@@ -1,0 +1,62 @@
+[gd_scene load_steps=2 format=3 uid="uid://endscreen"]
+
+[ext_resource type="Script" path="res://scenes/EndScreen.gd" id="1_end"]
+
+[node name="EndScreen" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_end")
+
+[node name="BG" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.047, 0.055, 0.122, 1)
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -290.0
+offset_right = 260.0
+offset_bottom = 290.0
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+add_theme_constant_override/separation = 8
+
+[node name="TitleLabel" type="Label" parent="Panel/VBox"]
+text = "GAME OVER"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 48
+
+[node name="SubLabel" type="Label" parent="Panel/VBox"]
+text = ""
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.75, 0.78, 0.85, 1)
+
+[node name="Sep" type="HSeparator" parent="Panel/VBox"]
+
+[node name="StatsBox" type="VBoxContainer" parent="Panel/VBox"]
+add_theme_constant_override/separation = 4
+
+[node name="Sep2" type="HSeparator" parent="Panel/VBox"]
+
+[node name="BtnRow" type="HBoxContainer" parent="Panel/VBox"]
+add_theme_constant_override/separation = 12
+alignment = 1
+
+[node name="RetryBtn" type="Button" parent="Panel/VBox/BtnRow"]
+text = "Play Again"
+custom_minimum_size = Vector2(140, 48)
+theme_override_font_sizes/font_size = 18
+
+[node name="MapBtn" type="Button" parent="Panel/VBox/BtnRow"]
+text = "Change Map"
+custom_minimum_size = Vector2(140, 48)
+theme_override_font_sizes/font_size = 18
+
+[node name="MenuBtn" type="Button" parent="Panel/VBox"]
+text = "Main Menu"
+custom_minimum_size = Vector2(0, 38)
+size_flags_horizontal = 3

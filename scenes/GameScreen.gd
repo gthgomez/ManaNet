@@ -1,0 +1,1790 @@
+extends Node2D
+class_name GameScreen
+
+# Main game screen — port of screens/game.py.
+# Owns GameState, ViewState, GameRenderer, InputController.
+# Wires the simulation → render → input pipeline each frame.
+
+const _MAPS := preload("res://data/maps.gd")
+const _TT   := preload("res://data/tower_types.gd")
+const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
+const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _UP   := preload("res://data/upgrade_paths.gd")
+const _MAP_BG_PATHS: Dictionary = {
+	0: "res://assets/sprites/maps/map_bg_s_curve.jpg",
+	1: "res://assets/sprites/maps/map_bg_gauntlet.jpg",
+	2: "res://assets/sprites/maps/map_bg_spiral.jpg",
+}
+
+# Child node references (assigned in _ready)
+@onready var renderer: Node2D           = $GameRenderer
+@onready var hud_layer: CanvasLayer      = $HudLayer
+
+# Created in code
+var game_state: GameState      = null
+var view_state: Object         = null
+var input_ctrl: Object         = null
+
+# HUD Control nodes (created dynamically in _build_hud)
+var _wave_btn: Button   = null
+var _pause_btn: Button  = null
+var _speed_btns: Array  = []   # [Button x3]
+var _sell_btn: Button   = null
+var _target_btn: Button = null
+var _msg_label: Label   = null
+var _gold_label: Label  = null
+var _lives_label: Label = null
+var _wave_label: Label  = null
+var _tower_panel: PanelContainer = null
+var _tower_name_label: Label = null
+var _base_upg_btn: Button = null
+var _path_upg_btns: Array = []   # [Button x3]
+var _shop_btns: Dictionary = {}  # tower_type -> Button
+var _promotion_modal: PanelContainer = null
+var _promotion_title: Label = null
+var _promotion_confirm_btn: Button = null
+var _promotion_cancel_btn: Button = null
+var _pause_modal: PanelContainer = null
+var _pause_title: Label = null
+var _resume_btn: Button = null
+var _restart_btn: Button = null
+var _quit_btn: Button = null
+var _placement_mode_btn: Button = null
+var _placement_confirm_toggle_btn: Button = null
+var _placement_confirm_modal: PanelContainer = null
+var _placement_confirm_title: Label = null
+var _placement_confirm_btn: Button = null
+var _placement_cancel_btn: Button = null
+var _top_bar: HBoxContainer = null
+var _speed_bar: HBoxContainer = null
+var _shop_bar: HBoxContainer = null
+var _modifier_badge: Label = null
+var _active_modifier_id: String = ""
+var _placement_confirm_bar: HBoxContainer = null
+var _confirm_placement_btn: Button = null
+var _cancel_placement_btn: Button = null
+var _info_btn: Button = null
+var _instruction_banner: PanelContainer = null
+var _instruction_label: Label = null
+var _tower_details_overlay: PanelContainer = null
+var _info_auto_paused: bool = false
+var _tower_stats_label: Label = null
+var _wave_progress_bar: ProgressBar = null
+var _wave_shop_modal: PanelContainer = null
+var _restart_confirm_start_ms: int = 0
+var _world_rect: Rect2 = Rect2(Vector2.ZERO, _LAYOUT.BASE_SIZE)
+
+# Dpad: track modal visibility so we can grab focus on open and restore on close
+var _dpad_pause_open: bool = false
+var _dpad_promo_open: bool = false
+var _dpad_shop_open: bool  = false
+var _dpad_place_open: bool = false
+var _world_scale: float = 1.0
+var _backdrop_texture: Texture2D = null
+var _selection_ring: SelectionRing = null
+var _virtual_cursor: VirtualCursor = null
+var _cursor_accel_time: float = 0.0
+const _PANEL_TEXT: Color = Color(0.92, 0.94, 0.98, 1.0)
+const _PANEL_MUTED: Color = Color(0.66, 0.70, 0.78, 1.0)
+const _PANEL_DISABLED: Color = Color(0.50, 0.53, 0.60, 1.0)
+
+# Previous lives count to detect leaks for screen shake
+var _prev_lives: int = 10
+var _prev_wave: int = 0
+
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
+
+func _ready() -> void:
+	view_state = ViewState.new()
+	view_state.configure_from_settings(Progression.get_settings())
+	input_ctrl = InputController.new()
+
+	# Init game state from Progression run config
+	var run_config: Dictionary = Progression.get_run_config()
+	var map_id: int = Progression.pending_map_id
+	var map_data: Dictionary = _MAPS.MAPS[map_id]
+	game_state = GameState.new(map_data["path"], run_config, map_id)
+	_apply_variant_stats(game_state)
+	_place_starting_tower(game_state, run_config)
+	_active_modifier_id = run_config.get("modifier_id", "")
+	_backdrop_texture = load(_MAP_BG_PATHS.get(map_id, ""))
+
+	# Wire renderer
+	renderer.game_state = game_state
+	renderer.view_state = view_state
+	
+	# Fade in transition
+	self.modulate.a = 0.0
+	var fade_tween := create_tween()
+	fade_tween.tween_property(self, "modulate:a", 1.0, 0.5).set_trans(Tween.TRANS_QUAD)
+	renderer.rebuild_path_for_map(map_data["path"])
+
+	# Wire input
+	input_ctrl.game_state = game_state
+	input_ctrl.view_state = view_state
+
+	_prev_lives = game_state.lives
+	_prev_wave = game_state.wave
+
+	# Show active modifier(s) as a persistent instruction for the first few seconds
+	var mod_ids: Array = Progression.get_active_modifier_ids()
+	if not mod_ids.is_empty():
+		var labels: Array = mod_ids.map(func(m): return _mod_short_name(m))
+		view_state.set_instruction(" + ".join(labels))
+		var clear_tween := create_tween()
+		clear_tween.tween_interval(4.0)
+		clear_tween.tween_callback(func(): view_state.clear_instruction())
+
+	_selection_ring = preload("res://rendering/overlays/SelectionRing.gd").new()
+	_selection_ring.visible = false
+	renderer.add_child(_selection_ring)
+	
+	_virtual_cursor = preload("res://input/VirtualCursor.gd").new()
+	_virtual_cursor.visible = false
+	renderer.add_child(_virtual_cursor)
+
+	_build_hud()
+	_apply_responsive_layout()
+	get_viewport().size_changed.connect(_on_viewport_size_changed)
+	_register_hud_rects()
+	FocusManager.register_initial_focus(_wave_btn if _wave_btn.visible else _shop_btns.values()[0])
+
+func _exit_tree() -> void:
+	if game_state:
+		game_state.dispose()
+
+func _apply_variant_stats(gs: GameState) -> void:
+	gs._variant_deltas = {}
+	for ttype in _TT.TOWER_TYPES_LIST:
+		var variant: Dictionary = Progression.get_variant_for_type(ttype)
+		if not variant.is_empty():
+			gs._variant_deltas[ttype] = variant
+
+func _place_starting_tower(gs: GameState, run_config: Dictionary) -> void:
+	var st_type: String = run_config.get("starting_tower_type", "")
+	if st_type == "" or st_type == "choice":
+		return
+	if not st_type in _TT.TOWER_TYPES:
+		return
+	if gs.path.size() < 2:
+		return
+
+	var start: Vector2 = gs.path[0]
+	var next: Vector2 = gs.path[1]
+	var direction: Vector2 = next - start
+	var length: float = direction.length()
+	if length == 0.0:
+		return
+
+	var perp: Vector2 = Vector2(-direction.y / length, direction.x / length)
+	var offset: float = float(_MAPS.PATH_RADIUS + _MAPS.TOWER_RADIUS + 6)
+	var anchor: Vector2 = start + direction * 0.25
+
+	for sign in [1.0, -1.0]:
+		var candidate: Vector2 = anchor + perp * offset * sign
+		if _try_place_free_starting_tower(gs, candidate, st_type):
+			return
+
+	for radius in range(10, 160, 10):
+		for angle_deg in range(0, 360, 30):
+			var angle: float = deg_to_rad(float(angle_deg))
+			var candidate: Vector2 = start + Vector2(cos(angle), sin(angle)) * float(radius)
+			if _try_place_free_starting_tower(gs, candidate, st_type):
+				return
+
+func _try_place_free_starting_tower(gs: GameState, candidate: Vector2, st_type: String) -> bool:
+	var check: Array = gs.can_place_tower(candidate, st_type)
+	if not check[0]:
+		return false
+	var tower := gs._configure_tower(Tower.new(candidate, st_type, gs.tower_id_counter))
+	gs.tower_id_counter += 1
+	gs.towers.append(tower)
+	gs.stat_tower_use_by_type[st_type] = gs.stat_tower_use_by_type.get(st_type, 0) + 1
+	return true
+
+func _build_hud() -> void:
+	# All HUD lives in a CanvasLayer so it renders on top of the game world
+	# and is not affected by screen shake.
+
+	# ---- Top bar ----
+	_top_bar = HBoxContainer.new()
+	_top_bar.add_theme_constant_override("separation", 12)
+	hud_layer.add_child(_top_bar)
+
+	_wave_label = Label.new()
+	_wave_label.text = "Wave 1 / 15"
+	_THEME.apply_label(_wave_label, "body")
+	_top_bar.add_child(_wave_label)
+
+	_lives_label = Label.new()
+	_lives_label.text = "Lives: 10"
+	_THEME.apply_label(_lives_label, "body")
+	_top_bar.add_child(_lives_label)
+
+	_gold_label = Label.new()
+	_gold_label.text = "Gold: 300"
+	_THEME.apply_label(_gold_label, "currency")
+	_top_bar.add_child(_gold_label)
+
+	_msg_label = Label.new()
+	_msg_label.text = ""
+	_msg_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_THEME.apply_label(_msg_label, "muted")
+	_top_bar.add_child(_msg_label)
+
+	_pause_btn = Button.new()
+	_pause_btn.text = "II"
+	_pause_btn.custom_minimum_size = Vector2(48.0, _LAYOUT.min_touch_height(false))
+	_THEME.apply_button(_pause_btn, "secondary")
+	_pause_btn.pressed.connect(_on_pause_pressed)
+	_top_bar.add_child(_pause_btn)
+
+	# ---- Speed buttons ----
+	_speed_bar = HBoxContainer.new()
+	_speed_bar.add_theme_constant_override("separation", 4)
+	hud_layer.add_child(_speed_bar)
+
+	for mult in [1.0, 2.0, 3.0]:
+		var btn := Button.new()
+		btn.text = "x%d" % int(mult)
+		btn.custom_minimum_size = Vector2(48.0, _LAYOUT.min_touch_height(false))
+		_THEME.apply_button(btn, "tab")
+		btn.pressed.connect(_on_speed_pressed.bind(mult))
+		_speed_bar.add_child(btn)
+		_speed_btns.append(btn)
+
+	# ---- Wave button ----
+	_wave_btn = Button.new()
+	_wave_btn.text = "Start Wave"
+	_wave_btn.custom_minimum_size = Vector2(210.0, _LAYOUT.min_touch_height(true))
+	_THEME.apply_button(_wave_btn, "primary")
+	_wave_btn.pressed.connect(_on_wave_btn_pressed)
+	hud_layer.add_child(_wave_btn)
+
+	# ---- Tower selection panel ----
+	_tower_panel = PanelContainer.new()
+	_tower_panel.custom_minimum_size = Vector2(430.0, 178.0)
+	_tower_panel.visible = false
+	_THEME.apply_panel(_tower_panel, "card")
+	hud_layer.add_child(_tower_panel)
+
+	var panel_margin := MarginContainer.new()
+	panel_margin.add_theme_constant_override("margin_left", 12)
+	panel_margin.add_theme_constant_override("margin_top", 10)
+	panel_margin.add_theme_constant_override("margin_right", 12)
+	panel_margin.add_theme_constant_override("margin_bottom", 10)
+	_tower_panel.add_child(panel_margin)
+
+	var panel_vbox := VBoxContainer.new()
+	panel_vbox.add_theme_constant_override("separation", 8)
+	panel_margin.add_child(panel_vbox)
+
+	_tower_name_label = Label.new()
+	_tower_name_label.text = "Tower"
+	_tower_name_label.add_theme_color_override("font_color", _PANEL_TEXT)
+	_tower_name_label.add_theme_font_size_override("font_size", 16)
+	_tower_name_label.clip_text = false
+
+	var name_hbox := HBoxContainer.new()
+	name_hbox.add_child(_tower_name_label)
+
+	_info_btn = Button.new()
+	_info_btn.text = "i"
+	_info_btn.custom_minimum_size = Vector2(32.0, 32.0)
+	_THEME.apply_button(_info_btn, "tab")
+	_info_btn.pressed.connect(_on_info_pressed)
+	name_hbox.add_child(_info_btn)
+
+	panel_vbox.add_child(name_hbox)
+
+	_tower_stats_label = Label.new()
+	_tower_stats_label.text = ""
+	_tower_stats_label.add_theme_color_override("font_color", _PANEL_MUTED)
+	_tower_stats_label.add_theme_font_size_override("font_size", 13)
+	panel_vbox.add_child(_tower_stats_label)
+
+	_base_upg_btn = Button.new()
+	_base_upg_btn.text = "Upgrade (45g)"
+	_base_upg_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
+	_base_upg_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_apply_button_readability(_base_upg_btn)
+	_base_upg_btn.pressed.connect(_on_base_upgrade_pressed)
+	panel_vbox.add_child(_base_upg_btn)
+
+	var path_row := HBoxContainer.new()
+	path_row.add_theme_constant_override("separation", 6)
+	panel_vbox.add_child(path_row)
+	for path_name in ["Top", "Middle", "Bottom"]:
+		var pbtn := Button.new()
+		pbtn.text = path_name
+		pbtn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
+		pbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_apply_button_readability(pbtn)
+		pbtn.pressed.connect(_on_path_upgrade_pressed.bind(path_name))
+		path_row.add_child(pbtn)
+		_path_upg_btns.append(pbtn)
+
+	var act_row := HBoxContainer.new()
+	act_row.add_theme_constant_override("separation", 6)
+	panel_vbox.add_child(act_row)
+
+	_sell_btn = Button.new()
+	_sell_btn.text = "Sell"
+	_sell_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
+	_sell_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_apply_button_readability(_sell_btn)
+	_sell_btn.pressed.connect(_on_sell_pressed)
+	act_row.add_child(_sell_btn)
+
+	_target_btn = Button.new()
+	_target_btn.text = "Target: First"
+	_target_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
+	_target_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_apply_button_readability(_target_btn)
+	_target_btn.pressed.connect(_on_target_pressed)
+	act_row.add_child(_target_btn)
+
+	# ---- Shop strip ----
+	_shop_bar = HBoxContainer.new()
+	_shop_bar.add_theme_constant_override("separation", 6)
+	hud_layer.add_child(_shop_bar)
+
+	for ttype in _TT.TOWER_TYPES_LIST:
+		var info: Dictionary = _TT.TOWER_TYPES[ttype]
+		var sbtn := Button.new()
+		sbtn.text = "%s\n%dg" % [info["name"], info["cost"]]
+		sbtn.custom_minimum_size = Vector2(126.0, 88.0)
+		_THEME.apply_button(sbtn, "shop")
+		sbtn.button_down.connect(_on_shop_btn_down.bind(ttype))
+		sbtn.pressed.connect(_on_shop_pressed.bind(ttype))
+		_shop_bar.add_child(sbtn)
+		_shop_btns[ttype] = sbtn
+
+	# ---- Placement Confirmation Bar ----
+	_placement_confirm_bar = HBoxContainer.new()
+	_placement_confirm_bar.add_theme_constant_override("separation", 10)
+	_placement_confirm_bar.visible = false
+	hud_layer.add_child(_placement_confirm_bar)
+
+	_confirm_placement_btn = Button.new()
+	_confirm_placement_btn.text = "✓"
+	_confirm_placement_btn.custom_minimum_size = Vector2(68.0, _LAYOUT.min_touch_height(true))
+	_THEME.apply_button(_confirm_placement_btn, "primary")
+	_confirm_placement_btn.pressed.connect(_on_confirm_placement)
+	_placement_confirm_bar.add_child(_confirm_placement_btn)
+
+	_cancel_placement_btn = Button.new()
+	_cancel_placement_btn.text = "X"
+	_cancel_placement_btn.custom_minimum_size = Vector2(68.0, _LAYOUT.min_touch_height(true))
+	_THEME.apply_button(_cancel_placement_btn, "danger")
+	_cancel_placement_btn.pressed.connect(_on_cancel_placement)
+	_placement_confirm_bar.add_child(_cancel_placement_btn)
+
+	# ---- Active modifier badge ----
+	var badge_mod_ids: Array = Progression.get_active_modifier_ids()
+	if not badge_mod_ids.is_empty():
+		_modifier_badge = Label.new()
+		_modifier_badge.add_theme_font_size_override("font_size", 11)
+		_modifier_badge.add_theme_color_override("font_color", _THEME.ORANGE)
+		_modifier_badge.add_theme_stylebox_override("normal",
+			_THEME.style_box(_THEME.BG, _THEME.ORANGE, 1, 4, 0))
+		var badge_labels: Array = badge_mod_ids.map(func(m): return _mod_short_name(m))
+		_modifier_badge.text = " + ".join(badge_labels)
+		hud_layer.add_child(_modifier_badge)
+
+	# ---- Instruction Banner ----
+	_instruction_banner = PanelContainer.new()
+	_instruction_banner.custom_minimum_size = Vector2(400, 50)
+	_instruction_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_THEME.apply_panel(_instruction_banner, "card")
+	hud_layer.add_child(_instruction_banner)
+	
+	_instruction_label = Label.new()
+	_instruction_label.text = "Pick a tower to begin defense"
+	_instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_instruction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_THEME.apply_label(_instruction_label, "heading")
+	_instruction_label.add_theme_font_size_override("font_size", 20)
+	_instruction_banner.add_child(_instruction_label)
+
+	# ---- Wave progress bar ----
+	_wave_progress_bar = ProgressBar.new()
+	_wave_progress_bar.min_value = 0.0
+	_wave_progress_bar.max_value = 1.0
+	_wave_progress_bar.value = 0.0
+	_wave_progress_bar.show_percentage = false
+	_wave_progress_bar.custom_minimum_size = Vector2(210.0, 5.0)
+	_wave_progress_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(_wave_progress_bar)
+
+	_build_promotion_modal()
+	_build_pause_modal()
+	_build_placement_confirm_modal()
+	_build_wave_shop_modal()
+	_wire_hud_dpad()
+
+func _build_promotion_modal() -> void:
+	_promotion_modal = PanelContainer.new()
+	_promotion_modal.visible = false
+	_promotion_modal.custom_minimum_size = Vector2(330.0, 150.0)
+	_THEME.apply_panel(_promotion_modal, "modal")
+	hud_layer.add_child(_promotion_modal)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	_promotion_modal.add_child(vbox)
+
+	_promotion_title = Label.new()
+	_promotion_title.text = "Confirm path promotion?"
+	_promotion_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_promotion_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_promotion_title.add_theme_color_override("font_color", _PANEL_TEXT)
+	vbox.add_child(_promotion_title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	vbox.add_child(row)
+
+	_promotion_confirm_btn = Button.new()
+	_promotion_confirm_btn.text = "Confirm"
+	_promotion_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_promotion_confirm_btn.custom_minimum_size = Vector2(0.0, 44.0)
+	_apply_button_readability(_promotion_confirm_btn)
+	_promotion_confirm_btn.pressed.connect(_on_promotion_confirm_pressed)
+	row.add_child(_promotion_confirm_btn)
+
+	_promotion_cancel_btn = Button.new()
+	_promotion_cancel_btn.text = "Cancel"
+	_promotion_cancel_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_promotion_cancel_btn.custom_minimum_size = Vector2(0.0, 44.0)
+	_apply_button_readability(_promotion_cancel_btn)
+	_promotion_cancel_btn.pressed.connect(_on_promotion_cancel_pressed)
+	row.add_child(_promotion_cancel_btn)
+
+func _build_pause_modal() -> void:
+	_pause_modal = PanelContainer.new()
+	_pause_modal.visible = false
+	_pause_modal.custom_minimum_size = Vector2(330.0, 290.0)
+	_THEME.apply_panel(_pause_modal, "modal")
+	hud_layer.add_child(_pause_modal)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	_pause_modal.add_child(vbox)
+
+	_pause_title = Label.new()
+	_pause_title.text = "Paused"
+	_pause_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pause_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pause_title.add_theme_color_override("font_color", _PANEL_TEXT)
+	_pause_title.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(_pause_title)
+
+	_resume_btn = Button.new()
+	_resume_btn.text = "Resume"
+	_resume_btn.custom_minimum_size = Vector2(0, 44)
+	_apply_button_readability(_resume_btn)
+	_resume_btn.pressed.connect(_on_resume_pressed)
+	vbox.add_child(_resume_btn)
+
+	_restart_btn = Button.new()
+	_restart_btn.text = "Restart Run"
+	_restart_btn.custom_minimum_size = Vector2(0, 44)
+	_apply_button_readability(_restart_btn)
+	_restart_btn.pressed.connect(_on_restart_pressed)
+	vbox.add_child(_restart_btn)
+
+	_quit_btn = Button.new()
+	_quit_btn.text = "Quit to Menu"
+	_quit_btn.custom_minimum_size = Vector2(0, 44)
+	_apply_button_readability(_quit_btn)
+	_quit_btn.pressed.connect(_on_quit_pressed)
+	vbox.add_child(_quit_btn)
+
+	var sep := HSeparator.new()
+	vbox.add_child(sep)
+
+	_placement_mode_btn = Button.new()
+	_placement_mode_btn.custom_minimum_size = Vector2(0, 44)
+	_apply_button_readability(_placement_mode_btn)
+	_placement_mode_btn.pressed.connect(_on_placement_mode_toggle)
+	vbox.add_child(_placement_mode_btn)
+
+	_placement_confirm_toggle_btn = Button.new()
+	_placement_confirm_toggle_btn.custom_minimum_size = Vector2(0, 44)
+	_apply_button_readability(_placement_confirm_toggle_btn)
+	_placement_confirm_toggle_btn.pressed.connect(_on_placement_confirm_toggle)
+	vbox.add_child(_placement_confirm_toggle_btn)
+
+func _build_placement_confirm_modal() -> void:
+	_placement_confirm_modal = PanelContainer.new()
+	_placement_confirm_modal.visible = false
+	_placement_confirm_modal.custom_minimum_size = Vector2(300.0, 120.0)
+	_THEME.apply_panel(_placement_confirm_modal, "modal")
+	hud_layer.add_child(_placement_confirm_modal)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	_placement_confirm_modal.add_child(vbox)
+
+	_placement_confirm_title = Label.new()
+	_placement_confirm_title.text = "Place tower here?"
+	_placement_confirm_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_placement_confirm_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_placement_confirm_title.add_theme_color_override("font_color", _PANEL_TEXT)
+	vbox.add_child(_placement_confirm_title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	vbox.add_child(row)
+
+	_placement_confirm_btn = Button.new()
+	_placement_confirm_btn.text = "Confirm"
+	_placement_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_placement_confirm_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
+	_apply_button_readability(_placement_confirm_btn)
+	_placement_confirm_btn.pressed.connect(_on_confirm_placement_pressed)
+	row.add_child(_placement_confirm_btn)
+
+	_placement_cancel_btn = Button.new()
+	_placement_cancel_btn.text = "Cancel"
+	_placement_cancel_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_placement_cancel_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
+	_apply_button_readability(_placement_cancel_btn)
+	_placement_cancel_btn.pressed.connect(_on_cancel_placement_pressed)
+	row.add_child(_placement_cancel_btn)
+
+func _build_wave_shop_modal() -> void:
+	_wave_shop_modal = PanelContainer.new()
+	_wave_shop_modal.visible = false
+	_wave_shop_modal.custom_minimum_size = Vector2(580.0, 300.0)
+	_THEME.apply_panel(_wave_shop_modal, "modal")
+	hud_layer.add_child(_wave_shop_modal)
+
+func _wire_hud_dpad() -> void:
+	# Ordered shop button list (matches _shop_bar child order)
+	var shop_list: Array = []
+	for child in _shop_bar.get_children():
+		if child is Button:
+			shop_list.append(child)
+
+	# Speed buttons: horizontal strip
+	FocusManager.setup_dpad_neighbors(_speed_btns, false)
+
+	# Shop strip: horizontal
+	FocusManager.setup_dpad_neighbors(shop_list, false)
+
+	# Speed strip → wave button (down); wave button → speed strip (up)
+	for btn in _speed_btns:
+		FocusManager.set_neighbor(btn, "bottom", _wave_btn)
+	if _speed_btns.size() > 0:
+		FocusManager.set_neighbor(_wave_btn, "top", _speed_btns[0])
+
+	# Wave button ↔ shop strip
+	if not shop_list.is_empty():
+		FocusManager.set_neighbor(_wave_btn, "bottom", shop_list[0])
+		for sbtn in shop_list:
+			FocusManager.set_neighbor(sbtn, "top", _wave_btn)
+
+	# Pause button: reachable from rightmost speed button, goes down to wave button
+	if _speed_btns.size() > 0:
+		FocusManager.set_neighbor(_speed_btns.back(), "right", _pause_btn)
+		FocusManager.set_neighbor(_pause_btn, "left", _speed_btns.back())
+	FocusManager.set_neighbor(_pause_btn, "bottom", _wave_btn)
+
+	# Tower panel: vertical chain base → paths → actions
+	# Path buttons also wired horizontally among themselves
+	FocusManager.setup_dpad_neighbors([_base_upg_btn] + _path_upg_btns + [_sell_btn, _target_btn], true)
+	FocusManager.setup_dpad_neighbors(_path_upg_btns, false)
+	# sell / target → down → first shop button
+	if not shop_list.is_empty():
+		FocusManager.set_neighbor(_sell_btn,   "bottom", shop_list[0])
+		FocusManager.set_neighbor(_target_btn, "bottom", shop_list[0])
+
+	# Pause modal: vertical chain
+	FocusManager.setup_dpad_neighbors([
+		_resume_btn, _restart_btn, _quit_btn,
+		_placement_mode_btn, _placement_confirm_toggle_btn
+	], true)
+
+	# Promotion modal: horizontal pair
+	FocusManager.setup_dpad_neighbors([_promotion_confirm_btn, _promotion_cancel_btn], false)
+
+	# Placement confirm modal: horizontal pair
+	FocusManager.setup_dpad_neighbors([_placement_confirm_btn, _placement_cancel_btn], false)
+
+	# Placement confirm bar (floating): horizontal pair
+	FocusManager.setup_dpad_neighbors([_confirm_placement_btn, _cancel_placement_btn], false)
+
+func _dpad_return_focus() -> void:
+	# Called after a modal closes — return focus to the most logical HUD button.
+	if _wave_btn.is_visible_in_tree():
+		_wave_btn.grab_focus()
+	elif not _shop_btns.is_empty():
+		_shop_btns.values()[0].grab_focus()
+
+func _show_wave_shop(now_ms: int) -> void:
+	if _wave_shop_modal == null:
+		return
+	# Rebuild content each time
+	for child in _wave_shop_modal.get_children():
+		child.queue_free()
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_right", 18)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	_wave_shop_modal.add_child(margin)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	margin.add_child(vbox)
+
+	var is_milestone: bool = game_state.wave in [5, 10, 15]
+	var title := Label.new()
+	title.text = "BOSS CLEARED - CHOOSE A BONUS" if is_milestone else "CHOOSE A BONUS BEFORE WAVE %d" % game_state.wave
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2) if is_milestone else _THEME.GOLD)
+	title.add_theme_font_size_override("font_size", 17)
+	vbox.add_child(title)
+
+	var help := Label.new()
+	help.text = "Pick one card, or skip the bonus to continue."
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help.add_theme_color_override("font_color", _PANEL_MUTED)
+	help.add_theme_font_size_override("font_size", 12)
+	vbox.add_child(help)
+
+	var _CARDS := preload("res://data/wave_shop_cards.gd")
+	var pool := _CARDS.filtered_pool(_active_modifier_id)
+	var drawn: Array = _CARDS.draw_cards(pool, 3, game_state.wave)
+
+	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	var card_columns: int = _LAYOUT.wave_shop_card_columns(viewport)
+	var card_min: Vector2 = _LAYOUT.wave_shop_card_min_size()
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0.0, 178.0 if card_columns < 3 else 150.0)
+	vbox.add_child(scroll)
+
+	var card_grid := GridContainer.new()
+	card_grid.columns = card_columns
+	card_grid.add_theme_constant_override("h_separation", 12)
+	card_grid.add_theme_constant_override("v_separation", 12)
+	card_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(card_grid)
+
+	var card_btns: Array = []
+	for card in drawn:
+		var card_panel := PanelContainer.new()
+		card_panel.custom_minimum_size = Vector2(card_min.x, maxf(card_min.y + 42.0, 144.0))
+		card_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_THEME.apply_panel(card_panel, "card")
+		card_grid.add_child(card_panel)
+
+		var card_margin := MarginContainer.new()
+		card_margin.add_theme_constant_override("margin_left", 10)
+		card_margin.add_theme_constant_override("margin_top", 8)
+		card_margin.add_theme_constant_override("margin_right", 10)
+		card_margin.add_theme_constant_override("margin_bottom", 8)
+		card_panel.add_child(card_margin)
+
+		var card_vbox := VBoxContainer.new()
+		card_vbox.add_theme_constant_override("separation", 6)
+		card_margin.add_child(card_vbox)
+
+		var card_title := Label.new()
+		card_title.text = "%s %s" % [card.get("icon", ""), card["label"]]
+		card_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		card_title.add_theme_color_override("font_color", _PANEL_TEXT)
+		card_title.add_theme_font_size_override("font_size", 14)
+		card_vbox.add_child(card_title)
+
+		var card_desc := Label.new()
+		card_desc.text = card["desc"]
+		card_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		card_desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		card_desc.add_theme_color_override("font_color", _PANEL_MUTED)
+		card_desc.add_theme_font_size_override("font_size", 12)
+		card_vbox.add_child(card_desc)
+
+		var card_btn := Button.new()
+		card_btn.text = "Choose"
+		card_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
+		card_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_THEME.apply_button(card_btn, "primary")
+		card_btn.add_theme_font_size_override("font_size", 12)
+		card_btn.pressed.connect(_on_wave_shop_pick.bind(card["id"], now_ms))
+		card_vbox.add_child(card_btn)
+		card_btns.append(card_btn)
+
+	var skip_btn := Button.new()
+	skip_btn.text = "Skip Bonus - Start Wave %d" % game_state.wave
+	skip_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(true))
+	_apply_button_readability(skip_btn)
+	skip_btn.pressed.connect(_on_wave_shop_skip.bind(now_ms))
+	vbox.add_child(skip_btn)
+
+	var desired_h: float = 390.0 if card_columns < 3 else 350.0
+	_layout_modal(_wave_shop_modal, Vector2(640.0, desired_h))
+	_wave_shop_modal.visible = true
+	JuiceManager.play(JuiceManager.SFX.WAVE_SHOP_OPEN)
+	# Wire card buttons horizontally and focus the first; skip_btn is reachable via down
+	FocusManager.setup_dpad_neighbors(card_btns, false)
+	if not card_btns.is_empty():
+		for cb in card_btns:
+			FocusManager.set_neighbor(cb, "bottom", skip_btn)
+		FocusManager.set_neighbor(skip_btn, "top", card_btns[0])
+		card_btns[0].grab_focus()
+
+func _on_wave_shop_pick(card_id: String, now_ms: int) -> void:
+	_wave_shop_modal.visible = false
+	_dispatch({"type": "wave_shop_pick", "card_id": card_id}, now_ms)
+	_dpad_return_focus()
+
+func _on_wave_shop_skip(now_ms: int) -> void:
+	_wave_shop_modal.visible = false
+	_dispatch({"type": "wave_shop_skip"}, now_ms)
+	_dpad_return_focus()
+
+func _apply_button_readability(btn: Button) -> void:
+	btn.clip_text = true
+	btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	if not btn.has_theme_stylebox_override("normal"):
+		_THEME.apply_button(btn, "secondary")
+	btn.add_theme_color_override("font_color", _PANEL_TEXT)
+	btn.add_theme_color_override("font_disabled_color", _PANEL_DISABLED)
+	btn.add_theme_font_size_override("font_size", 12)
+
+func _on_viewport_size_changed() -> void:
+	_apply_responsive_layout()
+	_hud_rects_ready = false
+	queue_redraw()
+
+func _draw() -> void:
+	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	if _backdrop_texture != null:
+		draw_texture_rect(_backdrop_texture, Rect2(Vector2.ZERO, viewport), false)
+		draw_rect(Rect2(Vector2.ZERO, viewport), Color(0.02, 0.03, 0.06, 0.34))
+	else:
+		draw_rect(Rect2(Vector2.ZERO, viewport), _LAYOUT.BG_COLOR)
+
+func _apply_responsive_layout() -> void:
+	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	_world_rect = _LAYOUT.game_world_rect(viewport)
+	_world_scale = _world_rect.size.x / _LAYOUT.BASE_SIZE.x
+	renderer.position = _world_rect.position
+	renderer.scale = Vector2(_world_scale, _world_scale)
+
+	var margin: float = _LAYOUT.edge_margin(viewport)
+	var top: float = _LAYOUT.top_margin(viewport)
+	var top_bar_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.074)
+	_LAYOUT.apply_rect(_top_bar, Rect2(Vector2(margin, top), Vector2(maxf(0.0, viewport.x - margin * 2.0), top_bar_h)))
+	_LAYOUT.apply_rect(_speed_bar, Rect2(Vector2(margin, top + top_bar_h + 6.0), Vector2(166.0, _LAYOUT.min_touch_height(false))))
+
+	# Scale font sizes with viewport height so they stay readable at all sizes
+	var top_font: int = int(clampf(viewport.y * 0.026, 13.0, 18.0))
+	for lbl in [_wave_label, _lives_label, _gold_label, _msg_label]:
+		if lbl:
+			lbl.add_theme_font_size_override("font_size", top_font)
+
+	# Shop strip: fit within the game world width with side margins, min 6 towers visible
+	var shop_h: float = 92.0
+	var shop_max_w: float = minf(viewport.x - margin * 2.0, _world_rect.size.x - margin * 2.0)
+	var shop_w: float = maxf(float(_shop_btns.size()) * 122.0, shop_max_w)
+	var shop_x: float = (viewport.x - shop_w) * 0.5
+	var shop_y: float = viewport.y - _LAYOUT.bottom_margin(viewport) - shop_h
+	_LAYOUT.apply_rect(_shop_bar, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
+
+	# Wave button: docked flush to top of shop strip, visually grouped
+	var wave_size: Vector2 = Vector2(clampf(viewport.x * 0.23, 180.0, 240.0), _LAYOUT.min_touch_height(true))
+	var wave_y: float = shop_y - wave_size.y - 8.0
+	_LAYOUT.apply_rect(_wave_btn, Rect2(Vector2((viewport.x - wave_size.x) * 0.5, wave_y), wave_size))
+
+	# Wave progress bar: directly below the wave button
+	if _wave_progress_bar != null:
+		_LAYOUT.apply_rect(_wave_progress_bar, Rect2(Vector2((viewport.x - wave_size.x) * 0.5, wave_y + wave_size.y + 2.0), Vector2(wave_size.x, 5.0)))
+
+	# Position modifier badge right of speed bar if present
+	if _modifier_badge != null:
+		var badge_x: float = margin + 166.0 + 8.0
+		var badge_y: float = top + top_bar_h + 9.0
+		_modifier_badge.position = Vector2(badge_x, badge_y)
+
+	# Instruction banner: centered below top bar
+	if _instruction_banner != null:
+		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin * 2.0))
+		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) else 52.0
+		var banner_font: int = int(clampf(viewport.y * 0.032, 15.0, 20.0))
+		_instruction_label.add_theme_font_size_override("font_size", banner_font)
+		_LAYOUT.apply_rect(_instruction_banner, Rect2(Vector2((viewport.x - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
+
+	_layout_tower_panel(null)
+
+	_layout_modal(_promotion_modal, Vector2(360.0, 160.0))
+	_layout_modal(_pause_modal, Vector2(400.0, 360.0))
+	_layout_modal(_placement_confirm_modal, Vector2(360.0, 146.0))
+
+static func _mod_short_name(mod_id: String) -> String:
+	match mod_id:
+		"mod_iron_economy":  return "[ Iron Eco ]"
+		"mod_glass_cannon":  return "[ Glass ]"
+		"mod_blitz":         return "[ Blitz ]"
+		"mod_hardened":      return "[ Hardened ]"
+		"mod_sudden_death":  return "[ SUDDEN DEATH ]"
+	return "[ %s ]" % mod_id
+
+func _layout_modal(panel: PanelContainer, desired_size: Vector2) -> void:
+	if panel == null:
+		return
+	var rect: Rect2 = _LAYOUT.modal_rect(_LAYOUT.viewport_size(self), desired_size)
+	_LAYOUT.apply_rect(panel, rect)
+
+func _screen_to_world(pos: Vector2) -> Vector2:
+	if _world_scale <= 0.0:
+		return pos
+	return (pos - _world_rect.position) / _world_scale
+
+func _world_to_screen(pos: Vector2) -> Vector2:
+	return _world_rect.position + pos * _world_scale
+
+func _layout_tower_panel(selected: Tower) -> void:
+	if _tower_panel == null:
+		return
+	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	var margin: float = _LAYOUT.edge_margin(viewport)
+	var top: float = _LAYOUT.top_margin(viewport)
+	var bottom: float = _LAYOUT.bottom_margin(viewport)
+	# INCREASED SIZE: 220px height for better mobile touch targets
+	var size: Vector2 = Vector2(minf(460.0, maxf(340.0, viewport.x - margin * 2.0)), 220.0)
+	var shop_y: float = viewport.y - bottom - 92.0
+	var low_y: float = maxf(top + 102.0, shop_y - size.y - 12.0)
+	var high_y: float = top + 102.0
+	var x: float = margin
+	var y: float = low_y
+
+	if selected != null:
+		var selected_screen: Vector2 = _world_to_screen(selected.pos)
+		x = margin if selected_screen.x > viewport.x * 0.5 else viewport.x - margin - size.x
+		y = high_y if selected_screen.y > viewport.y * 0.52 else low_y
+		y = clampf(y, top + 92.0, maxf(top + 92.0, shop_y - size.y - 8.0))
+	else:
+		x = viewport.x - margin - size.x
+		y = low_y
+
+	_LAYOUT.apply_rect(_tower_panel, Rect2(Vector2(x, y), size))
+	_THEME.apply_glass_panel(_tower_panel)
+
+func _register_hud_rects() -> void:
+	# Build Rect2 hit regions from the Control node global positions.
+	# Called after _build_hud so positions are stable.
+	# NOTE: These need to be re-registered after first _process frame
+	# when layout has settled; we call _refresh_hud_rects() in _process.
+	pass
+
+func _refresh_hud_rects() -> void:
+	var wave_rect := Rect2(_wave_btn.global_position, _wave_btn.size) if _wave_btn else Rect2()
+	var pause_rect := Rect2(_pause_btn.global_position, _pause_btn.size) if _pause_btn else Rect2()
+	var s1 := Rect2(_speed_btns[0].global_position, _speed_btns[0].size) if _speed_btns.size() > 0 else Rect2()
+	var s2 := Rect2(_speed_btns[1].global_position, _speed_btns[1].size) if _speed_btns.size() > 1 else Rect2()
+	var s3 := Rect2(_speed_btns[2].global_position, _speed_btns[2].size) if _speed_btns.size() > 2 else Rect2()
+	var sell_rect := Rect2(_sell_btn.global_position, _sell_btn.size) if _sell_btn else Rect2()
+	var tgt_rect := Rect2(_target_btn.global_position, _target_btn.size) if _target_btn else Rect2()
+
+	var shop_d: Dictionary = {}
+	for ttype in _shop_btns:
+		shop_d[ttype] = Rect2(_shop_btns[ttype].global_position, _shop_btns[ttype].size)
+
+	var upg_list: Array = []
+	var sel_id: int = view_state.selected_tower_id
+	for i in _path_upg_btns.size():
+		var btn: Button = _path_upg_btns[i]
+		upg_list.append({
+			"path": ["Top","Middle","Bottom"][i],
+			"rect": Rect2(btn.global_position, btn.size),
+			"tower_id": sel_id,
+		})
+
+	var base_rect := Rect2(_base_upg_btn.global_position, _base_upg_btn.size) if _base_upg_btn else Rect2()
+
+	input_ctrl.register_hud(wave_rect, pause_rect, s1, s2, s3,
+							sell_rect, tgt_rect, shop_d, upg_list, base_rect)
+
+# ---------------------------------------------------------------------------
+# Game loop
+# ---------------------------------------------------------------------------
+
+var _hud_rects_ready: bool = false
+
+func _process(_delta: float) -> void:
+	if not _hud_rects_ready:
+		_refresh_hud_rects()
+		_hud_rects_ready = true
+
+	var now_ms: int = Time.get_ticks_msec()
+
+	# Detect life loss for screen-space feedback.
+	if game_state.lives < _prev_lives:
+		var lost: int = _prev_lives - game_state.lives
+		view_state.start_screen_shake(now_ms, 7.0, 400)
+		var life_word: String = "Life" if lost == 1 else "%d Lives" % lost
+		view_state.show_toast("%s lost - %d left" % [life_word, game_state.lives], now_ms, 1200)
+	_prev_lives = game_state.lives
+
+	view_state.tick(now_ms)
+	game_state.update_simulation(now_ms)
+	renderer.render_frame(now_ms)
+	_update_selection_ring()
+	_update_virtual_cursor(now_ms)
+	_update_hud(now_ms)
+
+	# Check for end states
+	if game_state.game_state == "game_over" or game_state.game_state == "won":
+		_on_run_ended()
+
+func _update_hud(now_ms: int) -> void:
+	if game_state.wave > _prev_wave:
+		_show_wave_banner(game_state.wave)
+		_prev_wave = game_state.wave
+		
+	_wave_label.text  = "Wave %d / %d" % [game_state.wave, _MAPS.MAX_WAVE]
+
+	if _wave_progress_bar != null:
+		var in_wave: bool = not game_state.wave_ready and game_state.wave_enemy_total > 0
+		_wave_progress_bar.visible = in_wave
+		if in_wave:
+			var killed := game_state.enemies_spawned - game_state.enemies.size()
+			_wave_progress_bar.value = float(maxi(0, killed)) / float(game_state.wave_enemy_total)
+
+	if _lives_label.text != "Lives: %d" % game_state.lives:
+		_lives_label.text = "Lives: %d" % game_state.lives
+		_juice_label(_lives_label)
+		
+	if _gold_label.text != "Gold: %d" % game_state.gold:
+		_gold_label.text  = "Gold: %d" % game_state.gold
+		_juice_label(_gold_label)
+	
+	# Instruction banner: persistent instructions have priority over contextual hints
+	if _instruction_banner != null:
+		if view_state.instruction_banner != "":
+			_instruction_banner.visible = true
+			_instruction_label.text = view_state.instruction_banner
+		elif game_state.towers.size() == 0 and not view_state.placement_active:
+			_instruction_banner.visible = true
+			_instruction_label.text = "CHOOSE A TOWER TO BEGIN DEFENSE"
+		elif view_state.placement_active:
+			_instruction_banner.visible = true
+			_instruction_label.text = _placement_hint_text()
+		elif game_state.wave_shop_pending:
+			_instruction_banner.visible = true
+			_instruction_label.text = "CHOOSE A BONUS TO CONTINUE"
+		elif game_state.wave_ready and game_state.wave == 1 and game_state.enemies.size() == 0:
+			_instruction_banner.visible = true
+			_instruction_label.text = "START WAVE WHEN READY"
+		else:
+			_instruction_banner.visible = false
+
+	_update_placement_confirm_bar()
+
+	# Toast / message
+	var toast: String = view_state.get_toast(now_ms)
+	_msg_label.text = toast if toast != "" else game_state.last_message
+
+	# Wave button visibility
+	_wave_btn.visible = game_state.wave_ready and game_state.game_state == "playing"
+
+	# Pause button
+	_pause_btn.text = ">" if game_state.paused else "II"
+
+	# Speed button highlights
+	for i in _speed_btns.size():
+		var mult: float = [1.0, 2.0, 3.0][i]
+		_speed_btns[i].button_pressed = (game_state.speed_multiplier == mult)
+		_THEME.apply_button(_speed_btns[i], "primary" if game_state.speed_multiplier == mult else "tab")
+
+	# Tower panel
+	var sel: Tower = game_state.get_tower_by_id(view_state.selected_tower_id) if view_state.selected_tower_id >= 0 else null
+	var was_panel_hidden: bool = not _tower_panel.visible
+	_tower_panel.visible = sel != null
+	if sel != null:
+		if was_panel_hidden:
+			_base_upg_btn.grab_focus()
+		_layout_tower_panel(sel)
+		var pnames := ["Top","Middle","Bottom"]
+		_tower_name_label.text = "%s  Lv.%d" % [sel.tower_name, sel.level]
+		_tower_stats_label.text = "⚔ %d  ◎ %d  ⏱ %dms" % [sel.get_effective_damage(now_ms), int(sel.effective_range()), sel.effective_cooldown()]
+
+		# Base Upgrade Delta
+		if sel.level < 5:
+			var base_cost: int = sel.base_upgrade_cost()
+			var cur_dmg := sel.get_effective_damage(now_ms)
+			var next_dmg := int(float(sel.base_damage) * pow(1.15, float(sel.level)))
+			var d_dmg := next_dmg - int(float(sel.base_damage) * pow(1.15, float(sel.level-1)))
+			_base_upg_btn.text = "UPGRADE (%dg) [ ⚔️ +%d ]" % [base_cost, d_dmg]
+			_base_upg_btn.disabled = game_state.gold < base_cost
+		else:
+			_base_upg_btn.text = "MAX LEVEL"
+			_base_upg_btn.disabled = true
+			
+		for i in _path_upg_btns.size():
+			var path: String = pnames[i]
+			var can: bool = sel.tracker.can_attempt_upgrade(path)
+			var pcost: int = sel.path_upgrade_cost(path)
+			var lvl: int = sel.tracker.path_levels[path]
+			var p_data := _UP.get_path_data(sel.ttype, path)
+			
+			if can:
+				var next_mult: float = p_data["tiers"][lvl]
+				var cur_mult: float = p_data["tiers"][lvl-1] if lvl > 0 else 1.0
+				var d_pct := int((next_mult - cur_mult) * 100.0)
+				var icon := "⚔️" if "dmg" in p_data["name"].to_lower() else ("⚡" if "speed" in p_data["name"].to_lower() else "🎯")
+				_path_upg_btns[i].text = "%s [ %s +%d%% ] %dg" % [p_data["name"].left(6), icon, d_pct, pcost]
+				_path_upg_btns[i].disabled = game_state.gold < pcost
+			else:
+				_path_upg_btns[i].text = p_data["name"] + " (LOCKED)" if lvl == 0 else "MAX"
+				_path_upg_btns[i].disabled = true
+				
+		_target_btn.text = "Target: %s" % sel.target_mode.capitalize()
+		var sell_val: int = sel.sell_value(game_state.wave)
+		_sell_btn.text = "Sell +%dg" % sell_val if not view_state.confirm_sell else "Confirm?"
+		_sell_btn.disabled = game_state.sell_disabled
+
+	if _promotion_modal:
+		var fast_promotion: bool = Progression.get_settings().get("fast_promotion_enabled", false)
+		var promo_visible: bool = view_state.promotion_pending and sel != null and not fast_promotion
+		_promotion_modal.visible = promo_visible
+		if promo_visible and sel != null:
+			var pending_path: String = sel.tracker.pending_promotion_path
+			_promotion_title.text = "Promote %s as secondary and lock the third path?" % pending_path
+		if promo_visible and not _dpad_promo_open:
+			_promotion_confirm_btn.grab_focus()
+		elif not promo_visible and _dpad_promo_open:
+			_dpad_return_focus()
+		_dpad_promo_open = promo_visible
+
+	if _pause_modal:
+		var pause_visible: bool = game_state.paused and game_state.game_state == "playing"
+		_pause_modal.visible = pause_visible
+		if pause_visible:
+			_pause_title.text = "Paused  |  Wave %d  Lives %d  Gold %d" % [game_state.wave, game_state.lives, game_state.gold]
+			if view_state.confirm_restart:
+				var elapsed_s: int = (now_ms - _restart_confirm_start_ms) / 1000
+				var remaining_s: int = maxi(0, 4 - elapsed_s)
+				if remaining_s == 0 and _restart_confirm_start_ms > 0:
+					view_state.confirm_restart = false
+					_restart_confirm_start_ms = 0
+					_restart_btn.text = "Restart Run"
+				else:
+					_restart_btn.text = "Confirm Restart (%ds)" % remaining_s
+			else:
+				_restart_btn.text = "Restart Run"
+			_placement_mode_btn.text = "Placement: %s" % view_state.placement_mode.capitalize()
+			_placement_confirm_toggle_btn.text = "Placement Confirm: %s" % ("On" if view_state.confirm_placement_enabled else "Off")
+		else:
+			view_state.confirm_restart = false
+		if pause_visible and not _dpad_pause_open:
+			_resume_btn.grab_focus()
+		elif not pause_visible and _dpad_pause_open:
+			_dpad_return_focus()
+		_dpad_pause_open = pause_visible
+
+	if _placement_confirm_modal:
+		var has_pending: bool = view_state.has_pending_placement()
+		_placement_confirm_modal.visible = has_pending
+		if has_pending:
+			var pos: Vector2 = view_state.pending_placement_pos
+			var name: String = _TT.TOWER_TYPES.get(view_state.pending_placement_type, {}).get("name", "Tower")
+			if view_state.pending_placement_valid:
+				_placement_confirm_title.text = "Place %s at (%d, %d)?" % [name, int(pos.x), int(pos.y)]
+			else:
+				var check: Array = _placement_check(pos, view_state.pending_placement_type)
+				_placement_confirm_title.text = "Cannot place %s: %s" % [name, _placement_reason_hint(str(check[1]))]
+			_placement_confirm_btn.disabled = not view_state.pending_placement_valid
+		if has_pending and not _dpad_place_open:
+			_placement_confirm_btn.grab_focus()
+		elif not has_pending and _dpad_place_open:
+			_dpad_return_focus()
+		_dpad_place_open = has_pending
+
+	# Shop button affordability — hard-disable only for paused/banned; dim-only for unaffordable
+	for ttype in _shop_btns:
+		var cost: int = game_state._tower_purchase_cost(ttype)
+		var can_afford: bool = game_state.gold >= cost
+		var hard_disabled: bool = game_state.paused or ttype in game_state._disabled_towers
+		_shop_btns[ttype].disabled = hard_disabled
+		if hard_disabled:
+			_shop_btns[ttype].modulate.a = 0.4
+			_THEME.set_button_glow(_shop_btns[ttype], false)
+		elif not can_afford:
+			_shop_btns[ttype].modulate.a = 0.55
+			_THEME.set_button_glow(_shop_btns[ttype], false)
+		else:
+			_shop_btns[ttype].modulate.a = 1.0
+			_THEME.set_button_glow(_shop_btns[ttype], true)
+
+	# Wave shop: open modal when simulation signals shop is pending
+	if game_state.wave_shop_pending and _wave_shop_modal != null and not _wave_shop_modal.visible:
+		_show_wave_shop(now_ms)
+
+func _update_selection_ring() -> void:
+	if _selection_ring == null: return
+	var sel: Tower = game_state.get_tower_by_id(view_state.selected_tower_id) if view_state.selected_tower_id >= 0 else null
+	if sel == null:
+		_selection_ring.visible = false
+	else:
+		_selection_ring.visible = true
+		_selection_ring.position = sel.pos
+		
+		# Set color based on tower element/type
+		var ring_color := _THEME.CYAN
+		match sel.ttype:
+			"mage", "lightning": ring_color = _THEME.VIOLET
+			"cannon": ring_color = _THEME.ORANGE
+			"sniper": ring_color = _THEME.GOLD
+			"frost": ring_color = _THEME.CYAN
+		
+		_selection_ring.set_color(ring_color)
+
+func _juice_label(label: Label) -> void:
+	var tween := create_tween()
+	label.pivot_offset = label.size * 0.5
+	tween.tween_property(label, "scale", Vector2(1.2, 1.2), 0.05).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(label, "scale", Vector2.ONE, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+func _show_wave_banner(wave_num: int) -> void:
+	var banner := preload("res://ui/widgets/WaveBanner.gd").new()
+	hud_layer.add_child(banner)
+	banner.display("WAVE %d INBOUND" % wave_num)
+	var sfx := JuiceManager.SFX.BOSS_APPEAR if wave_num in [5, 10, 15] else JuiceManager.SFX.WAVE_START
+	JuiceManager.play(sfx)
+
+func _format_ui_reason(reason: String) -> String:
+	var text: String = reason.strip_edges()
+	if text == "":
+		return "Cannot place here"
+	if "_" in text:
+		text = text.replace("_", " ").capitalize()
+	return text
+
+func _placement_reason_hint(reason: String) -> String:
+	var text: String = _format_ui_reason(reason)
+	match text:
+		"Too close to the path":
+			return "MOVE AWAY FROM PATH"
+		"Too close to another tower":
+			return "TOO CLOSE TO TOWER"
+		"Cannot place on shop area":
+			return "MOVE ABOVE SHOP"
+		"Out of bounds":
+			return "STAY INSIDE MAP"
+		"Not enough gold":
+			return "NOT ENOUGH GOLD"
+	return text.to_upper()
+
+func _placement_check(pos: Vector2, tower_type: String) -> Array:
+	if game_state == null or tower_type == "":
+		return [false, "Cannot place here"]
+	return game_state.can_place_tower(pos, tower_type)
+
+func _placement_hint_text() -> String:
+	if view_state == null or not view_state.placement_active:
+		return ""
+	var tower_type: String = view_state.placement_tower_type
+	var check: Array = _placement_check(view_state.placement_ghost_pos, tower_type)
+	if bool(check[0]):
+		if view_state.placement_mode == "drag":
+			return "VALID PLACEMENT - RELEASE TO BUILD"
+		return "VALID PLACEMENT - TAP TO BUILD"
+	return "INVALID - %s" % _placement_reason_hint(str(check[1]))
+
+func _update_placement_confirm_bar() -> void:
+	if _placement_confirm_bar == null: return
+	if view_state.has_pending_placement():
+		_placement_confirm_bar.visible = true
+		var pos: Vector2 = _world_to_screen(view_state.pending_placement_pos)
+		var bar_size: Vector2 = _placement_confirm_bar.size
+		if bar_size.x <= 1.0 or bar_size.y <= 1.0:
+			bar_size = _placement_confirm_bar.get_combined_minimum_size()
+		var viewport: Vector2 = _LAYOUT.viewport_size(self)
+		var margin: float = _LAYOUT.edge_margin(viewport)
+		var next_pos: Vector2 = pos + Vector2(-bar_size.x * 0.5, 40.0)
+		next_pos.x = clampf(next_pos.x, margin, maxf(margin, viewport.x - bar_size.x - margin))
+		next_pos.y = clampf(next_pos.y, margin, maxf(margin, viewport.y - bar_size.y - margin))
+		_placement_confirm_bar.position = next_pos
+		_confirm_placement_btn.disabled = not view_state.pending_placement_valid
+	else:
+		_placement_confirm_bar.visible = false
+
+func _on_confirm_placement() -> void:
+	if view_state.has_pending_placement() and view_state.pending_placement_valid:
+		var action := {
+			"type": "place_tower",
+			"tower_type": view_state.pending_placement_type,
+			"pos": view_state.pending_placement_pos
+		}
+		_dispatch(action, Time.get_ticks_msec())
+		view_state.clear_pending_placement()
+
+func _on_cancel_placement() -> void:
+	view_state.clear_pending_placement()
+
+# ---------------------------------------------------------------------------
+# Input
+# ---------------------------------------------------------------------------
+
+func _input(event: InputEvent) -> void:
+	var now_ms: int = Time.get_ticks_msec()
+	var pos: Vector2 = Vector2.ZERO
+	var handled: bool = false
+
+	# Dpad / keyboard accept — Godot fires Button.pressed automatically on focused buttons,
+	# but we need ui_accept to also confirm placement when the bar is visible.
+	if event.is_action_pressed("ui_accept"):
+		if _placement_confirm_bar != null and _placement_confirm_bar.visible:
+			_on_confirm_placement()
+			get_viewport().set_input_as_handled()
+			return
+
+	# Dpad / keyboard cancel — layered dismiss (innermost modal first)
+	if event.is_action_pressed("ui_cancel"):
+		if _tower_details_overlay != null:
+			_close_tower_details()
+			get_viewport().set_input_as_handled()
+			return
+		if _wave_shop_modal != null and _wave_shop_modal.visible:
+			_on_wave_shop_skip(now_ms)
+		elif _promotion_modal != null and _promotion_modal.visible:
+			_on_promotion_cancel_pressed()
+		elif _pause_modal != null and _pause_modal.visible:
+			_on_resume_pressed()
+		elif _placement_confirm_modal != null and _placement_confirm_modal.visible:
+			_on_cancel_placement_pressed()
+		elif _placement_confirm_bar != null and _placement_confirm_bar.visible:
+			_on_cancel_placement()
+		elif view_state.placement_active:
+			view_state.exit_placement()
+			_dpad_return_focus()
+		elif view_state.selected_tower_id >= 0:
+			view_state.deselect_tower()
+			_dpad_return_focus()
+		elif game_state.game_state == "playing" and not game_state.paused:
+			_on_pause_pressed()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventScreenTouch:
+		pos = event.position
+		if _hud_captures_point(pos):
+			return
+		var world_pos: Vector2 = _screen_to_world(pos)
+		if event.pressed:
+			var action: Dictionary = input_ctrl.handle_press(world_pos, now_ms)
+			_dispatch(action, now_ms)
+			handled = true
+		else:
+			var action: Dictionary = input_ctrl.handle_release(world_pos, now_ms)
+			_dispatch(action, now_ms)
+			handled = true
+
+	elif event is InputEventScreenDrag:
+		input_ctrl.handle_drag(_screen_to_world(event.position), now_ms)
+		handled = true
+
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			pos = event.position
+			if _hud_captures_point(pos):
+				return
+			var world_pos: Vector2 = _screen_to_world(pos)
+			if event.pressed:
+				var action: Dictionary = input_ctrl.handle_press(world_pos, now_ms)
+				_dispatch(action, now_ms)
+			else:
+				var action: Dictionary = input_ctrl.handle_release(world_pos, now_ms)
+				_dispatch(action, now_ms)
+			handled = true
+
+	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		input_ctrl.handle_drag(_screen_to_world(event.position), now_ms)
+		handled = true
+
+	if handled:
+		get_viewport().set_input_as_handled()
+
+func _hud_captures_point(pos: Vector2) -> bool:
+	return _control_tree_captures_point(hud_layer, pos)
+
+func _control_tree_captures_point(node: Node, pos: Vector2) -> bool:
+	for child in node.get_children():
+		if child is Control:
+			var ctrl: Control = child
+			if not ctrl.is_visible_in_tree():
+				continue
+			if _control_tree_captures_point(child, pos):
+				return true
+			if ctrl.mouse_filter == Control.MOUSE_FILTER_IGNORE:
+				continue
+			if Rect2(ctrl.global_position, ctrl.size).has_point(pos):
+				return true
+		elif _control_tree_captures_point(child, pos):
+			return true
+	return false
+
+func _dispatch(action: Dictionary, now_ms: int) -> void:
+	if action.is_empty():
+		return
+	if action.get("type", "") == "placement_failed":
+		view_state.show_toast(_format_ui_reason(str(action.get("reason", "Cannot place here"))), now_ms, 1200)
+		return
+	var result := game_state.apply_action(action, now_ms)
+	_handle_action_result(result, action, now_ms)
+
+func _handle_action_result(result: Dictionary, action: Dictionary, now_ms: int) -> void:
+	if not result.get("success", false):
+		if result.get("reason", "") != "":
+			view_state.show_toast(_format_ui_reason(str(result["reason"])), now_ms, 1000)
+		return
+
+	var atype: String = action.get("type", "")
+	match atype:
+		"place_tower":
+			JuiceManager.play(JuiceManager.SFX.TOWER_PLACE)
+			view_state.show_toast("Placed!", now_ms, 600)
+			# Exit placement mode unless continuous placement is enabled and affordable.
+			var cont_on: bool = Progression.get_settings().get("continuous_placement", true)
+			var can_afford: bool = game_state.gold >= game_state._tower_purchase_cost(action.get("tower_type", ""))
+			if not cont_on or not can_afford:
+				view_state.exit_placement()
+		"upgrade_base":
+			JuiceManager.play(JuiceManager.SFX.TOWER_UPGRADE)
+			view_state.show_toast(result.get("message",""), now_ms, 800)
+		"upgrade_path":
+			if result.get("preview_promotion", false):
+				JuiceManager.play(JuiceManager.SFX.TOWER_PROMOTE)
+				view_state.promotion_pending = true
+				view_state.selected_tower_id = int(result.get("tower_id", view_state.selected_tower_id))
+				if Progression.get_settings().get("fast_promotion_enabled", false):
+					view_state.show_toast("Tap %s again to confirm." % action.get("path", ""), now_ms, 1600)
+				else:
+					view_state.show_toast("Confirm promotion?", now_ms, 2000)
+			else:
+				JuiceManager.play(JuiceManager.SFX.TOWER_UPGRADE)
+				view_state.show_toast(result.get("message",""), now_ms, 800)
+		"confirm_promotion":
+			JuiceManager.play(JuiceManager.SFX.TOWER_PROMOTE)
+			view_state.promotion_pending = false
+			view_state.show_toast(result.get("message",""), now_ms, 1200)
+		"cancel_promotion":
+			view_state.promotion_pending = false
+			view_state.show_toast(result.get("message",""), now_ms, 800)
+		"sell_tower":
+			JuiceManager.play(JuiceManager.SFX.TOWER_SELL)
+			view_state.deselect_tower()
+			view_state.show_toast(result.get("message",""), now_ms, 900)
+			_dpad_return_focus()
+		"select_tower":
+			_hud_rects_ready = false   # refresh upgrade rect tower_ids
+		"toggle_pause":
+			view_state.confirm_restart = false
+			view_state.show_toast(result.get("message",""), now_ms, 600)
+			if not game_state.paused:
+				_dpad_return_focus()
+
+# ---------------------------------------------------------------------------
+# HUD button signal handlers (delegate to input_ctrl action pattern)
+# ---------------------------------------------------------------------------
+
+func _on_wave_btn_pressed() -> void:
+	_dispatch({"type": "start_wave"}, Time.get_ticks_msec())
+
+func _on_pause_pressed() -> void:
+	_dispatch({"type": "toggle_pause"}, Time.get_ticks_msec())
+
+func _on_resume_pressed() -> void:
+	if game_state.paused:
+		_dispatch({"type": "toggle_pause"}, Time.get_ticks_msec())
+
+func _on_restart_pressed() -> void:
+	var now_ms: int = Time.get_ticks_msec()
+	if Progression.get_settings().get("confirm_restart", true) and not view_state.confirm_restart:
+		view_state.confirm_restart = true
+		_restart_confirm_start_ms = now_ms
+		view_state.show_toast("Tap Restart again to confirm.", now_ms, 1200)
+		return
+	_restart_current_run()
+
+func _on_quit_pressed() -> void:
+	game_state.paused = false
+	_fade_to_scene("res://scenes/MenuScreen.tscn")
+
+func _on_placement_mode_toggle() -> void:
+	var next_mode: String = "drop" if view_state.placement_mode == "drag" else "drag"
+	Progression.set_setting("placement_mode", next_mode)
+	view_state.configure_from_settings(Progression.get_settings())
+	view_state.show_toast("Placement: %s" % next_mode.capitalize(), Time.get_ticks_msec(), 900)
+
+func _on_placement_confirm_toggle() -> void:
+	Progression.set_setting("confirm_placement_enabled", not view_state.confirm_placement_enabled)
+	view_state.configure_from_settings(Progression.get_settings())
+	var state: String = "on" if view_state.confirm_placement_enabled else "off"
+	view_state.show_toast("Placement confirmation %s" % state, Time.get_ticks_msec(), 900)
+
+func _on_speed_pressed(mult: float) -> void:
+	_dispatch({"type": "set_speed", "multiplier": mult}, Time.get_ticks_msec())
+
+func _on_base_upgrade_pressed() -> void:
+	if view_state.selected_tower_id >= 0:
+		_dispatch({"type": "upgrade_base", "tower_id": view_state.selected_tower_id},
+				  Time.get_ticks_msec())
+
+func _on_path_upgrade_pressed(path_name: String) -> void:
+	if view_state.selected_tower_id >= 0:
+		var selected: Tower = game_state.get_tower_by_id(view_state.selected_tower_id)
+		if (
+			selected != null
+			and view_state.promotion_pending
+			and Progression.get_settings().get("fast_promotion_enabled", false)
+			and selected.tracker.pending_promotion_path == path_name
+		):
+			_dispatch({"type": "confirm_promotion", "tower_id": view_state.selected_tower_id},
+					  Time.get_ticks_msec())
+			return
+		_dispatch({"type": "upgrade_path", "tower_id": view_state.selected_tower_id, "path": path_name},
+				  Time.get_ticks_msec())
+
+func _on_sell_pressed() -> void:
+	if view_state.selected_tower_id < 0:
+		return
+	if not Progression.get_settings().get("confirm_sell", true):
+		_dispatch({"type": "sell_tower", "tower_id": view_state.selected_tower_id},
+				  Time.get_ticks_msec())
+		return
+	if view_state.confirm_sell:
+		_dispatch({"type": "sell_tower", "tower_id": view_state.selected_tower_id},
+				  Time.get_ticks_msec())
+		view_state.confirm_sell = false
+	else:
+		view_state.confirm_sell = true
+
+func _on_target_pressed() -> void:
+	if view_state.selected_tower_id >= 0:
+		_dispatch({"type": "cycle_target_mode", "tower_id": view_state.selected_tower_id},
+				  Time.get_ticks_msec())
+
+func _on_shop_btn_down(ttype: String) -> void:
+	# Activate placement immediately on button-down so the ghost tracks drag gestures.
+	# button_down fires on press; if the user simply clicks without dragging, pressed
+	# fires on release and _on_shop_pressed re-enters placement (harmless) and shows the hint.
+	view_state.enter_placement(ttype)
+	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
+	view_state.placement_ghost_valid = false
+
+func _on_shop_pressed(ttype: String) -> void:
+	# Fires only on a clean click (no drag). Placement already active from button_down;
+	# just re-confirm the type and show the placement hint.
+	view_state.enter_placement(ttype)
+	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
+	view_state.placement_ghost_valid = false
+	var mode_text: String = "Tap the map to place." if view_state.placement_mode == "drop" else "Drag or tap the map to place."
+	view_state.show_toast(mode_text, Time.get_ticks_msec(), 1000)
+
+func _on_confirm_placement_pressed() -> void:
+	if not view_state.has_pending_placement() or not view_state.pending_placement_valid:
+		return
+	var action := {
+		"type": "place_tower",
+		"tower_type": view_state.pending_placement_type,
+		"pos": view_state.pending_placement_pos,
+	}
+	view_state.clear_pending_placement()
+	_dispatch(action, Time.get_ticks_msec())
+
+func _on_cancel_placement_pressed() -> void:
+	view_state.clear_pending_placement()
+	view_state.show_toast("Placement cancelled.", Time.get_ticks_msec(), 700)
+
+func _on_info_pressed() -> void:
+	if _tower_details_overlay != null:
+		_close_tower_details()
+		return
+	var sel_id: int = view_state.selected_tower_id
+	if sel_id < 0: return
+	var tower := game_state.get_tower_by_id(sel_id)
+	if tower == null: return
+	_show_tower_details(tower)
+
+func _show_tower_details(tower: Tower) -> void:
+	_close_tower_details()
+
+	# Auto-pause if the setting is enabled and the game is not already paused
+	if Progression.get_settings().get("pause_on_tower_info", true) and not game_state.paused:
+		game_state.paused = true
+		_info_auto_paused = true
+
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var panel_w: float = clampf(vp.x - 32.0, 280.0, 540.0)
+	var panel_h: float = clampf(vp.y - 64.0, 200.0, 560.0)
+
+	# Dim backdrop — click anywhere on it to dismiss
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.0, 0.0, 0.0, 0.55)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			_close_tower_details()
+	)
+	hud_layer.add_child(backdrop)
+
+	_tower_details_overlay = PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.04, 0.06, 0.11, 0.97)
+	style.set_border_width_all(2)
+	style.border_color = Color(0.18, 0.69, 1.0, 0.7)
+	style.set_corner_radius_all(10)
+	style.shadow_color = Color(0.0, 0.5, 1.0, 0.25)
+	style.shadow_size = 12
+	_tower_details_overlay.add_theme_stylebox_override("panel", style)
+	_tower_details_overlay.set_meta("backdrop", backdrop)
+
+	# Position centred, but anchored to top-left so size doesn't fight the anchor
+	_tower_details_overlay.position = Vector2(
+		(vp.x - panel_w) * 0.5,
+		(vp.y - panel_h) * 0.5
+	)
+	_tower_details_overlay.size = Vector2(panel_w, panel_h)
+	hud_layer.add_child(_tower_details_overlay)
+
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_tower_details_overlay.add_child(scroll)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(margin)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(vbox)
+
+	# ── Header ──────────────────────────────────────────────────────────────
+	var header := HBoxContainer.new()
+	vbox.add_child(header)
+
+	var title := Label.new()
+	title.text = "%s — Upgrade Paths" % tower.tower_name
+	title.add_theme_font_size_override("font_size", 17)
+	title.add_theme_color_override("font_color", Color(0.18, 0.69, 1.0))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	header.add_child(title)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕"
+	close_btn.custom_minimum_size = Vector2(32.0, 32.0)
+	_THEME.apply_button(close_btn, "secondary")
+	close_btn.pressed.connect(_close_tower_details)
+	header.add_child(close_btn)
+
+	var sep := HSeparator.new()
+	vbox.add_child(sep)
+
+	# ── Current stats row ───────────────────────────────────────────────────
+	var now_ms: int = Time.get_ticks_msec()
+	var stats_lbl := Label.new()
+	stats_lbl.text = "DMG %d   Range %d   CD %dms" % [
+		tower.get_effective_damage(now_ms),
+		int(tower.effective_range()),
+		tower.effective_cooldown()
+	]
+	stats_lbl.add_theme_font_size_override("font_size", 12)
+	stats_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.85))
+	vbox.add_child(stats_lbl)
+
+	# ── One card per upgrade path ────────────────────────────────────────────
+	for path in _MAPS.PATH_KEYS:
+		var p_data := _UP.get_path_data(tower.ttype, path)
+		var cur: int = tower.tracker.path_levels[path]
+
+		var card := PanelContainer.new()
+		var card_sb := StyleBoxFlat.new()
+		card_sb.bg_color = Color(0.10, 0.13, 0.18, 0.85)
+		card_sb.set_border_width_all(1)
+		card_sb.border_color = Color(0.18, 0.69, 1.0, 0.25)
+		card_sb.set_corner_radius_all(6)
+		card_sb.content_margin_left = 10
+		card_sb.content_margin_right = 10
+		card_sb.content_margin_top = 8
+		card_sb.content_margin_bottom = 8
+		card.add_theme_stylebox_override("panel", card_sb)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		vbox.add_child(card)
+
+		var cvbox := VBoxContainer.new()
+		cvbox.add_theme_constant_override("separation", 4)
+		card.add_child(cvbox)
+
+		# Path name + level dots on one line
+		var top_row := HBoxContainer.new()
+		cvbox.add_child(top_row)
+
+		var p_name := Label.new()
+		p_name.text = p_data["name"]
+		p_name.add_theme_font_size_override("font_size", 14)
+		p_name.add_theme_color_override("font_color", Color(0.18, 0.69, 1.0))
+		p_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		top_row.add_child(p_name)
+
+		var dots := ""
+		for k in range(5):
+			dots += "●" if k < cur else "○"
+		var p_prog := Label.new()
+		p_prog.text = dots
+		p_prog.add_theme_font_size_override("font_size", 14)
+		p_prog.add_theme_color_override("font_color",
+			Color(0.3, 0.9, 0.55) if cur > 0 else Color(0.4, 0.45, 0.5))
+		top_row.add_child(p_prog)
+
+		var p_desc := Label.new()
+		p_desc.text = p_data["desc"]
+		p_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		p_desc.add_theme_font_size_override("font_size", 12)
+		p_desc.add_theme_color_override("font_color", Color(0.75, 0.78, 0.88))
+		p_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cvbox.add_child(p_desc)
+
+		var next_lvl := mini(4, cur)
+		var power := int((p_data["tiers"][next_lvl] - 1.0) * 100.0)
+		var p_stats := Label.new()
+		p_stats.text = "Next upgrade: +%d%% power" % power if cur < 5 else "MAX LEVEL"
+		p_stats.add_theme_font_size_override("font_size", 11)
+		p_stats.add_theme_color_override("font_color",
+			Color(1.0, 0.84, 0.0) if cur < 5 else Color(0.3, 0.9, 0.55))
+		cvbox.add_child(p_stats)
+
+func _close_tower_details() -> void:
+	if _tower_details_overlay == null:
+		return
+	if _tower_details_overlay.has_meta("backdrop"):
+		var bd: Node = _tower_details_overlay.get_meta("backdrop")
+		if is_instance_valid(bd):
+			bd.queue_free()
+	_tower_details_overlay.queue_free()
+	_tower_details_overlay = null
+	if _info_auto_paused:
+		_info_auto_paused = false
+		game_state.paused = false
+
+func _on_promotion_confirm_pressed() -> void:
+	if view_state.selected_tower_id >= 0:
+		_dispatch({"type": "confirm_promotion", "tower_id": view_state.selected_tower_id},
+				  Time.get_ticks_msec())
+
+func _on_promotion_cancel_pressed() -> void:
+	if view_state.selected_tower_id >= 0:
+		_dispatch({"type": "cancel_promotion", "tower_id": view_state.selected_tower_id},
+				  Time.get_ticks_msec())
+
+func _restart_current_run() -> void:
+	var map_id: int = game_state.map_id
+	var map_data: Dictionary = _MAPS.MAPS[map_id]
+	var run_config: Dictionary = Progression.get_run_config()
+
+	view_state = ViewState.new()
+	view_state.configure_from_settings(Progression.get_settings())
+	input_ctrl.view_state = view_state
+
+	game_state = GameState.new(map_data["path"], run_config, map_id)
+	_apply_variant_stats(game_state)
+	_place_starting_tower(game_state, run_config)
+	_backdrop_texture = load(_MAP_BG_PATHS.get(map_id, ""))
+	input_ctrl.game_state = game_state
+	renderer.game_state = game_state
+	renderer.view_state = view_state
+	renderer.rebuild_path_for_map(map_data["path"])
+
+	_prev_lives = game_state.lives
+	_hud_rects_ready = false
+	set_process(true)
+	view_state.show_toast("Game restarted.", Time.get_ticks_msec(), 900)
+
+func _fade_to_scene(path: String) -> void:
+	var tween := create_tween()
+	tween.tween_property(self, "modulate:a", 0.0, 0.20)
+	tween.tween_callback(func(): get_tree().change_scene_to_file(path))
+
+# ---------------------------------------------------------------------------
+# Run end — record to Progression and go to EndScreen
+# ---------------------------------------------------------------------------
+
+func _update_virtual_cursor(now_ms: int) -> void:
+	if _virtual_cursor == null: return
+	
+	var is_remote := not Input.get_connected_joypads().is_empty() or Input.is_action_pressed("ui_up") or Input.is_action_pressed("ui_down") or Input.is_action_pressed("ui_left") or Input.is_action_pressed("ui_right")
+	
+	if view_state.placement_active and is_remote:
+		_virtual_cursor.visible = true
+		var move := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+		var settings := Progression.get_settings()
+		var sensitivity: float = settings.get("cursor_sensitivity", 1.0)
+		var use_accel: bool = settings.get("cursor_acceleration", true)
+		
+		if move.length() > 0.1:
+			_cursor_accel_time += get_process_delta_time()
+			var accel_mult := 1.0
+			if use_accel:
+				# Logarithmic acceleration curve: starts at 1x, ramps to 2.5x over 1.2 seconds
+				accel_mult = 1.0 + (log(_cursor_accel_time + 1.0) * 1.8)
+			
+			var base_speed := 450.0 * sensitivity
+			var speed := base_speed * accel_mult * (2.0 if Input.is_action_pressed("ui_select") else 1.0)
+			
+			view_state.placement_ghost_pos += move * speed * get_process_delta_time()
+			# Clamp to map
+			view_state.placement_ghost_pos.x = clampf(view_state.placement_ghost_pos.x, 0, _MAPS.WIDTH)
+			view_state.placement_ghost_pos.y = clampf(view_state.placement_ghost_pos.y, 0, _MAPS.HEIGHT)
+		else:
+			_cursor_accel_time = 0.0
+		
+		_virtual_cursor.position = view_state.placement_ghost_pos
+		
+		if Input.is_action_just_pressed("ui_accept"):
+			_on_confirm_placement()
+	else:
+		_virtual_cursor.visible = false
+
+func _on_run_ended() -> void:
+	set_process(false)
+	if game_state.game_state == "won":
+		JuiceManager.play(JuiceManager.SFX.WIN)
+	else:
+		JuiceManager.play(JuiceManager.SFX.GAME_OVER)
+	var run_result = Progression.record_run(game_state, game_state.map_id)
+	var rp: int = run_result.get("rp", 0) if run_result is Dictionary else int(run_result)
+	Progression.pending_end_stats = {
+		"rp_earned":               rp,
+		"waves":                   game_state.stat_waves_survived,
+		"perfect_waves":           game_state.stat_perfect_waves,
+		"lives":                   game_state.lives,
+		"won":                     game_state.game_state == "won",
+		"map_id":                  game_state.map_id,
+		"towers_placed":           game_state.stat_towers_placed,
+		"enemies_killed":          game_state.stat_enemies_killed,
+		"gold_earned":             game_state.stat_gold_earned,
+		"newly_unlocked_variants": run_result.get("newly_unlocked_variants", []) if run_result is Dictionary else [],
+		"milestone_deltas":        run_result.get("milestone_deltas", []) if run_result is Dictionary else [],
+	}
+	get_tree().change_scene_to_file("res://scenes/EndScreen.tscn")
