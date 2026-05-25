@@ -1,5 +1,5 @@
 extends Control
-class_name RoboBaseScreen
+class_name CyberDeckScreen
 
 # Meta-progression shop: purchase starting-tower unlocks, convenience upgrades,
 # and view/activate earned tower variants.
@@ -11,7 +11,9 @@ const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 @onready var _back_btn:  Button         = $TopBar/BackBtn
 @onready var _title_lbl: Label          = $TopBar/Title
 @onready var _rp_lbl:    Label          = $TopBar/RPLabel
+@onready var _top_bar:   HBoxContainer  = $TopBar
 @onready var _tab_bar:   HBoxContainer  = $TabBar
+@onready var _scroll:    ScrollContainer = $Scroll
 @onready var _content:   VBoxContainer  = $Scroll/ContentMargin/Content
 
 var _active_tab: String = "shop"
@@ -30,7 +32,13 @@ func _ready() -> void:
 
 	_apply_visuals()
 	_build_tab_bar()
+	_scroll.scroll_deadzone = 12
+	_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	_content.mouse_filter = Control.MOUSE_FILTER_PASS
+	if _content.get_parent() is Control:
+		_content.get_parent().mouse_filter = Control.MOUSE_FILTER_PASS
 	_show_tab("shop")
+	_apply_layout()
 
 	_back_btn.pressed.connect(_on_back)
 	get_viewport().size_changed.connect(_on_resize)
@@ -46,13 +54,33 @@ func _apply_visuals() -> void:
 	_THEME.apply_button(_back_btn, "secondary")
 	_title_lbl.add_theme_color_override("font_color", _THEME.GOLD)
 	_rp_lbl.add_theme_color_override("font_color", _THEME.GOLD)
+	_back_btn.custom_minimum_size = Vector2(128.0, _LAYOUT.min_touch_height(false))
+	_rp_lbl.custom_minimum_size = Vector2(116.0, _LAYOUT.min_touch_height(false))
 	_refresh_rp()
 
 func _refresh_rp() -> void:
-	_rp_lbl.text = "RP: %d" % Progression.get_banked_rp()
+	_rp_lbl.text = "Shards: %d" % Progression.get_banked_rp()
 
 func _on_resize() -> void:
+	_apply_layout()
 	_show_tab(_active_tab)
+
+func _apply_layout() -> void:
+	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	var margin: float = _LAYOUT.edge_margin(viewport)
+	var top: float = _LAYOUT.top_margin(viewport)
+	var bottom: float = _LAYOUT.bottom_margin(viewport)
+	var top_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.07)
+	var tab_h: float = 44.0
+	var tab_gap: float = 8.0
+	var scroll_gap: float = 6.0
+
+	_LAYOUT.apply_rect(_top_bar, Rect2(Vector2(margin, top), Vector2(maxf(0.0, viewport.x - margin * 2.0), top_h)))
+	_LAYOUT.apply_rect(_tab_bar, Rect2(Vector2(margin, top + top_h + tab_gap), Vector2(maxf(0.0, viewport.x - margin * 2.0), tab_h)))
+
+	var scroll_top: float = top + top_h + tab_gap + tab_h + scroll_gap
+	var scroll_h: float = maxf(0.0, viewport.y - scroll_top - bottom)
+	_LAYOUT.apply_rect(_scroll, Rect2(Vector2(margin, scroll_top), Vector2(maxf(0.0, viewport.x - margin * 2.0), scroll_h)))
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Tab bar
@@ -145,18 +173,18 @@ func _build_shop() -> void:
 			"cannon":    desc_text = "Guaranteed Cannon tower ready at wave start."
 			"choice":    desc_text = "Pick any tower type freely at wave start."
 
-		var card := _make_shop_card(lbl, desc_text, cost, owned, prereq_ok, active,
-			func():
-				var result := Progression.purchase_upgrade(uid)
-				if result["success"]:
-					_refresh_rp()
-					_show_tab("shop")
-			,
-			func():
-				var new_active := uid if not active else ""
-				Progression.set_active_starting_tower(new_active)
+		var buy_cb := func():
+			var result := Progression.purchase_upgrade(uid)
+			if result["success"]:
+				_refresh_rp()
 				_show_tab("shop")
-		)
+
+		var activate_cb := func():
+			var new_active := uid if not active else ""
+			Progression.set_active_starting_tower(new_active)
+			_show_tab("shop")
+
+		var card := _make_shop_card(lbl, desc_text, cost, owned, prereq_ok, active, buy_cb, activate_cb)
 		_content.add_child(card)
 
 	_add_spacer(12.0)
@@ -182,13 +210,13 @@ func _build_shop() -> void:
 		if uid == "bonus_life_2" and not "bonus_life_1" in unlocked:
 			prereq_ok = false
 
-		var card := _make_simple_card(lbl, desc, cost, owned, prereq_ok, superseded,
-			func():
-				var result := Progression.purchase_upgrade(uid)
-				if result["success"]:
-					_refresh_rp()
-					_show_tab("shop")
-		)
+		var buy_cb := func():
+			var result := Progression.purchase_upgrade(uid)
+			if result["success"]:
+				_refresh_rp()
+				_show_tab("shop")
+
+		var card := _make_simple_card(lbl, desc, cost, owned, prereq_ok, superseded, buy_cb)
 		_content.add_child(card)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -221,13 +249,13 @@ func _build_variants() -> void:
 		var u_pct: float  = clampf(float(uses) / float(maxi(1, ut)), 0.0, 1.0)
 		var k_pct: float  = clampf(float(kills) / float(maxi(1, kt)), 0.0, 1.0)
 
+		var activate_cb := func():
+			var new_v := vkey if not active else ""
+			Progression.set_active_variant(ttype, new_v)
+			_show_tab("variants")
+
 		var card := _make_variant_card(lbl, ttype, desc, tint, unlocked, active,
-			uses, kills, ut, kt, u_pct, k_pct,
-			func():
-				var new_v := vkey if not active else ""
-				Progression.set_active_variant(ttype, new_v)
-				_show_tab("variants")
-		)
+			uses, kills, ut, kt, u_pct, k_pct, activate_cb)
 		_content.add_child(card)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -240,15 +268,18 @@ func _make_shop_card(
 		buy_cb: Callable, activate_cb: Callable) -> Control:
 
 	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	_THEME.apply_panel(panel, "card")
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var hbox := HBoxContainer.new()
+	hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	hbox.add_theme_constant_override("separation", 10)
 	panel.add_child(hbox)
 
 	# Left: text
 	var vtext := VBoxContainer.new()
+	vtext.mouse_filter = Control.MOUSE_FILTER_PASS
 	vtext.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vtext.add_theme_constant_override("separation", 3)
 	hbox.add_child(vtext)
@@ -269,6 +300,7 @@ func _make_shop_card(
 
 	# Right: controls
 	var vctrl := VBoxContainer.new()
+	vctrl.mouse_filter = Control.MOUSE_FILTER_PASS
 	vctrl.add_theme_constant_override("separation", 4)
 	vctrl.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.add_child(vctrl)
@@ -294,7 +326,7 @@ func _make_shop_card(
 		vctrl.add_child(lock_lbl)
 	else:
 		var cost_lbl := Label.new()
-		cost_lbl.text = "%d RP" % cost
+		cost_lbl.text = "%d Shards" % cost
 		_THEME.apply_label(cost_lbl, "currency")
 		cost_lbl.add_theme_font_size_override("font_size", 12)
 		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -319,14 +351,17 @@ func _make_simple_card(
 		buy_cb: Callable) -> Control:
 
 	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	_THEME.apply_panel(panel, "card")
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var hbox := HBoxContainer.new()
+	hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	hbox.add_theme_constant_override("separation", 10)
 	panel.add_child(hbox)
 
 	var vtext := VBoxContainer.new()
+	vtext.mouse_filter = Control.MOUSE_FILTER_PASS
 	vtext.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vtext.add_theme_constant_override("separation", 3)
 	hbox.add_child(vtext)
@@ -348,6 +383,7 @@ func _make_simple_card(
 	vtext.add_child(desc_lbl)
 
 	var vctrl := VBoxContainer.new()
+	vctrl.mouse_filter = Control.MOUSE_FILTER_PASS
 	vctrl.add_theme_constant_override("separation", 4)
 	vctrl.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.add_child(vctrl)
@@ -370,7 +406,7 @@ func _make_simple_card(
 		vctrl.add_child(lock_lbl)
 	else:
 		var cost_lbl := Label.new()
-		cost_lbl.text = "%d RP" % cost
+		cost_lbl.text = "%d Shards" % cost
 		_THEME.apply_label(cost_lbl, "currency")
 		cost_lbl.add_theme_font_size_override("font_size", 12)
 		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -397,10 +433,12 @@ func _make_variant_card(
 		activate_cb: Callable) -> Control:
 
 	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	_THEME.apply_panel(panel, "card")
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var hbox := HBoxContainer.new()
+	hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	hbox.add_theme_constant_override("separation", 10)
 	panel.add_child(hbox)
 
@@ -411,11 +449,13 @@ func _make_variant_card(
 	hbox.add_child(badge)
 
 	var vtext := VBoxContainer.new()
+	vtext.mouse_filter = Control.MOUSE_FILTER_PASS
 	vtext.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vtext.add_theme_constant_override("separation", 4)
 	hbox.add_child(vtext)
 
 	var top_row := HBoxContainer.new()
+	top_row.mouse_filter = Control.MOUSE_FILTER_PASS
 	vtext.add_child(top_row)
 
 	var name_lbl := Label.new()
@@ -444,6 +484,7 @@ func _make_variant_card(
 	if not unlocked:
 		# Progress bars
 		var prog_box := VBoxContainer.new()
+		prog_box.mouse_filter = Control.MOUSE_FILTER_PASS
 		prog_box.add_theme_constant_override("separation", 3)
 		vtext.add_child(prog_box)
 
@@ -452,6 +493,7 @@ func _make_variant_card(
 
 	# Right: activate button (only if unlocked)
 	var vctrl := VBoxContainer.new()
+	vctrl.mouse_filter = Control.MOUSE_FILTER_PASS
 	vctrl.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.add_child(vctrl)
 
@@ -482,6 +524,7 @@ func _make_variant_card(
 
 func _make_progress_row(label: String, current: int, maximum: int, pct: float, bar_color: Color) -> HBoxContainer:
 	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_PASS
 	row.add_theme_constant_override("separation", 6)
 
 	var lbl := Label.new()
@@ -492,6 +535,7 @@ func _make_progress_row(label: String, current: int, maximum: int, pct: float, b
 	row.add_child(lbl)
 
 	var bar := ProgressBar.new()
+	bar.mouse_filter = Control.MOUSE_FILTER_PASS
 	bar.value = pct
 	bar.min_value = 0.0
 	bar.max_value = 1.0
@@ -556,7 +600,7 @@ func _fade_to(path: String) -> void:
 	tw.tween_callback(func():
 		var err := get_tree().change_scene_to_file(path)
 		if err != OK:
-			printerr("RoboBaseScreen: scene change failed: %s (%d)" % [path, err])
+			printerr("CyberDeckScreen: scene change failed: %s (%d)" % [path, err])
 			self.modulate.a = 1.0
 	)
 

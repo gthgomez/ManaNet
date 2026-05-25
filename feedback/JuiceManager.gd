@@ -40,12 +40,28 @@ var _sfx_enabled: bool = true
 var _loaded_streams: Dictionary = {}   # SFX -> AudioStream cache
 
 func _ready() -> void:
+	_ensure_sfx_bus()
 	for _i in _POOL_SIZE:
 		var p := AudioStreamPlayer.new()
 		p.bus = "SFX"
 		add_child(p)
 		_pool.append(p)
 	_preload_streams()
+	configure_from_progression()
+
+func _ensure_sfx_bus() -> void:
+	if AudioServer.get_bus_index("SFX") >= 0:
+		return
+	AudioServer.add_bus()
+	var idx := AudioServer.bus_count - 1
+	AudioServer.set_bus_name(idx, "SFX")
+	AudioServer.set_bus_send(idx, "Master")
+
+func configure_from_progression() -> void:
+	var settings: Dictionary = Progression.get_settings()
+	var sfx_on: bool = settings.get("sfx_enabled", true)
+	var master_muted: bool = settings.get("audio_muted", false)
+	configure(sfx_on and not master_muted)
 
 func _preload_streams() -> void:
 	for sfx_id in _SFX_PATHS:

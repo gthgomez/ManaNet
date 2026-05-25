@@ -35,6 +35,7 @@ func _ready() -> void:
 	_build_cards()
 	_apply_visuals()
 	_apply_layout()
+	_scroll.scroll_deadzone = 12
 
 	FocusManager.register_initial_focus(_back_btn)
 
@@ -137,7 +138,7 @@ func _make_card(map_def: Dictionary) -> PanelContainer:
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(300, 420)
 	_THEME.apply_panel(card, "card")
-	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
 	card.focus_mode = Control.FOCUS_ALL
 	card.pivot_offset = Vector2(150, 210)
 	
@@ -168,6 +169,7 @@ func _make_card(map_def: Dictionary) -> PanelContainer:
 	)
 
 	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_PASS
 	margin.add_theme_constant_override("margin_left", 14)
 	margin.add_theme_constant_override("margin_top", 14)
 	margin.add_theme_constant_override("margin_right", 14)
@@ -175,6 +177,7 @@ func _make_card(map_def: Dictionary) -> PanelContainer:
 	card.add_child(margin)
 
 	var vbox := VBoxContainer.new()
+	vbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	vbox.add_theme_constant_override("separation", 8)
 	margin.add_child(vbox)
 

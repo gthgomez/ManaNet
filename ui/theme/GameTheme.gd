@@ -16,6 +16,10 @@ const GREEN: Color = Color(0.13, 0.77, 0.37, 1.0)          # Neo Green
 const RED: Color = Color(0.902, 0.224, 0.275, 1.0)         # #E63946  Soft Crimson
 const ORANGE: Color = Color(1.0, 0.36, 0.0, 1.0)           # Alert Orange
 
+static func shader_effects_enabled() -> bool:
+	var renderer := str(ProjectSettings.get_setting("rendering/renderer/rendering_method", ""))
+	return not (OS.has_feature("android") and renderer == "gl_compatibility")
+
 static func style_box(bg: Color, border: Color, border_width: int = 1, radius: int = 6, expand: int = 0, shadow_sz: int = 0) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
@@ -38,10 +42,22 @@ static func apply_panel(panel: Control, kind: String = "default") -> void:
 	var border: Color = CYAN.lerp(Color.WHITE, 0.12)
 	var bg: Color = PANEL
 	var shadow: int = 8
-	if kind == "card":
-		bg = PANEL_ALT
-		border = CYAN.lerp(VIOLET, 0.32)
-		shadow = 12
+	if kind == "card" and shader_effects_enabled():
+		var mat := ShaderMaterial.new()
+		mat.shader = preload("res://assets/shaders/chamfer_glass.gdshader")
+		mat.set_shader_parameter("bg_color", PANEL_ALT)
+		mat.set_shader_parameter("border_color", CYAN.lerp(VIOLET, 0.32))
+		mat.set_shader_parameter("border_glow_color", Color(CYAN.r, CYAN.g, CYAN.b, 0.12))
+		mat.set_shader_parameter("border_width", 1.5)
+		mat.set_shader_parameter("chamfer_size", 10.0)
+		mat.set_shader_parameter("glow_size", 5.0)
+		mat.set_shader_parameter("panel_size", panel.size)
+		panel.material = mat
+		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+
+		if not panel.is_connected("resized", Callable(_on_card_resized.bind(panel))):
+			panel.resized.connect(_on_card_resized.bind(panel))
+		return
 	elif kind == "modal":
 		bg = Color(0.03, 0.05, 0.11, 0.98)
 		border = GOLD
@@ -57,10 +73,22 @@ static func apply_panel(panel: Control, kind: String = "default") -> void:
 static func apply_glass_panel(panel: Control) -> void:
 	if panel == null:
 		return
-	var bg := Color(0.068, 0.108, 0.195, 0.65)
-	var border := Color(0.290, 0.565, 0.851, 0.22)
-	var sb := style_box(bg, border, 1, 14, 0)
-	panel.add_theme_stylebox_override("panel", sb)
+	if not shader_effects_enabled():
+		panel.material = null
+		panel.add_theme_stylebox_override("panel",
+				style_box(Color(0.051, 0.082, 0.149, 0.88), Color(0.290, 0.565, 0.851, 0.76), 2, 12, 2, 10))
+		return
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://assets/shaders/chamfer_glass.gdshader")
+	mat.set_shader_parameter("bg_color", Color(0.051, 0.082, 0.149, 0.72))
+	mat.set_shader_parameter("border_color", Color(0.290, 0.565, 0.851, 0.76))
+	mat.set_shader_parameter("border_glow_color", Color(0.290, 0.565, 0.851, 0.35))
+	mat.set_shader_parameter("border_width", 2.0)
+	mat.set_shader_parameter("chamfer_size", 20.0)
+	mat.set_shader_parameter("glow_size", 14.0)
+	mat.set_shader_parameter("panel_size", panel.size)
+	panel.material = mat
+	panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 
 static func apply_button(btn: Button, kind: String = "secondary") -> void:
 	if btn == null:
@@ -74,7 +102,18 @@ static func apply_button(btn: Button, kind: String = "secondary") -> void:
 		btn.focus_exited.connect(_on_focus_exited.bind(btn))
 		btn.pressed.connect(_on_button_pressed.bind(btn))
 
-	btn.material = null
+	if shader_effects_enabled():
+		var mat := ShaderMaterial.new()
+		mat.shader = preload("res://assets/shaders/LightSweep.gdshader")
+		mat.set_shader_parameter("sweep_pos", -1.0)
+		mat.set_shader_parameter("sweep_width", 0.14)
+		if kind == "primary":
+			mat.set_shader_parameter("sweep_color", Color(1.0, 0.94, 0.74, 0.44)) # warm gold glint
+		else:
+			mat.set_shader_parameter("sweep_color", Color(0.5, 0.8, 1.0, 0.38)) # cyan ice glint
+		btn.material = mat
+	else:
+		btn.material = null
 
 	# Default: secondary — visible navy fill, steel-blue border, clear hover lift
 	var base:   Color = Color(0.110, 0.178, 0.318, 1.0)
@@ -153,7 +192,7 @@ static func _on_focus_entered(btn: Button) -> void:
 	tween.tween_property(btn, "scale", Vector2(1.04, 1.04), 0.6).set_trans(Tween.TRANS_SINE)
 	tween.tween_property(btn, "scale", Vector2.ONE, 0.6).set_trans(Tween.TRANS_SINE)
 	btn.set_meta("focus_tween", tween)
-	
+
 	# Light sweep animation
 	var mat := btn.material as ShaderMaterial
 	if mat and mat.shader:
@@ -187,7 +226,7 @@ static func _on_button_pressed(btn: Button) -> void:
 		var tweener := ctween.tween_property(mat, "shader_parameter/sweep_pos", 2.0, 0.3)
 		if tweener:
 			tweener.from(-1.0)
-	
+
 	# Spawn juice burst at button center
 	var juice = btn.get_node_or_null("/root/JuiceManager")
 	if juice:
@@ -280,3 +319,7 @@ static func style_tree(node: Node) -> void:
 		elif child is Label:
 			apply_label(child)
 		style_tree(child)
+
+static func _on_card_resized(panel: Control) -> void:
+	if panel and panel.material is ShaderMaterial:
+		panel.material.set_shader_parameter("panel_size", panel.size)
