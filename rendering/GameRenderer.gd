@@ -97,8 +97,9 @@ var _map_bg_textures: Dictionary = {}
 
 func _ready() -> void:
 	z_index = 0
-	_tower_cutout_material = ShaderMaterial.new()
-	_tower_cutout_material.shader = _TOWER_CUTOUT_SHADER
+	if _THEME.shader_effects_enabled():
+		_tower_cutout_material = ShaderMaterial.new()
+		_tower_cutout_material.shader = _TOWER_CUTOUT_SHADER
 	_load_map_backgrounds()
 	_generate_starfield()
 	_build_multimesh_pools()
@@ -129,18 +130,22 @@ func _generate_starfield() -> void:
 func _build_multimesh_pools() -> void:
 	# Enemy MMIs
 	_enemy_mmis.clear()
-	var entity_mat := ShaderMaterial.new()
-	entity_mat.shader = preload("res://assets/shaders/EntityFidelity.gdshader")
-	
+	var use_shaders := _THEME.shader_effects_enabled()
+	var entity_mat: ShaderMaterial = null
+	if use_shaders:
+		entity_mat = ShaderMaterial.new()
+		entity_mat.shader = preload("res://assets/shaders/EntityFidelity.gdshader")
+
 	for etype in ENEMY_TYPE_ORDER:
 		var mmi := _make_mmi(MAX_ENEMIES, _enemy_color(etype), true)
 		var tex: Texture2D = load(ENEMY_SPRITE_PATHS[etype])
 		if tex:
 			mmi.texture = tex
-			var mat := entity_mat.duplicate()
-			mat.set_shader_parameter("outline_color", Color(1.0, 1.0, 1.0, 0.35))
-			mat.set_shader_parameter("outline_width", 1.8)
-			mmi.material = mat
+			if use_shaders and entity_mat:
+				var mat := entity_mat.duplicate()
+				mat.set_shader_parameter("outline_color", Color(1.0, 1.0, 1.0, 0.35))
+				mat.set_shader_parameter("outline_width", 1.8)
+				mmi.material = mat
 		add_child(mmi)
 		_enemy_mmis.append(mmi)
 
@@ -152,19 +157,19 @@ func _build_multimesh_pools() -> void:
 		var tex: Texture2D = load(TOWER_SPRITE_PATHS[ttype])
 		if tex:
 			mmi.texture = tex
-			# Create unique material per tower type for radiant glow colors
-			var mat := ShaderMaterial.new()
-			mat.shader = _TOWER_FIDELITY_SHADER
-			
-			var glow_col := _THEME.CYAN
-			match ttype:
-				"mage", "lightning": glow_col = _THEME.VIOLET
-				"cannon": glow_col = _THEME.ORANGE
-				"sniper": glow_col = _THEME.GOLD
-			
-			mat.set_shader_parameter("glow_color", glow_col)
-			mat.set_shader_parameter("glow_intensity", 3.5)
-			mmi.material = mat
+			if use_shaders:
+				var mat := ShaderMaterial.new()
+				mat.shader = _TOWER_FIDELITY_SHADER
+
+				var glow_col := _THEME.CYAN
+				match ttype:
+					"mage", "lightning": glow_col = _THEME.VIOLET
+					"cannon": glow_col = _THEME.ORANGE
+					"sniper": glow_col = _THEME.GOLD
+
+				mat.set_shader_parameter("glow_color", glow_col)
+				mat.set_shader_parameter("glow_intensity", 3.5)
+				mmi.material = mat
 		add_child(mmi)
 		_tower_mmis.append(mmi)
 
@@ -277,7 +282,7 @@ func _update_enemy_meshes(now_ms: int) -> void:
 			# Flash: set custom data x to 1.0 if flashing
 			var flash: float = 1.0 if now_ms < enemy.flash_until else 0.0
 			mmi.multimesh.set_instance_custom_data(j, Color(flash, 0, 0, 0))
-			
+
 			# Tint: chilled = blue tint, frozen = white
 			var col: Color = _enemy_base_color(enemy, now_ms)
 			mmi.multimesh.set_instance_color(j, col)
@@ -385,7 +390,7 @@ func _draw() -> void:
 			view_state.pending_placement_valid,
 			now_ms
 		)
-	
+
 	# Health bars and badges moved to _on_overlay_draw to stay on top of sprites
 	_overlay_node.queue_redraw()
 
@@ -476,11 +481,11 @@ func _draw_range_circle(now_ms: int, shake: Vector2) -> void:
 	var p: Vector2 = tower.pos + shake
 	var r: float = tower.effective_range()
 	var col := tower.color
-	
+
 	# Premium Pulsing Glow
 	var pulse := (sin(float(now_ms) * 0.004) + 1.0) * 0.5
 	draw_circle(p, r, Color(col.r, col.g, col.b, 0.05 + pulse * 0.02))
-	
+
 	# Outer segmented ring (Rotating)
 	var segments := 4
 	var segment_len := TAU / float(segments) * 0.45
@@ -489,10 +494,10 @@ func _draw_range_circle(now_ms: int, shake: Vector2) -> void:
 		var start_angle := i * (TAU / segments) + rotation_offset
 		draw_arc(p, r, start_angle, start_angle + segment_len, 32, col, 2.5)
 		draw_arc(p, r, start_angle, start_angle + segment_len, 32, Color.WHITE, 0.5)
-	
+
 	# Inner thin pulsing ring
 	draw_arc(p, r - 4.0, 0, TAU, 64, Color(col.r, col.g, col.b, 0.2 + pulse * 0.2), 1.0)
-	
+
 	# Scoped crosshair dots
 	for i in range(4):
 		var angle := i * PI * 0.5
@@ -679,20 +684,20 @@ func _draw_health_bars(canvas: CanvasItem, shake: Vector2) -> void:
 			continue
 		if now_ms - enemy.last_damage_time > 5500 and not has_status and not has_shield:
 			continue
-			
+
 		var hp_frac: float = clampf(float(enemy.health) / float(enemy.max_health), 0.0, 1.0)
 		var bar_x: float = enemy.pos.x - BAR_W * 0.5 + shake.x
 		var bar_y: float = enemy.pos.y - float(enemy.radius) - 12.0 + shake.y
-		
+
 		# High-contrast background container
 		canvas.draw_rect(Rect2(bar_x - 2, bar_y - 2, BAR_W + 4, BAR_H + 4), Color(0.01, 0.02, 0.04, 0.82))
 		canvas.draw_rect(Rect2(bar_x, bar_y, BAR_W, BAR_H), Color(0.05, 0.08, 0.12, 0.9))
-		
+
 		# Dynamic health color based on thresholds
 		var fill_color: Color = _THEME.GREEN
-		if hp_frac <= 0.35: 
+		if hp_frac <= 0.35:
 			fill_color = _THEME.RED
-		elif hp_frac <= 0.65: 
+		elif hp_frac <= 0.65:
 			fill_color = _THEME.ORANGE
 
 		canvas.draw_rect(Rect2(bar_x, bar_y, BAR_W * hp_frac, BAR_H), fill_color)
@@ -732,7 +737,7 @@ func _draw_overlay_on(canvas: CanvasItem) -> void:
 	if game_state == null: return
 	var now_ms: int = Time.get_ticks_msec()
 	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
-	
+
 	_draw_health_bars(canvas, shake)
 	_draw_tower_badges(canvas, now_ms, shake)
 
@@ -776,25 +781,25 @@ func draw_placement_ghost(pos: Vector2, tower_type: String, valid: bool, now_ms:
 	var ghost_color: Color = col if valid else _THEME.RED
 	var pulse := (sin(float(now_ms) * 0.008) + 1.0) * 0.5
 	ghost_color.a = 0.45 + pulse * 0.15
-	
+
 	# Draw background circle
 	draw_circle(pos, float(_MAPS.TOWER_RADIUS), Color(ghost_color.r, ghost_color.g, ghost_color.b, 0.2))
 	# Draw animated border
 	draw_arc(pos, float(_MAPS.TOWER_RADIUS), 0.0, TAU, 32, ghost_color, 2.0)
-	
+
 	# Range preview
 	if game_state:
 		var dummy_range: float = 110.0
 		if tower_type in _TT.TOWER_TYPES:
 			dummy_range = _TT.TOWER_TYPES[tower_type].get("range", 110.0)
-		
+
 		var r_col := col if valid else _THEME.RED
 		r_col.a = 0.25 + pulse * 0.1
 		var fill_alpha: float = 0.05 if valid else 0.035
 		var line_width: float = 1.5 if valid else 1.2
 		draw_circle(pos, dummy_range, Color(r_col.r, r_col.g, r_col.b, fill_alpha))
 		draw_arc(pos, dummy_range, 0.0, TAU, 64, r_col, line_width)
-		
+
 	if valid:
 		# Draw crosshair line to cursor
 		draw_line(pos + Vector2(-10, 0), pos + Vector2(10, 0), Color.WHITE, 1.0)
@@ -863,7 +868,7 @@ class _BakedPathDraw extends Node2D:
 		var c_border := Color(0.12, 0.15, 0.22)
 		var c_rail   := Color(0.08, 0.10, 0.16)
 		var c_energy := Color(0.18, 0.69, 1.0, 0.12)
-		
+
 		# Shadow
 		for i in range(map_path.size() - 1):
 			draw_line(map_path[i] + Vector2(3,3), map_path[i+1] + Vector2(3,3), c_shadow, 54.0)

@@ -65,3 +65,9 @@ export_presets.cfg
 .export_presets.cfg
 *.tsbuildinfo
 *.js.map
+
+# Open-source safety hardening
+.secrets/
+secrets/
+credentials/
+tokens/

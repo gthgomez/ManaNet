@@ -14,11 +14,11 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
-config/name="Tower Defense"
+config/name="ManaNet"
 config/version="7.1.2"
-config/description="TD port from Kivy to Godot 4"
+config/description="ManaNet — A Cyber-Arcana Tower Defense Game. Overclock your Netrunners, deploy plasma smart-bows, and protect your hacker Cyber-Deck Terminal."
 run/main_scene="res://scenes/Main.tscn"
-config/features=PackedStringArray("4.6", "Mobile")
+config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://assets/sprites/towers/mage.svg"
 boot_splash/image="res://assets/splash.png"
 boot_splash/fullsize=true
@@ -48,6 +48,7 @@ ui_touch={
 
 [rendering]
 
-renderer/rendering_method="mobile"
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 environment/defaults/default_clear_color=Color(0.047, 0.055, 0.122, 1)

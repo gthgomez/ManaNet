@@ -21,11 +21,8 @@ offset_left = -280.0
 offset_right = 280.0
 add_theme_constant_override/separation = 18
 
-[node name="Title" type="Label" parent="VBox"]
-text = "TOWER DEFENSE"
-theme_override_font_sizes/font_size = 52
-horizontal_alignment = 1
-theme_override_colors/font_color = Color(1.0, 0.82, 0.2, 1)
+[node name="Title" type="TextureRect" parent="VBox"]
+custom_minimum_size = Vector2(0, 92)
 
 [node name="SubTitle" type="Label" parent="VBox"]
 text = "Survive 15 waves. Build smart. Upgrade wisely."
@@ -45,8 +42,8 @@ theme_override_font_sizes/font_size = 28
 [node name="Row2" type="HBoxContainer" parent="VBox/ActionCol"]
 add_theme_constant_override/separation = 10
 
-[node name="RoboBaseBtn" type="Button" parent="VBox/ActionCol/Row2"]
-text = "Robo Base"
+[node name="CyberDeckBtn" type="Button" parent="VBox/ActionCol/Row2"]
+text = "Cyber-Deck"
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 18
 

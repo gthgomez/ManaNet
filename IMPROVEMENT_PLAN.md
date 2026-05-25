@@ -5,6 +5,18 @@
 
 ---
 
+## Status (2026-05-22)
+
+Polish batch landed for UX/audio items below. **Done:** #1, #2, #3, #4, #5, #6, #7, #10, #11, #15. **Open:** #8 (boss waves), #9 (Cannon path abilities), #12 (Map 3 spiral), #13 (variant mechanic rework), #14 (Fire TV FocusManager).
+
+| # | Status | Notes |
+|---|--------|-------|
+| 1–6, 10–11, 15 | **DONE** | Shop affordance, live stats, milestone bars, wave shop, wave progress, run recap, restart timer bar, modifier stacking, banner split |
+| 7 | **DONE (partial SFX)** | `feedback/JuiceManager.gd` — pool + settings gate; wired in `GameScreen.gd` / menus. **Unused call sites:** `BTN_PRESS`, `ENEMY_DEATH`, `WAVE_CLEAR` (assets exist, no `JuiceManager.play` yet) |
+| 8–9, 12–14 | **Open** | See detailed sections |
+
+---
+
 ## Priority Queue
 
 | # | Area | Issue | Effort | Impact |
@@ -180,7 +192,7 @@ Keep it to 2-3 lines maximum. Only show towers that were used in the run. If a v
 
 ### 7 — JuiceManager — SFX and Haptics
 
-**File:** `ui/JuiceManager.gd` (currently a stub)
+**File:** `feedback/JuiceManager.gd` (autoload; was stub at audit)
 
 **Problem:** The stub exists but nothing calls it. Audio feedback is a 2026 mobile UX baseline — micro-sounds on button press, wave start, enemy death, and upgrade confirmation are considered core engagement mechanics, not decoration.
 
@@ -193,6 +205,8 @@ Keep it to 2-3 lines maximum. Only show towers that were used in the run. If a v
 3. Wire call sites in `GameScreen.gd` after each `apply_action()` response — `JuiceManager.play(SFX.TOWER_PLACE)`.
 4. Android: use `Input.vibrate_handheld(duration_ms)` for heavy events (wave start, lives lost).
 5. Gate all audio behind `Settings.sfx_enabled` (add to SettingsScreen toggle list).
+
+**2026-05-22:** Steps 1–5 largely done; `SettingsScreen.gd` persists SFX toggle. Remaining wiring: `BTN_PRESS` (shop/HUD buttons), `ENEMY_DEATH` (kill hook in sim/renderer), `WAVE_CLEAR` (wave-complete handler).
 
 Asset sourcing: Kenney.nl free SFX packs are license-clear for commercial use.
 

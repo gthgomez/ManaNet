@@ -55,7 +55,7 @@ static func wave_shop_card_min_size() -> Vector2:
 static func shop_strip_needs_compaction(viewport: Vector2, tower_count: int) -> bool:
 	var margin: float = edge_margin(viewport)
 	var available: float = maxf(0.0, viewport.x - margin * 2.0)
-	var desired: float = float(tower_count) * 122.0
+	var desired: float = float(tower_count) * 126.0 + float(max(0, tower_count - 1)) * 6.0
 	return desired > available
 
 static func is_tablet(viewport: Vector2) -> bool:

@@ -181,6 +181,7 @@ func _default_settings() -> Dictionary:
 		"cursor_sensitivity":        1.0,
 		"pause_on_tower_info":       true,
 		"audio_muted":               false,
+		"sfx_enabled":               true,
 	}
 
 func _default_profile() -> Dictionary:

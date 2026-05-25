@@ -63,7 +63,7 @@ func _ready() -> void:
 
 	_add_stat("Towers Built",      str(towers),                         Color.WHITE)
 	_add_stat("Enemies Killed",    str(kills),                          Color.WHITE)
-	_add_stat("Gold Earned",       str(gold),                           Color(1.0, 0.82, 0.2))
+	_add_stat("Credits Earned",    str(gold),                           Color(1.0, 0.82, 0.2))
 	_add_stat("Lives Remaining",   str(lives),                          Color.WHITE)
 	_add_stat("Perfect Waves",     "%d / %d" % [perfect_waves, waves],  Color(0.2, 0.8, 1.0))
 	_add_stat("Research Points",   "+%d  (total: %d)" % [rp_earned, total_rp], Color(0.47, 0.9, 1.0))

@@ -1,8 +1,8 @@
-[gd_scene load_steps=2 format=3 uid="uid://robobasescreen"]
+[gd_scene load_steps=2 format=3 uid="uid://cyberdeckscreen"]
 
-[ext_resource type="Script" path="res://scenes/RoboBaseScreen.gd" id="1_rb"]
+[ext_resource type="Script" path="res://scenes/CyberDeckScreen.gd" id="1_rb"]
 
-[node name="RoboBaseScreen" type="Control"]
+[node name="CyberDeckScreen" type="Control"]
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1_rb")
@@ -22,14 +22,14 @@ text = "< Back"
 custom_minimum_size = Vector2(80, 36)
 
 [node name="Title" type="Label" parent="TopBar"]
-text = "ROBO BASE"
+text = "CYBER-DECK"
 size_flags_horizontal = 3
 horizontal_alignment = 1
 theme_override_font_sizes/font_size = 28
 theme_override_colors/font_color = Color(1.0, 0.82, 0.2, 1)
 
 [node name="RPLabel" type="Label" parent="TopBar"]
-text = "RP: 0"
+text = "Shards: 0"
 horizontal_alignment = 2
 theme_override_colors/font_color = Color(1.0, 0.82, 0.2, 0.9)
 

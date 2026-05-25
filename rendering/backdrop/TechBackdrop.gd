@@ -10,9 +10,11 @@ func _ready() -> void:
 	var shader_rect := ColorRect.new()
 	shader_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	shader_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	shader_rect.material = ShaderMaterial.new()
-	shader_rect.material.shader = preload("res://assets/shaders/MenuScanning.gdshader")
-	shader_rect.material.set_shader_parameter("line_color", Color(0.290, 0.565, 0.851, 0.14))
+	shader_rect.color = Color(0.0, 0.0, 0.0, 0.0)
+	if _THEME.shader_effects_enabled():
+		shader_rect.material = ShaderMaterial.new()
+		shader_rect.material.shader = preload("res://assets/shaders/MenuScanning.gdshader")
+		shader_rect.material.set_shader_parameter("line_color", Color(0.290, 0.565, 0.851, 0.14))
 	add_child(shader_rect)
 
 var _time: float = 0.0

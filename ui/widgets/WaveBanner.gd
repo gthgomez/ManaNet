@@ -10,16 +10,19 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	
 	_bg = PanelContainer.new()
+	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_bg.custom_minimum_size = Vector2(400.0, 80.0)
 	_THEME.apply_panel(_bg, "modal")
 	add_child(_bg)
 	
 	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_theme_constant_override("margin_left", 20)
 	margin.add_theme_constant_override("margin_right", 20)
 	_bg.add_child(margin)
 	
 	_label = Label.new()
+	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_label.text = "WAVE START"
 	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER

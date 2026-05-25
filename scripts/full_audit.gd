@@ -278,7 +278,7 @@ func _test_scene_files() -> void:
 		"res://scenes/MenuScreen.tscn",
 		"res://scenes/MapSelectScreen.tscn",
 		"res://scenes/GameScreen.tscn",
-		"res://scenes/RoboBaseScreen.tscn",
+		"res://scenes/CyberDeckScreen.tscn",
 		"res://scenes/SettingsScreen.tscn",
 		"res://scenes/EndScreen.tscn",
 	]

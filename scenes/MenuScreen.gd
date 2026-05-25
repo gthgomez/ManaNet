@@ -7,10 +7,10 @@ const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 
 @onready var _vbox: VBoxContainer   = $VBox
-@onready var _title: Label          = $VBox/Title
+@onready var _title: TextureRect      = $VBox/Title
 @onready var _subtitle: Label       = $VBox/SubTitle
 @onready var _play_btn: Button      = $VBox/ActionCol/PlayBtn
-@onready var _base_btn: Button      = $VBox/ActionCol/Row2/RoboBaseBtn
+@onready var _base_btn: Button      = $VBox/ActionCol/Row2/CyberDeckBtn
 @onready var _settings_btn: Button  = $VBox/ActionCol/Row2/SettingsBtn
 @onready var _bg: ColorRect         = $BG
 
@@ -36,6 +36,10 @@ var _tower_base_y: Array = []
 var _time: float = 0.0
 
 func _ready() -> void:
+	_title.texture = load("res://assets/sprites/ui/title_logo.png")
+	_title.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_title.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+
 	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var backdrop := _BACKDROP.new()
@@ -67,7 +71,7 @@ func _ready() -> void:
 	fade_tween.tween_property(self, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
 
 	_play_btn.pressed.connect(_on_play)
-	_base_btn.pressed.connect(_on_robobase)
+	_base_btn.pressed.connect(_on_cyberdeck)
 	_settings_btn.pressed.connect(_on_settings)
 	get_viewport().size_changed.connect(_apply_layout)
 	_apply_visuals()
@@ -95,19 +99,15 @@ func _process(delta: float) -> void:
 
 func _apply_visuals() -> void:
 	if _bg:
-		var mat := ShaderMaterial.new()
-		mat.shader = preload("res://assets/shaders/LiquidGlass.gdshader")
-		_bg.material = mat
+		if _THEME.shader_effects_enabled():
+			var mat := ShaderMaterial.new()
+			mat.shader = preload("res://assets/shaders/LiquidGlass.gdshader")
+			_bg.material = mat
+		else:
+			_bg.material = null
 
-	_THEME.apply_label(_title, "title")
 	_THEME.apply_label(_subtitle, "muted")
 	_subtitle.text = "Survive 15 waves. Build smart. Upgrade wisely."
-
-	_title.add_theme_font_size_override("font_size", 64)
-	# CYAN halo replaces the plain black outline — logo-tier depth treatment
-	_title.add_theme_constant_override("outline_size", 22)
-	_title.add_theme_color_override("font_outline_color",
-			Color(_THEME.CYAN.r, _THEME.CYAN.g, _THEME.CYAN.b, 0.24))
 
 	_THEME.apply_button(_play_btn, "primary")
 	_THEME.apply_button(_base_btn, "secondary")
@@ -115,7 +115,7 @@ func _apply_visuals() -> void:
 
 	# Gap 9 — Accessibility: tooltip_text and FOCUS_ALL on all interactive controls
 	_play_btn.tooltip_text     = "Start a new run"
-	_base_btn.tooltip_text     = "Open Robo Base — spend RP on permanent upgrades"
+	_base_btn.tooltip_text     = "Open Cyber-Deck — spend Shards on permanent software upgrades"
 	_settings_btn.tooltip_text = "Gameplay settings"
 	_play_btn.focus_mode     = Control.FOCUS_ALL
 	_base_btn.focus_mode     = Control.FOCUS_ALL
@@ -156,7 +156,7 @@ func _apply_layout() -> void:
 	_LAYOUT.apply_rect(_vbox, Rect2(Vector2(x, y), Vector2(width, height)))
 
 	_vbox.add_theme_constant_override("separation", 32)
-	_title.add_theme_font_size_override("font_size", 72 if viewport.x >= 1200.0 else 56)
+	_title.custom_minimum_size = Vector2(0.0, 110.0 if viewport.x >= 1200.0 else 84.0)
 	_subtitle.autowrap_mode       = TextServer.AUTOWRAP_WORD_SMART
 	_play_btn.custom_minimum_size     = Vector2(0.0, 64.0)
 	_base_btn.custom_minimum_size     = Vector2(0.0, _LAYOUT.TOUCH_HEIGHT)
@@ -164,9 +164,14 @@ func _apply_layout() -> void:
 
 	# Gap 2 — glass panel housing the content area
 	_ensure_glass()
-	_LAYOUT.apply_rect(_glass, Rect2(
+	var glass_rect := Rect2(
 			Vector2(x - 20.0, y - 12.0),
-			Vector2(width + 40.0, height + 24.0)))
+			Vector2(width + 40.0, height + 24.0))
+	_LAYOUT.apply_rect(_glass, glass_rect)
+	if _glass.material is ShaderMaterial:
+		_glass.material.set_shader_parameter("panel_size", glass_rect.size)
+	for tr in _tower_showcase:
+		move_child(tr, _vbox.get_index())
 
 	var margin := _LAYOUT.edge_margin(viewport)
 	var top    := _LAYOUT.top_margin(viewport)
@@ -186,12 +191,15 @@ func _apply_layout() -> void:
 
 	# Tower showcase — centered row just below VBox
 	if not _tower_showcase.is_empty():
-		var ts_sz  := 80.0
-		var ts_gap := 36.0
+		var compact_showcase := OS.has_feature("android") and viewport.x > viewport.y
+		var ts_sz  := 64.0 if compact_showcase else 80.0
+		var ts_gap := 28.0 if compact_showcase else 36.0
 		var count  := _tower_showcase.size()
 		var total_w := count * ts_sz + (count - 1) * ts_gap
 		var ts_x    := (viewport.x - total_w) * 0.5
-		var ts_y    := y + height + 20.0
+		var desired_y := y + height + 14.0
+		var max_y := viewport.y - bottom - ts_sz - (34.0 if compact_showcase else 24.0)
+		var ts_y: float = minf(desired_y, max_y)
 		_tower_base_y.resize(count)
 		for i in count:
 			_tower_showcase[i].size     = Vector2(ts_sz, ts_sz)
@@ -293,6 +301,7 @@ func _on_mute_toggle() -> void:
 	var is_muted: bool = Progression.get_settings().get("audio_muted", false)
 	Progression.set_setting("audio_muted", not is_muted)
 	_refresh_mute_btn()
+	JuiceManager.configure_from_progression()
 
 # ── Gap 5: Title decorative gold rule ─────────────────────────────────────────
 
@@ -356,6 +365,8 @@ func _update_last_run_label() -> void:
 # ── Gap 7 + previous-pass: Tower showcase with per-tower tints ────────────────
 
 func _add_tower_showcase() -> void:
+	if OS.has_feature("android") and not _THEME.shader_effects_enabled():
+		return
 	var paths := [
 		"res://assets/sprites/towers/archer.svg",
 		"res://assets/sprites/towers/cannon.svg",
@@ -379,13 +390,26 @@ func _add_tower_showcase() -> void:
 		tr.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		tr.modulate     = Color(tints[i].r, tints[i].g, tints[i].b, 0.0)
+		tr.modulate     = Color(1.0, 1.0, 1.0, 0.0)
+
+		if _THEME.shader_effects_enabled():
+			var mat := ShaderMaterial.new()
+			mat.shader = preload("res://assets/shaders/hologram.gdshader")
+			mat.set_shader_parameter("holo_color", tints[i])
+			mat.set_shader_parameter("scanline_speed", 1.4)
+			mat.set_shader_parameter("scanline_scale", 110.0)
+			mat.set_shader_parameter("flicker_amount", 0.05)
+			tr.material = mat
+		else:
+			tr.material = null
+			tr.modulate = Color(tints[i].r, tints[i].g, tints[i].b, 0.0)
+
 		add_child(tr)
 		# Keep towers behind VBox in draw order
 		move_child(tr, _vbox.get_index())
 		_tower_showcase.append(tr)
 		_tower_base_y.append(0.0)
-		# Staggered fade-in, arriving at each tower's accent tint
+		# Staggered fade-in, arriving at full opacity
 		var fade := tr.create_tween()
 		fade.tween_property(tr, "modulate:a", tints[i].a, 0.5).set_delay(0.35 + i * 0.11)
 
@@ -491,8 +515,8 @@ func _add_rp_pill() -> void:
 func _on_play() -> void:
 	_fade_to("res://scenes/MapSelectScreen.tscn")
 
-func _on_robobase() -> void:
-	_fade_to("res://scenes/RoboBaseScreen.tscn")
+func _on_cyberdeck() -> void:
+	_fade_to("res://scenes/CyberDeckScreen.tscn")
 
 func _on_settings() -> void:
 	_fade_to("res://scenes/SettingsScreen.tscn")

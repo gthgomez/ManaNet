@@ -8,8 +8,8 @@ const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 
 const _SETTING_ROWS := [
-	["gold_efficiency_enabled",  "Gold Efficiency RP Bonus",
-	 "Adds RP for spending gold efficiently over the run.",            true],
+	["gold_efficiency_enabled",  "Credits Efficiency Shards Bonus",
+	 "Adds Shards for spending credits efficiently over the run.",            true],
 	["show_upgrade_tutorial",    "Show Upgrade Tutorial",
 	 "Shows the path-promotion explainer on first branch.",            true],
 	["fast_promotion_enabled",   "Fast Promotion",
@@ -24,6 +24,8 @@ const _SETTING_ROWS := [
 	 "Gradually increases cursor speed while moving for smoother navigation.", true],
 	["pause_on_tower_info",       "Pause on Tower Info",
 	 "Automatically pauses the game while the '!' upgrade info panel is open.", true],
+	["sfx_enabled",               "Sound Effects",
+	 "Play UI and gameplay sound effects (master mute still applies).", true],
 ]
 
 const _OPTION_ROWS := [
@@ -57,6 +59,10 @@ func _ready() -> void:
 	_ensure_header_spacer()
 	_apply_visuals()
 	_apply_layout()
+	_scroll.scroll_deadzone = 12
+	_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	_content.mouse_filter = Control.MOUSE_FILTER_PASS
+	_rows_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	_build()
 	
 	# Handle Fire TV / Remote focus
@@ -121,6 +127,8 @@ func _apply_layout() -> void:
 	var content_rect: Rect2 = _LAYOUT.centered_rect(viewport, top + 66.0, _LAYOUT.bottom_margin(viewport), 1320.0)
 	_ensure_glass()
 	_LAYOUT.apply_rect(_glass, content_rect)
+	if _glass.material is ShaderMaterial:
+		_glass.material.set_shader_parameter("panel_size", content_rect.size)
 	_LAYOUT.apply_rect(_scroll, content_rect)
 	_content.custom_minimum_size = Vector2(maxf(0.0, content_rect.size.x - 42.0), 0.0)
 	_rows_box.custom_minimum_size = Vector2(maxf(0.0, content_rect.size.x - 42.0), 0.0)
@@ -140,10 +148,12 @@ func _build() -> void:
 		var enabled: bool = settings.get(key, default)
 
 		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_PASS
 		row.add_theme_constant_override("separation", 24)
 		row.custom_minimum_size = Vector2(0, 76)
 
 		var col := VBoxContainer.new()
+		col.mouse_filter = Control.MOUSE_FILTER_PASS
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var name_lbl := Label.new()
 		name_lbl.text = title
@@ -177,10 +187,12 @@ func _build() -> void:
 	_rows_box.add_child(data_header)
 	
 	var data_row := HBoxContainer.new()
+	data_row.mouse_filter = Control.MOUSE_FILTER_PASS
 	data_row.add_theme_constant_override("separation", 24)
 	data_row.custom_minimum_size = Vector2(0, 76)
 	
 	var data_col := VBoxContainer.new()
+	data_col.mouse_filter = Control.MOUSE_FILTER_PASS
 	data_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var data_lbl := Label.new()
 	data_lbl.text = "Maintenance Actions"
@@ -194,6 +206,7 @@ func _build() -> void:
 	data_row.add_child(data_col)
 	
 	var btn_vbox := VBoxContainer.new()
+	btn_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	btn_vbox.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	btn_vbox.add_theme_constant_override("separation", 8)
 	
@@ -224,10 +237,12 @@ func _build() -> void:
 		var current = settings.get(key, values[0])
 
 		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_PASS
 		row.add_theme_constant_override("separation", 24)
 		row.custom_minimum_size = Vector2(0, 76)
 
 		var col := VBoxContainer.new()
+		col.mouse_filter = Control.MOUSE_FILTER_PASS
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var name_lbl := Label.new()
 		name_lbl.text = title
@@ -268,6 +283,8 @@ func _build() -> void:
 
 func _on_toggle(key: String, current: bool) -> void:
 	Progression.set_setting(key, not current)
+	if key == "sfx_enabled":
+		JuiceManager.configure_from_progression()
 	_build()
 
 func _on_cycle_option(key: String, values: Array, current_idx: int) -> void:
@@ -281,6 +298,7 @@ func _on_reset_tutorials() -> void:
 
 func _on_reset_settings() -> void:
 	Progression.reset_settings()
+	JuiceManager.configure_from_progression()
 	_build()
 
 func _on_back() -> void:
