@@ -11,7 +11,7 @@ Agent-neutral startup router for the Godot tower defense port. Root `ENGINEERING
    - `CLAUDE.md` for Claude
    - `CODEX.md` for Codex, if present
    - `GEMINI.md` for Gemini, if present
-5. If porting from Kivy, inspect the matching source in `C:\Workspace\td_v712` before translating behavior.
+5. If porting from Kivy, inspect the matching source in `C:\Workspace\Project_Games\TowerDefenseKivy` before translating behavior.
 
 ## Local Rules
 

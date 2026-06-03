@@ -1,4 +1,4 @@
-# PROJECT_CONTEXT.md — TowerDefenseGodot
+# PROJECT_CONTEXT.md — ManaNet
 
 ## What This Is
 
@@ -26,7 +26,7 @@ This file is the agent-neutral project context. `CLAUDE.md` is a Claude adapter;
 
 ## Verification & Commands
 
-Run from `C:\Workspace\Project_Games\TowerDefenseGodot`.
+Run from `C:\Workspace\Project_Games\ManaNet`.
 
 - Headless simulation: `godot --headless -s scripts/SimulationBot.gd`
 - Benchmark: `godot --headless -s scripts/benchmark.gd`
