@@ -6,16 +6,22 @@ Godot 4 port of the Python/Kivy tower-defense game in `C:\Workspace\Project_Game
 
 This file is the agent-neutral project context. `CLAUDE.md` is a Claude adapter; it should not be required for Codex, Gemini, or other agents unless they are specifically using that adapter.
 
+## Ship program
+
+**Ship A** in the locked 90-day mobile program: `C:\Workspace\Project_Games\SHIP_PROGRAM_90_DAY.md`.  
+Parallel polish with SimLife (Ship B). Prefer open polish items in `IMPROVEMENT_PLAN.md` (#7 finish, #8 bosses, #9 Cannon, #12 Map 3, #13 variants). **Skip #14 Fire TV** for this program.
+
 ## Startup Sequence
 
 1. Read workspace root `ENGINEERING.md`.
 2. Read workspace root `AGENTS.md`.
-3. Read this file.
-4. Read a model adapter only when it applies to the active tool:
+3. Read `C:\Workspace\Project_Games\SHIP_PROGRAM_90_DAY.md` when doing ship/polish work.
+4. Read this file.
+5. Read a model adapter only when it applies to the active tool:
    - `CLAUDE.md` for Claude
    - `CODEX.md` for Codex, if present
    - `GEMINI.md` for Gemini, if present
-5. If porting logic from Kivy, inspect the matching source in `C:\Workspace\Project_Games\TowerDefenseKivy`.
+6. If porting logic from Kivy, inspect the matching source in `C:\Workspace\Project_Games\TowerDefenseKivy`.
 
 ## Architecture & Invariants
 

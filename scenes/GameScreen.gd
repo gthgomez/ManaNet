@@ -104,6 +104,8 @@ const _Z_OVERLAY: int = 120
 # Previous lives count to detect leaks for screen shake
 var _prev_lives: int = 10
 var _prev_wave: int = 0
+var _prev_kills: int = 0
+var _prev_wave_shop_pending: bool = false
 
 # ---------------------------------------------------------------------------
 # Lifecycle
@@ -140,6 +142,8 @@ func _ready() -> void:
 
 	_prev_lives = game_state.lives
 	_prev_wave = game_state.wave
+	_prev_kills = game_state.stat_enemies_killed
+	_prev_wave_shop_pending = game_state.wave_shop_pending
 
 	# Show active modifier(s) as a persistent instruction for the first few seconds
 	var mod_ids: Array = Progression.get_active_modifier_ids()
@@ -1068,6 +1072,13 @@ func _process(_delta: float) -> void:
 
 	view_state.tick(now_ms)
 	game_state.update_simulation(now_ms)
+	# Juice: kills and wave-clear (rising edges after sim step)
+	if game_state.stat_enemies_killed > _prev_kills:
+		JuiceManager.play(JuiceManager.SFX.ENEMY_DEATH)
+	_prev_kills = game_state.stat_enemies_killed
+	if game_state.wave_shop_pending and not _prev_wave_shop_pending:
+		JuiceManager.play(JuiceManager.SFX.WAVE_CLEAR)
+	_prev_wave_shop_pending = game_state.wave_shop_pending
 	renderer.render_frame(now_ms)
 	_update_selection_ring()
 	_update_virtual_cursor(now_ms)
@@ -1085,11 +1096,12 @@ func _update_hud(now_ms: int) -> void:
 	_wave_label.text  = "Wave %d / %d" % [game_state.wave, _MAPS.MAX_WAVE]
 
 	if _wave_progress_bar != null:
-		var in_wave: bool = not game_state.wave_ready and not game_state.wave_shop_pending and game_state.wave_enemy_total > 0
+		var spawn_total: int = game_state.get_wave_spawn_total()
+		var in_wave: bool = not game_state.wave_ready and not game_state.wave_shop_pending and spawn_total > 0
 		_wave_progress_bar.visible = in_wave
 		if in_wave:
 			var killed := game_state.enemies_spawned - game_state.enemies.size()
-			var ratio: float = float(maxi(0, killed)) / float(game_state.wave_enemy_total)
+			var ratio: float = float(maxi(0, killed)) / float(spawn_total)
 			_wave_progress_bar.value = ratio
 			_apply_wave_progress_style(ratio)
 
@@ -1900,6 +1912,9 @@ func _restart_current_run() -> void:
 	renderer.rebuild_path_for_map(map_data["path"])
 
 	_prev_lives = game_state.lives
+	_prev_wave = game_state.wave
+	_prev_kills = game_state.stat_enemies_killed
+	_prev_wave_shop_pending = game_state.wave_shop_pending
 	_hud_rects_ready = false
 	set_process(true)
 	view_state.show_toast("Game restarted.", Time.get_ticks_msec(), 900)

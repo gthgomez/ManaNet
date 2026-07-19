@@ -14,6 +14,7 @@ func _init() -> void:
 	_test_wave_shop_gate()
 	_test_frost_vanguard_timing()
 	_test_boss_shield_brute_absorbs_damage()
+	_test_boss_wave_trash_density()
 	_test_invalid_wave_shop_card()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass_count)
@@ -78,6 +79,29 @@ func _test_boss_shield_brute_absorbs_damage() -> void:
 	state.apply_hit(tower, boss, 999, 5000)
 	_check(boss.shield_hp == initial_shield - 1, "BossShieldBrute shield absorbs one hit")
 	_check(boss.health == initial_health, "BossShieldBrute shield prevents health damage")
+	state.dispose()
+
+func _test_boss_wave_trash_density() -> void:
+	var state: GameState = _make_state()
+	state.wave = 5
+	state.wave_enemy_total = 20
+	# 1 boss + round(20 * 0.6) trash = 13
+	_check(state.get_wave_spawn_total() == 13, "boss wave spawn total is 1 + 60%% of base (13 for base 20)")
+	state.wave = 4
+	_check(state.get_wave_spawn_total() == 20, "non-boss wave uses full wave_enemy_total")
+	state.wave = 5
+	state.enemies_spawned = 0
+	state.enemies.clear()
+	state.spawn_interval_ms = 500
+	state.spawn_enemy(1000)
+	_check(state.enemies.size() == 1 and state.enemies[0] is EnemyScript.BossShieldBrute,
+		"boss wave first spawn is BossShieldBrute")
+	_check(state.next_spawn_ms == 1000 + 500 + GameStateScript.BOSS_POST_SPAWN_EXTRA_MS,
+		"boss spawn adds post-boss trash delay")
+	while state.enemies_spawned < state.get_wave_spawn_total():
+		state.spawn_enemy(state.next_spawn_ms)
+	_check(state.enemies_spawned == 13, "boss wave stops at density cap (not full base 20)")
+	_check(state.wave_enemy_total == 20, "base wave_enemy_total progression value unchanged")
 	state.dispose()
 
 func _test_invalid_wave_shop_card() -> void:

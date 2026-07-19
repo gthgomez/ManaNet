@@ -565,8 +565,21 @@ func _apply_wave_shop_card(card_id: String, now_ms: int) -> void:
 func _is_boss_wave() -> bool:
 	return wave in [5, 10, 15]
 
+## Boss waves: 1 boss + ~60% of the usual non-boss wave count as trash (plan #8).
+## Keeps `wave_enemy_total` progression intact; only the spawn cap is reduced.
+const BOSS_TRASH_DENSITY: float = 0.6
+## Extra pause after the boss enters before trash spawns (readability).
+const BOSS_POST_SPAWN_EXTRA_MS: int = 600
+
+func get_wave_spawn_total() -> int:
+	if not _is_boss_wave():
+		return wave_enemy_total
+	var trash: int = maxi(0, int(round(float(wave_enemy_total) * BOSS_TRASH_DENSITY)))
+	return 1 + trash
+
 func spawn_enemy(now_ms: int) -> void:
 	var enemy: Enemy
+	var spawned_boss := false
 
 	# Boss waves: first spawn is always the boss
 	if _is_boss_wave() and enemies_spawned == 0:
@@ -574,6 +587,7 @@ func spawn_enemy(now_ms: int) -> void:
 			5:  enemy = Enemy.BossShieldBrute.new(path)
 			10: enemy = Enemy.BossSwarmCarrier.new(path)
 			15: enemy = Enemy.BossRegenerator.new(path)
+		spawned_boss = true
 	else:
 		var weights: Array
 		if wave >= 8:
@@ -616,9 +630,12 @@ func spawn_enemy(now_ms: int) -> void:
 	enemies.append(enemy)
 	enemies_spawned += 1
 	# Clear per-spawn speed mult once all enemies for this wave are queued
-	if enemies_spawned >= wave_enemy_total:
+	if enemies_spawned >= get_wave_spawn_total():
 		_ws_next_spawn_speed_mult = 1.0
-	next_spawn_ms = now_ms + int(float(spawn_interval_ms) * _ws_spawn_interval_mult)
+	var interval: int = int(float(spawn_interval_ms) * _ws_spawn_interval_mult)
+	if spawned_boss:
+		interval += BOSS_POST_SPAWN_EXTRA_MS
+	next_spawn_ms = now_ms + interval
 	wave_started = true
 
 # ---------------------------------------------------------------------------
@@ -856,7 +873,7 @@ func update_simulation(now_ms: int) -> void:
 		return
 
 	# Step 1: spawn
-	if enemies_spawned < wave_enemy_total and now_ms >= next_spawn_ms:
+	if enemies_spawned < get_wave_spawn_total() and now_ms >= next_spawn_ms:
 		spawn_enemy(now_ms)
 
 	# Step 2: move enemies, detect leaks
@@ -976,7 +993,7 @@ func update_simulation(now_ms: int) -> void:
 	particles = alive_particles
 
 	# Step 8: wave completion check (skip if wave shop is already pending)
-	if not wave_shop_pending and enemies_spawned >= wave_enemy_total and enemies.is_empty() and game_state == "playing":
+	if not wave_shop_pending and enemies_spawned >= get_wave_spawn_total() and enemies.is_empty() and game_state == "playing":
 		var wave_bonus: int = int(round(float(50 + wave * 15) * _wave_bonus_mult))
 		gold += wave_bonus
 		stat_gold_earned += wave_bonus

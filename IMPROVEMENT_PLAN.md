@@ -5,15 +5,19 @@
 
 ---
 
-## Status (2026-05-22)
+## Status (2026-07-18 · Ship Program W1)
 
-Polish batch landed for UX/audio items below. **Done:** #1, #2, #3, #4, #5, #6, #7, #10, #11, #15. **Open:** #8 (boss waves), #9 (Cannon path abilities), #12 (Map 3 spiral), #13 (variant mechanic rework), #14 (Fire TV FocusManager).
+Polish batch landed for UX/audio items below. Ship program: `../SHIP_PROGRAM_90_DAY.md`. W1 inventory: `docs/W1_INVENTORY_AND_BOSS_CONTRACTS.md`.
 
 | # | Status | Notes |
 |---|--------|-------|
 | 1–6, 10–11, 15 | **DONE** | Shop affordance, live stats, milestone bars, wave shop, wave progress, run recap, restart timer bar, modifier stacking, banner split |
-| 7 | **DONE (partial SFX)** | `feedback/JuiceManager.gd` — pool + settings gate; wired in `GameScreen.gd` / menus. **Unused call sites:** `BTN_PRESS`, `ENEMY_DEATH`, `WAVE_CLEAR` (assets exist, no `JuiceManager.play` yet) |
-| 8–9, 12–14 | **Open** | See detailed sections |
+| 7 | **DONE (W1)** | Juice call sites complete: `BTN_PRESS` (GameTheme), `ENEMY_DEATH` + `WAVE_CLEAR` (GameScreen rising edges); place/upgrade/sell/boss/win already wired |
+| 8 | **DONE (core+density) / OPEN (feel)** | Boss classes + spawn + mechanics + BOSS_APPEAR + **60% trash density** (`get_wave_spawn_total`) + 600ms post-boss delay. Remaining: device feel pass, shield VFX clarity. Contracts in W1 doc |
+| 9 | **Open** | Cannon Shock chill still the real gap |
+| 12 | **LIKELY DONE / VALIDATE** | Path coords already match proposed fix in `data/maps.gd`. Validate coverage before re-editing |
+| 13 | **Open** | Variant mechanics |
+| 14 | **OUT OF SCOPE** | Fire TV — skipped for 90-day mobile ship program |
 
 ---
 
