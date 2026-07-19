@@ -7,6 +7,7 @@ class_name EndScreen
 const _MAPS_DATA := preload("res://data/maps.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 
 @onready var _panel: PanelContainer = $Panel
@@ -61,12 +62,12 @@ func _ready() -> void:
 	else:
 		_sub_lbl.text = "Survived %d of 15 waves  |  Map: %s" % [waves, map_name]
 
-	_add_stat("Towers Built",      str(towers),                         Color.WHITE)
-	_add_stat("Enemies Killed",    str(kills),                          Color.WHITE)
-	_add_stat("Credits Earned",    str(gold),                           Color(1.0, 0.82, 0.2))
-	_add_stat("Lives Remaining",   str(lives),                          Color.WHITE)
+	_add_stat("Defenders Built",   str(towers),                         Color.WHITE)
+	_add_stat("Intrusions Cleared", str(kills),                         Color.WHITE)
+	_add_stat("%s Earned" % _BRAND.CURRENCY_RUN, str(gold),             Color(1.0, 0.82, 0.2))
+	_add_stat("%s Remaining" % _BRAND.CORE_RESOURCE, str(lives),        Color.WHITE)
 	_add_stat("Perfect Waves",     "%d / %d" % [perfect_waves, waves],  Color(0.2, 0.8, 1.0))
-	_add_stat("Research Points",   "+%d  (total: %d)" % [rp_earned, total_rp], Color(0.47, 0.9, 1.0))
+	_add_stat(_BRAND.CURRENCY_META, _BRAND.end_stat_shards(rp_earned, total_rp), Color(0.47, 0.9, 1.0))
 
 	var newly_unlocked: Array = stats.get("newly_unlocked_variants", [])
 	var milestone_deltas: Array = stats.get("milestone_deltas", [])

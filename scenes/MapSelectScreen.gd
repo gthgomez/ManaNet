@@ -7,6 +7,7 @@ class_name MapSelectScreen
 const _MAPS_DATA := preload("res://data/maps.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 const _DIFFICULTY_LABELS: Array[String] = ["", "Easy", "Medium", "Hard"]
 const _DIFFICULTY_COLORS: Array[Color] = [
@@ -112,12 +113,12 @@ func _refresh_mod_strip() -> void:
 			_mod_rp_lbl.text = ""
 		elif active.size() == 1:
 			var mult: float = Progression.MODIFIER_RP_MULT.get(active[0], 1.0)
-			_mod_rp_lbl.text = "  RP ×%.1f" % mult
+			_mod_rp_lbl.text = _BRAND.shards_mult(mult, false)
 		else:
 			var m_a: float = Progression.MODIFIER_RP_MULT.get(active[0], 1.0)
 			var m_b: float = Progression.MODIFIER_RP_MULT.get(active[1], 1.0)
 			var stacked: float = maxf(m_a, m_b) + 0.5
-			_mod_rp_lbl.text = "  RP ×%.1f  (stacked)" % stacked
+			_mod_rp_lbl.text = _BRAND.shards_mult(stacked, true)
 
 func _add_backdrop() -> void:
 	var backdrop := _BACKDROP.new()

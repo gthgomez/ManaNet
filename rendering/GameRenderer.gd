@@ -289,12 +289,19 @@ func _update_enemy_meshes(now_ms: int) -> void:
 
 func _enemy_base_color(enemy: Enemy, now_ms: int) -> Color:
 	var base: Color = Color.WHITE
+	# Boss stealth: dim until revealed (Swarm Carrier / stealthed types)
+	if enemy.stealthed and now_ms >= enemy.revealed_until:
+		return Color(0.45, 0.55, 0.70, 0.55)
 	if now_ms < enemy.frozen_until:
 		return base.lerp(Color.WHITE, 0.65)
 	if now_ms < enemy.chilled_until:
 		return base.lerp(Color(0.5, 0.8, 1.0), 0.45)
 	if now_ms < enemy.revealed_until:
 		return base.lerp(Color(1.0, 1.0, 0.4), 0.35)
+	# Boss regenerator: soft green pulse while healing below max HP
+	if enemy is Enemy.BossRegenerator and enemy.health > 0 and enemy.health < enemy.max_health:
+		var pulse: float = 0.35 + 0.25 * (0.5 + 0.5 * sin(float(now_ms) * 0.008))
+		return base.lerp(Color(0.35, 1.0, 0.55), pulse)
 	return base
 
 func _update_tower_meshes(now_ms: int) -> void:
@@ -680,9 +687,11 @@ func _draw_health_bars(canvas: CanvasItem, shake: Vector2) -> void:
 	for enemy in game_state.enemies:
 		var has_status: bool = _enemy_has_visible_status(enemy, now_ms)
 		var has_shield: bool = enemy.shields > 0
-		if enemy.health >= enemy.max_health and not has_status and not has_shield:
+		var hit_shield: int = _boss_hit_shield_hp(enemy)
+		var is_boss: bool = hit_shield >= 0 or enemy is Enemy.BossRegenerator or enemy is Enemy.BossSwarmCarrier
+		if enemy.health >= enemy.max_health and not has_status and not has_shield and not is_boss:
 			continue
-		if now_ms - enemy.last_damage_time > 5500 and not has_status and not has_shield:
+		if now_ms - enemy.last_damage_time > 5500 and not has_status and not has_shield and not is_boss:
 			continue
 
 		var hp_frac: float = clampf(float(enemy.health) / float(enemy.max_health), 0.0, 1.0)
@@ -699,6 +708,8 @@ func _draw_health_bars(canvas: CanvasItem, shake: Vector2) -> void:
 			fill_color = _THEME.RED
 		elif hp_frac <= 0.65:
 			fill_color = _THEME.ORANGE
+		if enemy is Enemy.BossRegenerator and enemy.health < enemy.max_health:
+			fill_color = fill_color.lerp(Color(0.4, 1.0, 0.55), 0.35)
 
 		canvas.draw_rect(Rect2(bar_x, bar_y, BAR_W * hp_frac, BAR_H), fill_color)
 
@@ -715,9 +726,33 @@ func _draw_health_bars(canvas: CanvasItem, shake: Vector2) -> void:
 			canvas.draw_rect(Rect2(bar_x, s_y, BAR_W * s_frac, 2.5), _THEME.CYAN)
 			canvas.draw_line(Vector2(bar_x, s_y), Vector2(bar_x + BAR_W * s_frac, s_y), Color.WHITE, 0.5)
 
+		# Boss hit-shield charges (BossShieldBrute): pips above HP bar
+		if hit_shield > 0:
+			var pip_y: float = bar_y - 10.0
+			for i in range(3):
+				var px: float = bar_x + 4.0 + float(i) * 10.0
+				var on: bool = i < hit_shield
+				canvas.draw_circle(Vector2(px, pip_y), 3.6, Color(0.0, 0.0, 0.0, 0.75))
+				canvas.draw_circle(
+					Vector2(px, pip_y),
+					2.6,
+					Color(0.55, 0.85, 1.0, 1.0) if on else Color(0.25, 0.30, 0.38, 0.85)
+				)
+
 		_draw_enemy_status_pips(canvas, enemy, now_ms, Vector2(bar_x + BAR_W + 5.0, bar_y + BAR_H * 0.5))
 
+func _boss_hit_shield_hp(enemy: Enemy) -> int:
+	if enemy is Enemy.BossShieldBrute:
+		return int(enemy.shield_hp)
+	return -1
+
 func _enemy_has_visible_status(enemy: Enemy, now_ms: int) -> bool:
+	if enemy.stealthed and now_ms >= enemy.revealed_until:
+		return true
+	if enemy is Enemy.BossRegenerator and enemy.health < enemy.max_health:
+		return true
+	if _boss_hit_shield_hp(enemy) > 0:
+		return true
 	return now_ms < enemy.chilled_until or now_ms < enemy.frozen_until or now_ms < enemy.revealed_until
 
 func _draw_enemy_status_pips(canvas: CanvasItem, enemy: Enemy, now_ms: int, start_pos: Vector2) -> void:
@@ -728,16 +763,45 @@ func _draw_enemy_status_pips(canvas: CanvasItem, enemy: Enemy, now_ms: int, star
 		colors.append(_THEME.CYAN)
 	if now_ms < enemy.revealed_until:
 		colors.append(_THEME.GOLD)
+	if enemy.stealthed and now_ms >= enemy.revealed_until:
+		colors.append(Color(0.55, 0.65, 0.85, 0.95))  # stealth
+	if enemy is Enemy.BossRegenerator and enemy.health < enemy.max_health:
+		colors.append(Color(0.35, 1.0, 0.55, 1.0))  # regen
 	for i in range(colors.size()):
 		var p: Vector2 = start_pos + Vector2(float(i) * 7.0, 0.0)
 		canvas.draw_circle(p, 3.5, Color(0.0, 0.0, 0.0, 0.72))
 		canvas.draw_circle(p, 2.4, colors[i])
+
+func _draw_boss_telegraphs(canvas: CanvasItem, shake: Vector2, now_ms: int) -> void:
+	## Identity / UX: boss states must be readable without a wiki (W1 contracts).
+	if game_state == null:
+		return
+	for enemy in game_state.enemies:
+		var pos: Vector2 = enemy.pos + shake
+		var r: float = float(enemy.radius) + 6.0
+		var hit_shield: int = _boss_hit_shield_hp(enemy)
+		if hit_shield > 0:
+			var pulse: float = 0.55 + 0.25 * (0.5 + 0.5 * sin(float(now_ms) * 0.006))
+			var col := Color(0.45, 0.82, 1.0, pulse)
+			canvas.draw_arc(pos, r + 2.0, 0.0, TAU, 40, col, 2.5, true)
+			# Remaining hit charges as arc segments
+			var segs: int = mini(3, hit_shield)
+			for i in range(segs):
+				var a0: float = -PI * 0.5 + float(i) * TAU / 3.0
+				var a1: float = a0 + TAU / 3.0 - 0.25
+				canvas.draw_arc(pos, r + 7.0, a0, a1, 12, Color(0.7, 0.95, 1.0, 0.9), 3.0, true)
+		elif enemy is Enemy.BossSwarmCarrier and enemy.stealthed and now_ms >= enemy.revealed_until:
+			canvas.draw_arc(pos, r, 0.0, TAU, 32, Color(0.5, 0.6, 0.85, 0.35), 1.5, true)
+		elif enemy is Enemy.BossRegenerator and enemy.health > 0 and enemy.health < enemy.max_health:
+			var gpulse: float = 0.4 + 0.35 * (0.5 + 0.5 * sin(float(now_ms) * 0.01))
+			canvas.draw_arc(pos, r + 3.0, 0.0, TAU, 36, Color(0.3, 1.0, 0.5, gpulse), 2.0, true)
 
 func _draw_overlay_on(canvas: CanvasItem) -> void:
 	if game_state == null: return
 	var now_ms: int = Time.get_ticks_msec()
 	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 
+	_draw_boss_telegraphs(canvas, shake, now_ms)
 	_draw_health_bars(canvas, shake)
 	_draw_tower_badges(canvas, now_ms, shake)
 

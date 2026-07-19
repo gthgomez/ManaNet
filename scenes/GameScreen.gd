@@ -9,6 +9,7 @@ const _MAPS := preload("res://data/maps.gd")
 const _TT   := preload("res://data/tower_types.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _UP   := preload("res://data/upgrade_paths.gd")
 const _MAP_BG_PATHS: Dictionary = {
 	0: "res://assets/sprites/maps/map_bg_s_curve.jpg",
@@ -60,6 +61,7 @@ var _placement_cancel_btn: Button = null
 var _top_bar: HBoxContainer = null
 var _speed_bar: HBoxContainer = null
 var _shop_bar: HBoxContainer = null
+var _shop_scroll: ScrollContainer = null
 var _modifier_badge: Label = null
 var _active_modifier_id: String = ""
 var _placement_confirm_bar: HBoxContainer = null
@@ -237,12 +239,12 @@ func _build_hud() -> void:
 	_top_bar.add_child(_wave_label)
 
 	_lives_label = Label.new()
-	_lives_label.text = "Lives: 10"
+	_lives_label.text = _BRAND.integrity(10)
 	_THEME.apply_label(_lives_label, "body")
 	_top_bar.add_child(_lives_label)
 
 	_gold_label = Label.new()
-	_gold_label.text = "Credits: 300"
+	_gold_label.text = _BRAND.credits(300)
 	_THEME.apply_label(_gold_label, "currency")
 	_top_bar.add_child(_gold_label)
 
@@ -275,7 +277,7 @@ func _build_hud() -> void:
 
 	# ---- Wave button ----
 	_wave_btn = Button.new()
-	_wave_btn.text = "Start Wave"
+	_wave_btn.text = _BRAND.START_WAVE
 	_wave_btn.custom_minimum_size = Vector2(210.0, _LAYOUT.min_touch_height(true))
 	_wave_btn.z_index = _Z_WAVE_BUTTON
 	_THEME.apply_button(_wave_btn, "primary")
@@ -366,11 +368,17 @@ func _build_hud() -> void:
 	_target_btn.pressed.connect(_on_target_pressed)
 	act_row.add_child(_target_btn)
 
-	# ---- Shop strip ----
+	# ---- Shop strip (ScrollContainer when cards exceed phone width) ----
+	_shop_scroll = ScrollContainer.new()
+	_shop_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_shop_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_shop_scroll.z_index = _Z_SHOP_BAR
+	hud_layer.add_child(_shop_scroll)
+
 	_shop_bar = HBoxContainer.new()
 	_shop_bar.add_theme_constant_override("separation", 6)
-	_shop_bar.z_index = _Z_SHOP_BAR
-	hud_layer.add_child(_shop_bar)
+	_shop_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shop_scroll.add_child(_shop_bar)
 
 	for ttype in _TT.TOWER_TYPES_LIST:
 		var info: Dictionary = _TT.TOWER_TYPES[ttype]
@@ -392,7 +400,7 @@ func _build_hud() -> void:
 		shop_vbox.add_child(name_lbl)
 		_shop_name_labels[ttype] = name_lbl
 		var cost_lbl := Label.new()
-		cost_lbl.text = "%dg" % info["cost"]
+		cost_lbl.text = _BRAND.credits_amount_suffix(int(info["cost"]))
 		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cost_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_THEME.apply_label(cost_lbl, "currency")
@@ -449,7 +457,7 @@ func _build_hud() -> void:
 	
 	_instruction_label = Label.new()
 	_instruction_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_instruction_label.text = "Pick a tower to begin defense"
+	_instruction_label.text = _BRAND.INSTRUCTION_PICK_TOWER
 	_instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_instruction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -727,14 +735,14 @@ func _show_wave_shop(now_ms: int) -> void:
 
 	var is_milestone: bool = game_state.wave in [5, 10, 15]
 	var title := Label.new()
-	title.text = "BOSS CLEARED - CHOOSE A BONUS" if is_milestone else "CHOOSE A BONUS BEFORE WAVE %d" % game_state.wave
+	title.text = _BRAND.wave_shop_header(game_state.wave, is_milestone)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2) if is_milestone else _THEME.GOLD)
 	title.add_theme_font_size_override("font_size", 17)
 	vbox.add_child(title)
 
 	var help := Label.new()
-	help.text = "Pick one card, or skip the bonus to continue."
+	help.text = _BRAND.WAVE_SHOP_HELP
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help.add_theme_color_override("font_color", _PANEL_MUTED)
 	help.add_theme_font_size_override("font_size", 12)
@@ -809,7 +817,7 @@ func _show_wave_shop(now_ms: int) -> void:
 		card_btns.append(card_btn)
 
 	var skip_btn := Button.new()
-	skip_btn.text = "Skip Bonus - Start Wave %d" % game_state.wave
+	skip_btn.text = _BRAND.skip_bonus_start_wave(game_state.wave)
 	skip_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(true))
 	_apply_button_readability(skip_btn)
 	skip_btn.pressed.connect(_on_wave_shop_skip.bind(now_ms))
@@ -885,35 +893,48 @@ func _apply_responsive_layout() -> void:
 		if lbl:
 			lbl.add_theme_font_size_override("font_size", top_font)
 
-	# Shop strip: fit within the game world width with side margins, min 6 towers visible
+	# Shop strip: fit within viewport; horizontal scroll when 6 towers exceed width
 	var tower_count: int = max(1, _shop_btns.size())
 	var gap_count: int = max(0, tower_count - 1)
 	var shop_sep: float = 6.0
 	var compact_shop: bool = viewport.y < 620.0 or _LAYOUT.shop_strip_needs_compaction(viewport, tower_count)
-	var preferred_card_w: float = 106.0 if compact_shop else 126.0
-	var min_card_w: float = 76.0 if compact_shop else 92.0
+	var preferred_card_w: float = 100.0 if compact_shop else 120.0
+	var min_card_w: float = 72.0 if compact_shop else 88.0
 	var shop_h: float = 76.0 if compact_shop else 88.0
 	var shop_max_w: float = minf(viewport.x - margin * 2.0, _world_rect.size.x - margin * 2.0)
-	var min_shop_w: float = float(tower_count) * min_card_w + float(gap_count) * shop_sep
-	var preferred_shop_w: float = float(tower_count) * preferred_card_w + float(gap_count) * shop_sep
-	var shop_w: float = minf(preferred_shop_w, shop_max_w)
-	shop_w = maxf(shop_w, min_shop_w)
-	var card_w: float = floor((shop_w - float(gap_count) * shop_sep) / float(tower_count))
+	var preferred_content_w: float = float(tower_count) * preferred_card_w + float(gap_count) * shop_sep
+	var min_content_w: float = float(tower_count) * min_card_w + float(gap_count) * shop_sep
+	var needs_scroll: bool = min_content_w > shop_max_w + 1.0
+	var shop_w: float = shop_max_w if needs_scroll else minf(preferred_content_w, shop_max_w)
+	var card_w: float
+	if needs_scroll:
+		card_w = min_card_w
+	else:
+		card_w = floor((shop_w - float(gap_count) * shop_sep) / float(tower_count))
+		card_w = maxf(card_w, min_card_w)
 	var card_h: float = shop_h
 	var shop_x: float = (viewport.x - shop_w) * 0.5
 	var shop_y: float = viewport.y - _LAYOUT.bottom_margin(viewport) - shop_h
 	_shop_bar.add_theme_constant_override("separation", int(shop_sep))
 	for ttype in _shop_btns.keys():
 		var shop_btn: Button = _shop_btns[ttype]
-		shop_btn.size_flags_horizontal = Control.SIZE_FILL
+		shop_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN if needs_scroll else Control.SIZE_FILL
 		shop_btn.custom_minimum_size = Vector2(card_w, card_h)
 		if ttype in _shop_name_labels:
 			var name_lbl: Label = _shop_name_labels[ttype]
-			name_lbl.add_theme_font_size_override("font_size", 11 if compact_shop else 13)
+			name_lbl.add_theme_font_size_override("font_size", 10 if compact_shop or needs_scroll else 13)
 		if ttype in _shop_cost_labels:
 			var cost_lbl: Label = _shop_cost_labels[ttype]
-			cost_lbl.add_theme_font_size_override("font_size", 12 if compact_shop else 14)
-	_LAYOUT.apply_rect(_shop_bar, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
+			cost_lbl.add_theme_font_size_override("font_size", 11 if compact_shop or needs_scroll else 14)
+	var content_w: float = float(tower_count) * card_w + float(gap_count) * shop_sep
+	_shop_bar.custom_minimum_size = Vector2(content_w if needs_scroll else shop_w, shop_h)
+	if _shop_scroll != null:
+		_shop_scroll.horizontal_scroll_mode = (
+			ScrollContainer.SCROLL_MODE_SHOW_ALWAYS if needs_scroll else ScrollContainer.SCROLL_MODE_DISABLED
+		)
+		_LAYOUT.apply_rect(_shop_scroll, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
+	else:
+		_LAYOUT.apply_rect(_shop_bar, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
 
 	# Wave button: docked flush to top of shop strip, visually grouped
 	var wave_size: Vector2 = Vector2(clampf(viewport.x * 0.23, 180.0, 240.0), _LAYOUT.min_touch_height(true))
@@ -947,7 +968,7 @@ func _apply_responsive_layout() -> void:
 	_raise_visible_modal_controls()
 
 func _raise_core_hud_controls() -> void:
-	for node in [_wave_btn, _shop_bar, _instruction_banner, _placement_confirm_bar]:
+	for node in [_wave_btn, _shop_scroll if _shop_scroll != null else _shop_bar, _instruction_banner, _placement_confirm_bar]:
 		if node != null and node.get_parent() == hud_layer:
 			hud_layer.move_child(node, hud_layer.get_child_count() - 1)
 
@@ -1066,8 +1087,11 @@ func _process(_delta: float) -> void:
 	if game_state.lives < _prev_lives:
 		var lost: int = _prev_lives - game_state.lives
 		view_state.start_screen_shake(now_ms, 7.0, 400)
-		var life_word: String = "Life" if lost == 1 else "%d Lives" % lost
-		view_state.show_toast("%s lost - %d left" % [life_word, game_state.lives], now_ms, 1200)
+		view_state.show_toast(
+			"%s — %d left" % [_BRAND.life_lost_toast(lost), game_state.lives],
+			now_ms,
+			1200
+		)
 	_prev_lives = game_state.lives
 
 	view_state.tick(now_ms)
@@ -1105,12 +1129,14 @@ func _update_hud(now_ms: int) -> void:
 			_wave_progress_bar.value = ratio
 			_apply_wave_progress_style(ratio)
 
-	if _lives_label.text != "Lives: %d" % game_state.lives:
-		_lives_label.text = "Lives: %d" % game_state.lives
+	var lives_txt: String = _BRAND.integrity(game_state.lives)
+	if _lives_label.text != lives_txt:
+		_lives_label.text = lives_txt
 		_juice_label(_lives_label)
-		
-	if _gold_label.text != "Credits: %d" % game_state.gold:
-		_gold_label.text  = "Credits: %d" % game_state.gold
+
+	var gold_txt: String = _BRAND.credits(game_state.gold)
+	if _gold_label.text != gold_txt:
+		_gold_label.text = gold_txt
 		_juice_label(_gold_label)
 
 	var sel: Tower = game_state.get_tower_by_id(view_state.selected_tower_id) if view_state.selected_tower_id >= 0 else null
@@ -1131,13 +1157,13 @@ func _update_hud(now_ms: int) -> void:
 			_instruction_label.text = view_state.instruction_banner
 		elif game_state.towers.size() == 0 and not view_state.placement_active:
 			_instruction_banner.visible = true
-			_instruction_label.text = "CHOOSE A TOWER TO BEGIN DEFENSE"
+			_instruction_label.text = _BRAND.INSTRUCTION_CHOOSE_TOWER
 		elif view_state.placement_active:
 			_instruction_banner.visible = true
 			_instruction_label.text = _placement_hint_text()
 		elif game_state.wave_ready and game_state.wave == 1 and game_state.enemies.size() == 0:
 			_instruction_banner.visible = true
-			_instruction_label.text = "START WAVE WHEN READY"
+			_instruction_label.text = _BRAND.INSTRUCTION_START_WAVE
 		else:
 			_instruction_banner.visible = false
 
@@ -1147,7 +1173,9 @@ func _update_hud(now_ms: int) -> void:
 	var toast: String = view_state.get_toast(now_ms)
 	_msg_label.text = toast if toast != "" else game_state.last_message
 
-	if _shop_bar != null:
+	if _shop_scroll != null:
+		_shop_scroll.visible = not blocking_menu_visible
+	elif _shop_bar != null:
 		_shop_bar.visible = not blocking_menu_visible
 
 	# Wave button visibility
@@ -1222,7 +1250,7 @@ func _update_hud(now_ms: int) -> void:
 	if _pause_modal:
 		_pause_modal.visible = pause_visible
 		if pause_visible:
-			_pause_title.text = "Paused  |  Wave %d  Lives %d  Credits %d" % [game_state.wave, game_state.lives, game_state.gold]
+			_pause_title.text = _BRAND.pause_status(game_state.wave, game_state.lives, game_state.gold)
 			if view_state.confirm_restart:
 				var elapsed_ms: int = now_ms - _restart_confirm_start_ms
 				var remaining_s: int = maxi(0, 4 - elapsed_ms / 1000)

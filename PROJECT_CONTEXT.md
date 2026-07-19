@@ -11,6 +11,8 @@ This file is the agent-neutral project context. `CLAUDE.md` is a Claude adapter;
 **Ship A** in the locked 90-day mobile program: `C:\Workspace\Project_Games\SHIP_PROGRAM_90_DAY.md`.  
 Parallel polish with SimLife (Ship B). Prefer open polish items in `IMPROVEMENT_PLAN.md` (#7 finish, #8 bosses, #9 Cannon, #12 Map 3, #13 variants). **Skip #14 Fire TV** for this program.
 
+**Identity:** `docs/IDENTITY_AND_UX_DIRECTION.md` + `ui/theme/BrandCopy.gd` — network defense fantasy; player terms: Credits, Integrity, Shards, Cyber-Deck, Patches.
+
 ## Startup Sequence
 
 1. Read workspace root `ENGINEERING.md`.
