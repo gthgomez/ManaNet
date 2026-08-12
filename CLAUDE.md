@@ -1,6 +1,6 @@
 # CLAUDE.md — godot_td (Tower Defense)
 
-Godot 4 port of the Python/Kivy tower-defense game (`td_v712`). The original Kivy implementation lives at `C:\Workspace\Project_Games\TowerDefenseKivy\` and is the reference for game rules and progression. See `docs/GODOT_PORT_PLAN.md` for the port strategy.
+Godot 4 port of the Python/Kivy tower-defense game (`TowerDefenseKivy`). The original Kivy implementation lives at `C:\Workspace\Project_Games\TowerDefenseKivy\` and is the reference for game rules and progression. See `docs/GODOT_PORT_PLAN.md` for the port strategy.
 
 ## Startup Sequence
 
@@ -51,5 +51,5 @@ godot_td/
 
 - `simulation/` must stay UI-free — no Node references, no scene coupling.
 - `SimulationBot.gd` is the headless test harness; use it to verify balance changes before touching UI.
-- When porting logic from `td_v712/`, read the Kivy source first, then translate — don't invent new mechanics without user approval.
-- Upgrade paths and RP system are defined in `td_v712/` progression layer; port faithfully.
+- When porting logic from `TowerDefenseKivy/`, read the Kivy source first, then translate — don't invent new mechanics without user approval.
+- Upgrade paths and RP system are defined in `TowerDefenseKivy/` progression layer; port faithfully.

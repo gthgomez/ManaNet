@@ -148,7 +148,12 @@ const TOWER_VARIANTS: Array = [
 var _profile: Dictionary = {}
 const _SAVE_PATH: String = "user://td_progression.json"
 const _TMP_PATH:  String = "user://td_progression.tmp"
-const _LEGACY_DESKTOP_SAVE: String = "res://../td_v712/td_progression.json"
+# Legacy desktop save from the Kivy predecessor (TowerDefenseKivy writes
+# td_progression.json at its repo root as the desktop fallback). res://../
+# is not portable, so resolve the sibling project path absolutely; on Android
+# exports the file simply does not exist and file_exists() returns false.
+func _legacy_desktop_save_path() -> String:
+	return ProjectSettings.globalize_path("res://") + "../TowerDefenseKivy/td_progression.json"
 
 # Transient: map id chosen on MapSelectScreen, read by GameScreen on load
 var pending_map_id: int = 0
@@ -220,7 +225,7 @@ func load_profile() -> Dictionary:
 		_profile = loaded
 		return _profile
 
-	var migrated := _read_profile_file(_LEGACY_DESKTOP_SAVE)
+	var migrated := _read_profile_file(_legacy_desktop_save_path())
 	if not migrated.is_empty():
 		_profile = migrated
 		_profile["engine"] = "godot"
