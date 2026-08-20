@@ -75,6 +75,8 @@ var _info_auto_paused: bool = false
 var _tower_stats_label: Label = null
 var _wave_progress_bar: ProgressBar = null
 var _wave_shop_modal: PanelContainer = null
+var _wave_shop_scroll: ScrollContainer = null
+var _wave_shop_desired: Vector2 = Vector2(520.0, 320.0)
 var _restart_confirm_start_ms: int = 0
 var _restart_confirm_bar: ProgressBar = null
 var _world_rect: Rect2 = Rect2(Vector2.ZERO, _LAYOUT.BASE_SIZE)
@@ -485,7 +487,8 @@ func _build_hud() -> void:
 func _build_promotion_modal() -> void:
 	_promotion_modal = PanelContainer.new()
 	_promotion_modal.visible = false
-	_promotion_modal.custom_minimum_size = Vector2(330.0, 150.0)
+	_promotion_modal.custom_minimum_size = Vector2.ZERO
+	_promotion_modal.clip_contents = true
 	_promotion_modal.z_index = _Z_MODAL
 	_promotion_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	_THEME.apply_panel(_promotion_modal, "modal")
@@ -525,7 +528,8 @@ func _build_promotion_modal() -> void:
 func _build_pause_modal() -> void:
 	_pause_modal = PanelContainer.new()
 	_pause_modal.visible = false
-	_pause_modal.custom_minimum_size = Vector2(330.0, 300.0)
+	_pause_modal.custom_minimum_size = Vector2.ZERO
+	_pause_modal.clip_contents = true
 	_pause_modal.z_index = _Z_MODAL
 	_pause_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	_THEME.apply_panel(_pause_modal, "modal")
@@ -598,9 +602,12 @@ func _build_pause_modal() -> void:
 	vbox.add_child(_placement_confirm_toggle_btn)
 
 func _build_placement_confirm_modal() -> void:
+	# Built for potential future / accessibility, but P0 uses only the floating bar
+	# so confirm UI never double-stacks over the map on short phone viewports.
 	_placement_confirm_modal = PanelContainer.new()
 	_placement_confirm_modal.visible = false
-	_placement_confirm_modal.custom_minimum_size = Vector2(300.0, 120.0)
+	_placement_confirm_modal.custom_minimum_size = Vector2.ZERO
+	_placement_confirm_modal.clip_contents = true
 	_placement_confirm_modal.z_index = _Z_MODAL
 	_placement_confirm_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	_THEME.apply_panel(_placement_confirm_modal, "modal")
@@ -640,7 +647,8 @@ func _build_placement_confirm_modal() -> void:
 func _build_wave_shop_modal() -> void:
 	_wave_shop_modal = PanelContainer.new()
 	_wave_shop_modal.visible = false
-	_wave_shop_modal.custom_minimum_size = Vector2(580.0, 300.0)
+	_wave_shop_modal.custom_minimum_size = Vector2.ZERO
+	_wave_shop_modal.clip_contents = true
 	_wave_shop_modal.z_index = _Z_MODAL
 	_wave_shop_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	_THEME.apply_panel(_wave_shop_modal, "modal")
@@ -714,14 +722,34 @@ func _show_wave_shop(now_ms: int) -> void:
 	# Rebuild content each time
 	for child in _wave_shop_modal.get_children():
 		child.queue_free()
+	_wave_shop_scroll = null
 
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
 	var card_columns: int = _LAYOUT.wave_shop_card_columns(viewport)
 	var card_min: Vector2 = _LAYOUT.wave_shop_card_min_size()
+	_wave_shop_desired = _LAYOUT.wave_shop_desired_size(viewport, self)
+
+	# Chrome heights are fixed so the scroll region can be hard-capped (prevents
+	# PanelContainer min-size growth that overflowed short phone landscapes).
+	var m_side: int = 12 if card_columns < 3 else 14
+	var m_top: int = 8 if card_columns < 3 else 10
+	var vbox_sep: int = 6 if card_columns < 3 else 8
+	var title_font: int = 15 if _LAYOUT.is_short_height(viewport) else 17
+	var help_font: int = 11 if _LAYOUT.is_short_height(viewport) else 12
+	var title_h: float = float(title_font + 6)
+	var help_h: float = float(help_font + 6)
+	var skip_h: float = _LAYOUT.min_touch_height(true)
+	var chrome_h: float = float(m_top * 2) + title_h + help_h + skip_h + float(vbox_sep * 3)
+	var scroll_h: float = maxf(96.0, _wave_shop_desired.y - chrome_h)
+	var card_h: float
+	if card_columns > 1:
+		card_h = minf(168.0, maxf(card_min.y + 12.0, scroll_h - 8.0))
+	else:
+		card_h = minf(180.0, maxf(120.0, scroll_h * 0.42))
 
 	var margin := MarginContainer.new()
-	var m_side := 18 if card_columns == 3 else 12
-	var m_top  := 16 if card_columns == 3 else 8
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_theme_constant_override("margin_left", m_side)
 	margin.add_theme_constant_override("margin_top", m_top)
 	margin.add_theme_constant_override("margin_right", m_side)
@@ -729,7 +757,8 @@ func _show_wave_shop(now_ms: int) -> void:
 	_wave_shop_modal.add_child(margin)
 
 	var vbox := VBoxContainer.new()
-	var vbox_sep := 16 if card_columns == 3 else 6
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", vbox_sep)
 	margin.add_child(vbox)
 
@@ -738,14 +767,16 @@ func _show_wave_shop(now_ms: int) -> void:
 	title.text = _BRAND.wave_shop_header(game_state.wave, is_milestone)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2) if is_milestone else _THEME.GOLD)
-	title.add_theme_font_size_override("font_size", 17)
+	title.add_theme_font_size_override("font_size", title_font)
+	title.custom_minimum_size = Vector2(0.0, title_h)
 	vbox.add_child(title)
 
 	var help := Label.new()
 	help.text = _BRAND.WAVE_SHOP_HELP
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help.add_theme_color_override("font_color", _PANEL_MUTED)
-	help.add_theme_font_size_override("font_size", 12)
+	help.add_theme_font_size_override("font_size", help_font)
+	help.custom_minimum_size = Vector2(0.0, help_h)
 	vbox.add_child(help)
 
 	var _CARDS := preload("res://data/wave_shop_cards.gd")
@@ -753,19 +784,22 @@ func _show_wave_shop(now_ms: int) -> void:
 	var drawn: Array = _CARDS.draw_cards(pool, 3, game_state.wave)
 
 	var scroll := ScrollContainer.new()
+	_wave_shop_scroll = scroll
 	scroll.scroll_deadzone = 12
 	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size = Vector2(0.0, 144.0 if card_columns < 3 else 126.0)
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.custom_minimum_size = Vector2(0.0, scroll_h)
+	scroll.clip_contents = true
 	vbox.add_child(scroll)
 
 	var card_grid := GridContainer.new()
 	card_grid.mouse_filter = Control.MOUSE_FILTER_PASS
 	card_grid.columns = card_columns
-	card_grid.add_theme_constant_override("h_separation", 12)
-	card_grid.add_theme_constant_override("v_separation", 12)
+	card_grid.add_theme_constant_override("h_separation", 10)
+	card_grid.add_theme_constant_override("v_separation", 10)
 	card_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(card_grid)
 
@@ -773,43 +807,47 @@ func _show_wave_shop(now_ms: int) -> void:
 	for card in drawn:
 		var card_panel := PanelContainer.new()
 		card_panel.mouse_filter = Control.MOUSE_FILTER_PASS
-		card_panel.custom_minimum_size = Vector2(card_min.x, maxf(card_min.y + 20.0, 120.0))
+		card_panel.custom_minimum_size = Vector2(minf(card_min.x, 150.0), card_h)
 		card_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card_panel.clip_contents = true
 		_THEME.apply_panel(card_panel, "card")
 		card_grid.add_child(card_panel)
 
 		var card_margin := MarginContainer.new()
 		card_margin.mouse_filter = Control.MOUSE_FILTER_PASS
-		card_margin.add_theme_constant_override("margin_left", 10)
-		card_margin.add_theme_constant_override("margin_top", 8)
-		card_margin.add_theme_constant_override("margin_right", 10)
-		card_margin.add_theme_constant_override("margin_bottom", 8)
+		card_margin.add_theme_constant_override("margin_left", 8)
+		card_margin.add_theme_constant_override("margin_top", 6)
+		card_margin.add_theme_constant_override("margin_right", 8)
+		card_margin.add_theme_constant_override("margin_bottom", 6)
 		card_panel.add_child(card_margin)
 
 		var card_vbox := VBoxContainer.new()
 		card_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
-		card_vbox.add_theme_constant_override("separation", 6)
+		card_vbox.add_theme_constant_override("separation", 4)
 		card_margin.add_child(card_vbox)
 
 		var card_title := Label.new()
 		card_title.text = "%s %s" % [card.get("icon", ""), card["label"]]
 		card_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		card_title.max_lines_visible = 2
 		card_title.add_theme_color_override("font_color", _PANEL_TEXT)
-		card_title.add_theme_font_size_override("font_size", 14)
+		card_title.add_theme_font_size_override("font_size", 13 if _LAYOUT.is_short_height(viewport) else 14)
 		card_vbox.add_child(card_title)
 
 		var card_desc := Label.new()
 		card_desc.text = card["desc"]
 		card_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		card_desc.max_lines_visible = 4 if card_columns == 1 else 3
 		card_desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		card_desc.add_theme_color_override("font_color", _PANEL_MUTED)
-		card_desc.add_theme_font_size_override("font_size", 12)
+		card_desc.add_theme_font_size_override("font_size", 11 if _LAYOUT.is_short_height(viewport) else 12)
 		card_vbox.add_child(card_desc)
 
 		var card_btn := Button.new()
 		card_btn.text = "Choose"
 		card_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
 		card_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card_btn.size_flags_vertical = Control.SIZE_SHRINK_END
 		_THEME.apply_button(card_btn, "primary")
 		card_btn.add_theme_font_size_override("font_size", 12)
 		card_btn.pressed.connect(_on_wave_shop_pick.bind(card["id"], now_ms))
@@ -818,23 +856,16 @@ func _show_wave_shop(now_ms: int) -> void:
 
 	var skip_btn := Button.new()
 	skip_btn.text = _BRAND.skip_bonus_start_wave(game_state.wave)
-	skip_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(true))
+	skip_btn.custom_minimum_size = Vector2(0.0, skip_h)
+	skip_btn.size_flags_vertical = Control.SIZE_SHRINK_END
 	_apply_button_readability(skip_btn)
 	skip_btn.pressed.connect(_on_wave_shop_skip.bind(now_ms))
 	vbox.add_child(skip_btn)
 
-	var desired_w: float = 640.0
-	if card_columns == 1:
-		desired_w = 340.0
-	elif card_columns == 2:
-		desired_w = 500.0
-
-	var desired_h: float = 320.0 if card_columns < 3 else 280.0
-	_layout_modal(_wave_shop_modal, Vector2(desired_w, desired_h))
+	_layout_modal(_wave_shop_modal, _wave_shop_desired)
 	_wave_shop_modal.visible = true
 	_raise_visible_modal_controls()
 	JuiceManager.play(JuiceManager.SFX.WAVE_SHOP_OPEN)
-	# Wire card buttons horizontally and focus the first; skip_btn is reachable via down
 	FocusManager.setup_dpad_neighbors(card_btns, false)
 	if not card_btns.is_empty():
 		for cb in card_btns:
@@ -881,11 +912,17 @@ func _apply_responsive_layout() -> void:
 	renderer.position = _world_rect.position
 	renderer.scale = Vector2(_world_scale, _world_scale)
 
-	var margin: float = _LAYOUT.edge_margin(viewport)
-	var top: float = _LAYOUT.top_margin(viewport)
+	var margins: Dictionary = _LAYOUT.content_margins(viewport, self)
+	var margin_l: float = float(margins["left"])
+	var margin_r: float = float(margins["right"])
+	var top: float = float(margins["top"])
+	var bottom: float = float(margins["bottom"])
+	var margin: float = maxf(margin_l, margin_r)
 	var top_bar_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.074)
-	_LAYOUT.apply_rect(_top_bar, Rect2(Vector2(margin, top), Vector2(maxf(0.0, viewport.x - margin * 2.0), top_bar_h)))
-	_LAYOUT.apply_rect(_speed_bar, Rect2(Vector2(margin, top + top_bar_h + 6.0), Vector2(166.0, _LAYOUT.min_touch_height(false))))
+	if _LAYOUT.is_short_height(viewport):
+		top_bar_h = maxf(_LAYOUT.min_touch_height(false), minf(top_bar_h, 44.0))
+	_LAYOUT.apply_rect(_top_bar, Rect2(Vector2(margin_l, top), Vector2(maxf(0.0, viewport.x - margin_l - margin_r), top_bar_h)))
+	_LAYOUT.apply_rect(_speed_bar, Rect2(Vector2(margin_l, top + top_bar_h + 6.0), Vector2(166.0, _LAYOUT.min_touch_height(false))))
 
 	# Scale font sizes with viewport height so they stay readable at all sizes
 	var top_font: int = int(clampf(viewport.y * 0.026, 13.0, 18.0))
@@ -901,7 +938,7 @@ func _apply_responsive_layout() -> void:
 	var preferred_card_w: float = 100.0 if compact_shop else 120.0
 	var min_card_w: float = 72.0 if compact_shop else 88.0
 	var shop_h: float = 76.0 if compact_shop else 88.0
-	var shop_max_w: float = minf(viewport.x - margin * 2.0, _world_rect.size.x - margin * 2.0)
+	var shop_max_w: float = minf(viewport.x - margin_l - margin_r, _world_rect.size.x - margin * 2.0)
 	var preferred_content_w: float = float(tower_count) * preferred_card_w + float(gap_count) * shop_sep
 	var min_content_w: float = float(tower_count) * min_card_w + float(gap_count) * shop_sep
 	var needs_scroll: bool = min_content_w > shop_max_w + 1.0
@@ -913,8 +950,8 @@ func _apply_responsive_layout() -> void:
 		card_w = floor((shop_w - float(gap_count) * shop_sep) / float(tower_count))
 		card_w = maxf(card_w, min_card_w)
 	var card_h: float = shop_h
-	var shop_x: float = (viewport.x - shop_w) * 0.5
-	var shop_y: float = viewport.y - _LAYOUT.bottom_margin(viewport) - shop_h
+	var shop_x: float = margin_l + (viewport.x - margin_l - margin_r - shop_w) * 0.5
+	var shop_y: float = viewport.y - bottom - shop_h
 	_shop_bar.add_theme_constant_override("separation", int(shop_sep))
 	for ttype in _shop_btns.keys():
 		var shop_btn: Button = _shop_btns[ttype]
@@ -947,23 +984,28 @@ func _apply_responsive_layout() -> void:
 
 	# Position modifier badge right of speed bar if present
 	if _modifier_badge != null:
-		var badge_x: float = margin + 166.0 + 8.0
+		var badge_x: float = margin_l + 166.0 + 8.0
 		var badge_y: float = top + top_bar_h + 9.0
 		_modifier_badge.position = Vector2(badge_x, badge_y)
 
 	# Instruction banner: centered below top bar
 	if _instruction_banner != null:
-		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin * 2.0))
-		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) else 52.0
-		var banner_font: int = int(clampf(viewport.y * 0.032, 15.0, 20.0))
+		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin_l - margin_r))
+		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport) else 52.0
+		var banner_font: int = int(clampf(viewport.y * 0.032, 14.0, 20.0))
 		_instruction_label.add_theme_font_size_override("font_size", banner_font)
-		_LAYOUT.apply_rect(_instruction_banner, Rect2(Vector2((viewport.x - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
+		_LAYOUT.apply_rect(_instruction_banner, Rect2(Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
 
 	_layout_tower_panel(null)
 
 	_layout_modal(_promotion_modal, Vector2(360.0, 160.0))
 	_layout_modal(_pause_modal, Vector2(400.0, 360.0))
-	_layout_modal(_placement_confirm_modal, Vector2(360.0, 146.0))
+	# Placement confirm modal is intentionally not shown (floating bar only).
+	if _placement_confirm_modal != null:
+		_placement_confirm_modal.visible = false
+	if _wave_shop_modal != null and _wave_shop_modal.visible:
+		_wave_shop_desired = _LAYOUT.wave_shop_desired_size(viewport, self)
+		_layout_modal(_wave_shop_modal, _wave_shop_desired)
 	_raise_core_hud_controls()
 	_raise_visible_modal_controls()
 
@@ -995,8 +1037,11 @@ static func _mod_short_name(mod_id: String) -> String:
 func _layout_modal(panel: PanelContainer, desired_size: Vector2) -> void:
 	if panel == null:
 		return
-	var rect: Rect2 = _LAYOUT.modal_rect(_LAYOUT.viewport_size(self), desired_size)
-	_LAYOUT.apply_rect(panel, rect)
+	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	# Center over the playfield when present so letterbox gutters don't pull modals off-map.
+	var center_on: Rect2 = _world_rect if _world_rect.size.x > 1.0 and _world_rect.size.y > 1.0 else Rect2()
+	var rect: Rect2 = _LAYOUT.modal_rect(viewport, desired_size, self, center_on)
+	_LAYOUT.apply_modal(panel, rect)
 
 func _screen_to_world(pos: Vector2) -> Vector2:
 	if _world_scale <= 0.0:
@@ -1010,24 +1055,28 @@ func _layout_tower_panel(selected: Tower) -> void:
 	if _tower_panel == null:
 		return
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	var margin: float = _LAYOUT.edge_margin(viewport)
-	var top: float = _LAYOUT.top_margin(viewport)
-	var bottom: float = _LAYOUT.bottom_margin(viewport)
-	# INCREASED SIZE: 220px height for better mobile touch targets
-	var size: Vector2 = Vector2(minf(460.0, maxf(340.0, viewport.x - margin * 2.0)), 220.0)
+	var margins: Dictionary = _LAYOUT.content_margins(viewport, self)
+	var margin_l: float = float(margins["left"])
+	var margin_r: float = float(margins["right"])
+	var top: float = float(margins["top"])
+	var bottom: float = float(margins["bottom"])
+	var panel_h: float = 220.0
+	if _LAYOUT.is_short_height(viewport) or _LAYOUT.is_phone_ultrawide(viewport):
+		panel_h = 168.0
+	var size: Vector2 = Vector2(minf(460.0, maxf(300.0, viewport.x - margin_l - margin_r)), panel_h)
 	var shop_y: float = viewport.y - bottom - 92.0
 	var low_y: float = maxf(top + 102.0, shop_y - size.y - 12.0)
 	var high_y: float = top + 102.0
-	var x: float = margin
+	var x: float = margin_l
 	var y: float = low_y
 
 	if selected != null:
 		var selected_screen: Vector2 = _world_to_screen(selected.pos)
-		x = margin if selected_screen.x > viewport.x * 0.5 else viewport.x - margin - size.x
+		x = margin_l if selected_screen.x > viewport.x * 0.5 else viewport.x - margin_r - size.x
 		y = high_y if selected_screen.y > viewport.y * 0.52 else low_y
 		y = clampf(y, top + 92.0, maxf(top + 92.0, shop_y - size.y - 8.0))
 	else:
-		x = viewport.x - margin - size.x
+		x = viewport.x - margin_r - size.x
 		y = low_y
 
 	_LAYOUT.apply_rect(_tower_panel, Rect2(Vector2(x, y), size))
@@ -1279,22 +1328,15 @@ func _update_hud(now_ms: int) -> void:
 			_dpad_return_focus()
 		_dpad_pause_open = pause_visible
 
+	# P0: floating confirm bar only — keep center modal hidden so it never stacks over the map.
 	if _placement_confirm_modal:
-		_placement_confirm_modal.visible = has_pending
-		if has_pending:
-			var pos: Vector2 = view_state.pending_placement_pos
-			var name: String = _TT.TOWER_TYPES.get(view_state.pending_placement_type, {}).get("name", "Tower")
-			if view_state.pending_placement_valid:
-				_placement_confirm_title.text = "Place %s at (%d, %d)?" % [name, int(pos.x), int(pos.y)]
-			else:
-				var check: Array = _placement_check(pos, view_state.pending_placement_type)
-				_placement_confirm_title.text = "Cannot place %s: %s" % [name, _placement_reason_hint(str(check[1]))]
-			_placement_confirm_btn.disabled = not view_state.pending_placement_valid
-		if has_pending and not _dpad_place_open:
-			_placement_confirm_btn.grab_focus()
-		elif not has_pending and _dpad_place_open:
-			_dpad_return_focus()
-		_dpad_place_open = has_pending
+		_placement_confirm_modal.visible = false
+	if has_pending and not _dpad_place_open:
+		if _confirm_placement_btn != null:
+			_confirm_placement_btn.grab_focus()
+	elif not has_pending and _dpad_place_open:
+		_dpad_return_focus()
+	_dpad_place_open = has_pending
 
 	# Shop button affordability — block active menus, dim-only for unaffordable towers.
 	for ttype in _shop_btns:
@@ -1416,7 +1458,8 @@ func _placement_hint_text() -> String:
 	return "INVALID - %s" % _placement_reason_hint(str(check[1]))
 
 func _update_placement_confirm_bar() -> void:
-	if _placement_confirm_bar == null: return
+	if _placement_confirm_bar == null:
+		return
 	if view_state.has_pending_placement():
 		_placement_confirm_bar.visible = true
 		var pos: Vector2 = _world_to_screen(view_state.pending_placement_pos)
@@ -1424,10 +1467,14 @@ func _update_placement_confirm_bar() -> void:
 		if bar_size.x <= 1.0 or bar_size.y <= 1.0:
 			bar_size = _placement_confirm_bar.get_combined_minimum_size()
 		var viewport: Vector2 = _LAYOUT.viewport_size(self)
-		var margin: float = _LAYOUT.edge_margin(viewport)
+		var margins: Dictionary = _LAYOUT.content_margins(viewport, self)
+		var margin_l: float = float(margins["left"])
+		var margin_r: float = float(margins["right"])
+		var margin_t: float = float(margins["top"])
+		var margin_b: float = float(margins["bottom"])
 		var next_pos: Vector2 = pos + Vector2(-bar_size.x * 0.5, 40.0)
-		next_pos.x = clampf(next_pos.x, margin, maxf(margin, viewport.x - bar_size.x - margin))
-		next_pos.y = clampf(next_pos.y, margin, maxf(margin, viewport.y - bar_size.y - margin))
+		next_pos.x = clampf(next_pos.x, margin_l, maxf(margin_l, viewport.x - bar_size.x - margin_r))
+		next_pos.y = clampf(next_pos.y, margin_t, maxf(margin_t, viewport.y - bar_size.y - margin_b))
 		_placement_confirm_bar.position = next_pos
 		_confirm_placement_btn.disabled = not view_state.pending_placement_valid
 	else:

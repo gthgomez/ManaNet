@@ -66,8 +66,7 @@ export_presets.cfg
 *.tsbuildinfo
 *.js.map
 
-# Open-source safety hardening
-.secrets/
-secrets/
-credentials/
-tokens/
+# AGES test runs
+.agent-game/runs/
+.agent-game/evidence/
+.agent-game/quarantine/

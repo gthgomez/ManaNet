@@ -1,0 +1,41 @@
+schema_version: "2.0.0"
+scenario:
+  id: "insufficient_gold"
+  name: "ManaNet Insufficient Gold Failure Fixture"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+
+telemetry_mode: "full"
+screenshot_mode: "none"
+render_mode: "headless"
+
+steps:
+  - op: "launch"
+    entrypoint: "res://simulation/core/GameState.gd"
+  - op: "domain_action"
+    action: "place_tower"
+    params:
+      tower_type: "sniper"  # Sniper costs 150 gold; after placing 2 snipers (300-300=0), 3rd fails
+      pos: [200, 150]
+  - op: "domain_action"
+    action: "place_tower"
+    params:
+      tower_type: "sniper"
+      pos: [300, 150]
+  - op: "domain_action"
+    action: "place_tower"
+    params:
+      tower_type: "sniper"
+      pos: [400, 150]
+  - op: "checkpoint"
+    name: "after_attempts"
+  - op: "assert"
+    target: "telemetry.state_snapshot.player.gold"
+    operator: "equals"
+    value: 0
+  - op: "assert"
+    target: "telemetry.state_snapshot.towers_count"
+    operator: "equals"
+    value: 2

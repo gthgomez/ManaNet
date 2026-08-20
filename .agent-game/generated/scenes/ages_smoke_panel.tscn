@@ -1,0 +1,18 @@
+# AGES_SCENE_IR_GENERATED
+# source: C:/Workspace/Project_Games/ManaNet/.agent-game/scenes/ages_smoke_panel.scene.yaml
+# source_sha256: f7506ad2a5ca685bde9826e960475cb6254d4a19fe3dadbde1bfd4fb06c3be22
+# compiler_version: 6.0.0
+# generated_at: 2026-08-20T05:06:26.145479Z
+[gd_scene format=3]
+
+[node name="AgesSmokeRoot" type="Control"]
+anchors_preset = 15
+
+[node name="Label" type="Label" parent="."]
+text = "AGES Scene IR Smoke"
+position = Vector2(24, 24)
+
+[node name="Panel" type="Panel" parent="."]
+position = Vector2(24, 64)
+size = Vector2(200, 80)
+

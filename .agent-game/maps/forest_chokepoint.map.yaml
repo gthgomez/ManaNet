@@ -1,0 +1,49 @@
+# CLASSIFICATION: SYNTHETIC_VALIDATION_FIXTURE
+# Reference Map IR model used to validate Map IR schema, graph topology validation,
+# BFS reachability, build-zone overlap checks, and visual preview generation.
+schema_version: "1.0.0"
+
+map:
+  id: "forest_chokepoint"
+  name: "Forest Chokepoint (Tower Defense Reference Fixture)"
+  genre: "tower_defense"
+
+dimensions:
+  width: 28
+  height: 18
+
+tile_size:
+  width: 32
+  height: 32
+
+spawns:
+  - id: "enemy_spawn_west"
+    at: [0, 8]
+    direction: "east"
+
+goals:
+  - id: "crystal_base"
+    at: [27, 8]
+
+paths:
+  - id: "main_convoy"
+    points:
+      - [0, 8]
+      - [6, 8]
+      - [6, 14]
+      - [14, 14]
+      - [14, 4]
+      - [22, 4]
+      - [22, 8]
+      - [27, 8]
+
+blocked_regions:
+  - [0, 0, 27, 2]     # Dense northern treeline
+  - [0, 16, 27, 17]   # Southern deep river gorge
+  - [8, 6, 12, 12]    # Center rock massif
+
+build_zones:
+  - [2, 4, 4, 6]      # Western hill platform
+  - [8, 11, 12, 13]   # Southern river bend build site
+  - [16, 2, 20, 3]    # Northern cliff overhang
+  - [24, 6, 26, 7]    # Base defense rampart

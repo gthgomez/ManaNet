@@ -1,0 +1,40 @@
+schema_version: "2.0.0"
+scenario:
+  id: "deterministic_replay"
+  name: "ManaNet 100% Deterministic Replay Proof Fixture"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+
+telemetry_mode: "full"
+screenshot_mode: "none"
+render_mode: "headless"
+
+steps:
+  - op: "launch"
+    entrypoint: "res://simulation/core/GameState.gd"
+  - op: "checkpoint"
+    name: "initial"
+  - op: "domain_action"
+    action: "place_tower"
+    params:
+      tower_type: "archer"
+      pos: [200, 250]
+  - op: "domain_action"
+    action: "place_tower"
+    params:
+      tower_type: "frost"
+      pos: [350, 250]
+  - op: "wait"
+    ticks: 30
+  - op: "checkpoint"
+    name: "final_state"
+  - op: "assert"
+    target: "telemetry.state_snapshot.player.gold"
+    operator: "equals"
+    value: 110  # 300 - 80 (archer) - 110 (frost) = 110
+  - op: "assert"
+    target: "telemetry.state_snapshot.towers_count"
+    operator: "equals"
+    value: 2

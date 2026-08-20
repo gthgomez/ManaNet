@@ -1,0 +1,36 @@
+{
+  "schema_version": "2.0.0",
+  "baselines": {
+    "basic_tower_placement/initial": {
+      "scenario_id": "basic_tower_placement",
+      "checkpoint": "initial",
+      "path": "C:\\Workspace\\Project_Games\\ManaNet\\.agent-game\\baselines\\basic_tower_placement\\initial.png",
+      "old_sha256": null,
+      "sha256": "0ef57753cc5d59cf300517b58358aef3bd41a591639714c266371967b748e6d3",
+      "approved_at": "2026-08-12T01:29:04.275183Z",
+      "reason": "Manual baseline approval"
+    },
+    "runtime_input_smoke/initial_runtime": {
+      "scenario_id": "runtime_input_smoke",
+      "checkpoint": "initial_runtime",
+      "path": "C:\\Workspace\\Project_Games\\ManaNet\\.agent-game\\baselines\\runtime_input_smoke\\initial_runtime.png",
+      "old_sha256": null,
+      "sha256": "082c1a9338859719cae216cb7a613756112a309a8f4c048b8787f4fa70b7a0b2",
+      "approved_at": "2026-08-12T03:11:04.327337Z",
+      "reason": "Phase3B recovery baseline from real viewport"
+    },
+    "visual_checkpoint_smoke/visual_ready": {
+      "scenario_id": "visual_checkpoint_smoke",
+      "checkpoint": "visual_ready",
+      "path": "C:\\Workspace\\Project_Games\\ManaNet\\.agent-game\\baselines\\visual_checkpoint_smoke\\visual_ready.png",
+      "old_sha256": null,
+      "sha256": "39777502e601283f0eed39aa9463bf33c3c946f5224370dbd6cde172b2fe41a2",
+      "approved_at": "2026-08-20T05:06:11.975064Z",
+      "reason": "Stage A2 restore stable baseline after negative probe",
+      "source_run_id": "run-20260820-050558",
+      "git_dirty": true,
+      "diff_fingerprint": "58f29c564f2c7138a4813d6244a4bba29923785f8ed5c01b201fcc97ed509e39",
+      "source_image_path": "C:\\Workspace\\Project_Games\\ManaNet\\.agent-game\\runs\\run-20260820-050558\\screenshots\\000_visual_ready.png"
+    }
+  }
+}
