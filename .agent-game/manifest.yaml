@@ -67,6 +67,43 @@ architecture:
 runtime:
   scenario_bridge: "res://.agent-game/godot_scenario_bridge.gd"
 
+governance:
+  allow_agent_baseline_mutation: false
+  allow_agent_asset_promotion: false
+  allow_agent_scene_mutation: false
+  allow_agent_map_mutation: false
+
+art_direction:
+  guide: "art/ART_DIRECTION.md"
+  palette:
+    path: "art/palette.png"
+    required: false
+    colors:
+      - "#1EB0FF"
+      - "#FFB400"
+      - "#FF3C3C"
+      - "#0A0F1C"
+  references:
+    good: "art/references/good"
+    avoid: "art/references/avoid"
+  profiles:
+    ui_icon:
+      asset_class: "ui_icon"
+      resolution: [64, 64]
+      perspective: "flat_2d"
+      outline: "none"
+      lighting: "self_illuminated"
+      palette_strict: false
+      alpha_required: true
+    pixel_sprite:
+      asset_class: "pixel_sprite"
+      resolution: [32, 32]
+      perspective: "top_down_isometric"
+      outline: "1px_dark_contour"
+      lighting: "top_left_45deg"
+      palette_strict: false
+      alpha_required: true
+
 entrypoints:
   main_scene: "res://scenes/Main.tscn"
   test_runner: "scripts/full_audit.gd"

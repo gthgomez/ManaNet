@@ -1,0 +1,14 @@
+schema_version: "2.0.0"
+style_profile:
+  id: "mana_cyber_cyberpunk"
+  name: "ManaNet Cyberpunk Tower Defense Style"
+  palette:
+    primary: "#1EB0FF"     # Cyan
+    secondary: "#FFB400"   # Gold
+    danger: "#FF3C3C"      # Crimson
+    background: "#0A0F1C"  # Dark Obsidian
+  pixel_art: true
+  alpha_required: true
+  default_viewport:
+    width: 900
+    height: 600
