@@ -39,6 +39,8 @@ Run from `C:\Workspace\Project_Games\ManaNet`.
 
 - Headless simulation: `godot --headless -s scripts/SimulationBot.gd`
 - Benchmark: `godot --headless -s scripts/benchmark.gd`
+- Simulation regression checks: `godot --headless -s tests/simulation/regression_checks.gd`
+- UI regression harness (hermetic — backs up/restores the user save): `godot --headless tests/ui/UIRegressionTest.tscn`
 - Run locally: Godot 4.6 editor playback
 
 If the `godot` executable is not on `PATH`, report verification as blocked and include the command you would run.
