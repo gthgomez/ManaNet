@@ -29,6 +29,7 @@ Parallel polish with SimLife (Ship B). Prefer open polish items in `IMPROVEMENT_
 
 - `simulation/` must stay UI-free. Do not add Node references or scene coupling there.
 - `scenes/`, `ui/`, `rendering/`, and `input/` own presentation, reusable UI, rendering helpers, and input handling.
+- `ui/controllers/` holds cohesive subsystems extracted from `GameScreen.gd` (wave-shop modal, tower-details overlay, run setup, placement hints); GameScreen remains the scene entry point and orchestrator.
 - `scripts/SimulationBot.gd` is the headless simulation harness for mechanics and balance checks.
 - When porting from `TowerDefenseKivy`, translate the existing mechanics faithfully. Do not invent new mechanics without user approval.
 

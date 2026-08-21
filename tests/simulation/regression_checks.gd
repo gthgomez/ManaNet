@@ -16,6 +16,8 @@ func _init() -> void:
 	_test_boss_shield_brute_absorbs_damage()
 	_test_boss_wave_trash_density()
 	_test_invalid_wave_shop_card()
+	_test_cannon_shock_stuns_target_and_chills_aoe()
+	_test_cannon_siege_splash_and_rapid_cooldown()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass_count)
 	print("FAIL: %d" % _fail_count)
@@ -111,4 +113,73 @@ func _test_invalid_wave_shop_card() -> void:
 	var result: Dictionary = state.apply_action({"type": "wave_shop_pick", "card_id": "not_a_real_card"}, 6000)
 	_check(result.get("success", true) == false, "invalid wave shop card returns success false")
 	_check(state.wave_shop_pending and not state.wave_ready, "invalid wave shop card leaves the gate unchanged")
+	state.dispose()
+
+func _test_cannon_shock_stuns_target_and_chills_aoe() -> void:
+	var state: GameState = _make_state()
+	var cannon := TowerScript.new(Vector2(480.0, 420.0), "cannon", 1)
+	cannon.tracker.path_levels["Bottom"] = 2
+	# Stun 400 + 150*2 = 700 ms; nearby chill 300 + 100*2 = 500 ms (matches upgrade_paths.gd desc)
+	_check(cannon.stun_duration_ms() == 700, "cannon Bottom L2 stun duration is 700ms")
+	# Splash path (Top) is 0: shock radius falls back to int(effective_range * 0.35) = int(95 * 0.35) = 33
+	var target := EnemyScript.new(state.path)
+	var near := EnemyScript.new(state.path)
+	var far := EnemyScript.new(state.path)
+	target.pos = Vector2(500, 500)
+	near.pos = Vector2(520, 500)
+	far.pos = Vector2(700, 700)
+	state.enemies.append(target)
+	state.enemies.append(near)
+	state.enemies.append(far)
+	var now_ms: int = 7000
+	state.apply_hit(cannon, target, 50, now_ms)
+	_check(target.frozen_until == now_ms + 700, "shock stuns primary target for 700ms")
+	_check(near.chilled_until == now_ms + 500, "shock chills enemies within blast radius for 500ms")
+	_check(far.chilled_until < now_ms, "shock does not chill enemies outside radius")
+	_check(near.current_speed(now_ms) == near.speed * 0.6, "chilled enemy moves at 60% speed")
+	# Control: identical hit from a cannon without Shock applies neither stun nor chill
+	var plain := TowerScript.new(Vector2(480.0, 420.0), "cannon", 2)
+	var plain_target := EnemyScript.new(state.path)
+	var plain_near := EnemyScript.new(state.path)
+	plain_target.pos = Vector2(500, 500)
+	plain_near.pos = Vector2(520, 500)
+	state.enemies.append(plain_target)
+	state.enemies.append(plain_near)
+	state.apply_hit(plain, plain_target, 50, now_ms)
+	_check(plain_target.frozen_until < now_ms and plain_near.chilled_until < now_ms,
+		"cannon without Shock applies neither stun nor chill")
+	state.dispose()
+
+func _test_cannon_siege_splash_and_rapid_cooldown() -> void:
+	var state: GameState = _make_state()
+	var base := TowerScript.new(Vector2(480.0, 420.0), "cannon", 1)
+	_check(base.splash_radius() == 0, "cannon without Siege has no AoE splash radius")
+	_check(base.effective_cooldown() == base.base_cooldown, "cannon without Rapid keeps base cooldown")
+	var siege := TowerScript.new(Vector2(480.0, 420.0), "cannon", 1)
+	siege.tracker.path_levels["Top"] = 3
+	_check(siege.splash_radius() == 106, "Siege L3 grants 106px AoE splash radius")
+	var target := EnemyScript.new(state.path)
+	var neighbor := EnemyScript.new(state.path)
+	var outsider := EnemyScript.new(state.path)
+	target.pos = Vector2(500, 500)
+	neighbor.pos = Vector2(560, 500)
+	outsider.pos = Vector2(900, 900)
+	state.enemies.append(target)
+	state.enemies.append(neighbor)
+	state.enemies.append(outsider)
+	var neighbor_health_before: int = neighbor.health
+	var outsider_health_before: int = outsider.health
+	state.apply_hit(siege, target, 68, 4000)
+	_check(neighbor.health == neighbor_health_before - maxi(1, int(68.0 * 0.65)),
+		"Siege splash deals 65% hit damage to enemies in radius")
+	_check(outsider.health == outsider_health_before, "Siege splash does not reach enemies outside radius")
+	var saw_shake := false
+	for ev in state.drain_events():
+		if ev.get("type") == "screen_shake":
+			saw_shake = true
+	_check(saw_shake, "Siege splash impact emits screen shake event")
+	var rapid := TowerScript.new(Vector2(480.0, 420.0), "cannon", 2)
+	rapid.tracker.path_levels["Middle"] = 5
+	_check(rapid.effective_cooldown() == int(float(rapid.base_cooldown) * 0.55),
+		"Rapid L5 reduces cannon cooldown by 45% (capped)")
 	state.dispose()
