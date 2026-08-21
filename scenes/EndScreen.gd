@@ -92,26 +92,22 @@ func _ready() -> void:
 func _add_milestone_row(delta: Dictionary) -> void:
 	var row := HBoxContainer.new()
 	var name_lbl := Label.new()
-	name_lbl.text = delta.get("ttype", "?").capitalize()
+	name_lbl.text = str(delta.get("label", "?"))
 	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_THEME.apply_label(name_lbl, "muted")
 	row.add_child(name_lbl)
-	var uses_after: int = delta.get("uses_after", 0)
-	var kills_after: int = delta.get("kills_after", 0)
-	var uses_needed: int = delta.get("uses_needed", 0)
-	var kills_needed: int = delta.get("kills_needed", 0)
-	var unlocked: bool = delta.get("unlocked", false)
-	var prog_text: String
-	if unlocked:
-		prog_text = "✓ VARIANT UNLOCKED"
-	else:
-		var u_pct: int = int(float(uses_after) / float(maxi(1, uses_needed)) * 100.0)
-		var k_pct: int = int(float(kills_after) / float(maxi(1, kills_needed)) * 100.0)
-		prog_text = "Place %d%%  Kill %d%%" % [mini(100, u_pct), mini(100, k_pct)]
+	# Key contract mirrors Progression.record_run()'s milestone_deltas entries.
+	var uses_now: int = delta.get("uses_now", 0)
+	var kills_now: int = delta.get("kills_now", 0)
+	var uses_max: int = maxi(1, delta.get("uses_max", 0))
+	var kills_max: int = maxi(1, delta.get("kills_max", 0))
+	var u_pct: int = mini(100, int(float(uses_now) / float(uses_max) * 100.0))
+	var k_pct: int = mini(100, int(float(kills_now) / float(kills_max) * 100.0))
+	var prog_text: String = "Place %d%%  Kill %d%%" % [u_pct, k_pct]
 	var prog_lbl := Label.new()
 	prog_lbl.text = prog_text
 	_THEME.apply_label(prog_lbl, "body")
-	prog_lbl.add_theme_color_override("font_color", _THEME.GOLD if unlocked else Color(0.75, 0.80, 0.90))
+	prog_lbl.add_theme_color_override("font_color", Color(0.75, 0.80, 0.90))
 	prog_lbl.add_theme_font_size_override("font_size", 12)
 	row.add_child(prog_lbl)
 	_stats_box.add_child(row)

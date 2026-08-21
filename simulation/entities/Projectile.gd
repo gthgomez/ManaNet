@@ -4,6 +4,10 @@ class_name Projectile
 
 const _MAPS := preload("res://data/maps.gd")
 
+# Legacy px-per-frame@60fps speed units (Kivy port); canonical value mirrors
+# GameState.SIM_REFERENCE_FRAME_MS (kept local to avoid class_name cycles).
+const SIM_REFERENCE_FRAME_MS: float = 1000.0 / 60.0
+
 var pos: Vector2
 var prev_pos: Vector2
 var target: Enemy
@@ -45,10 +49,10 @@ func _update_direction() -> void:
 		dx = cos(base_angle) * speed
 		dy = sin(base_angle) * speed
 
-func move() -> void:
+func move(sim_dt_ms: float) -> void:
 	prev_pos = pos
-	pos.x += dx
-	pos.y += dy
+	pos.x += dx * sim_dt_ms / SIM_REFERENCE_FRAME_MS
+	pos.y += dy * sim_dt_ms / SIM_REFERENCE_FRAME_MS
 	if target != null and target.health > 0:
 		_update_direction()
 

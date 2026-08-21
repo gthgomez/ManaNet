@@ -54,6 +54,12 @@ var _default_target_mode: String
 
 const _SPATIAL_CELL_SIZE: float = 120.0
 
+# Legacy entity speeds are px-per-frame at 60 fps (Kivy port units).
+const SIM_REFERENCE_FRAME_MS: float = 1000.0 / 60.0
+# Upper bound for one simulated step; pauses, hitches, and debugger stalls
+# larger than this advance the sim by at most this much instead of teleporting.
+const MAX_SIM_STEP_MS: float = 50.0
+
 # Run stats
 var stat_towers_placed: int
 var stat_enemies_killed: int
@@ -872,6 +878,18 @@ func update_simulation(now_ms: int) -> void:
 		effects = effects.filter(func(e): return e.until_ms > now_ms)
 		return
 
+	# Unified simulation delta: one clamped, speed-scaled step per tick.
+	# Every per-tick motion (enemies, projectiles, burn DoT, boss regen,
+	# particles) derives from this value, keeping the sim frame-rate
+	# independent. Cooldowns/spawn gates stay on wall-clock ms and already
+	# divide by speed_multiplier (see Tower.can_shoot), so scaling the delta
+	# by speed_multiplier keeps both time models consistent at any tick rate.
+	if _last_sim_ms == 0:
+		_last_sim_ms = now_ms
+	var raw_step_ms: float = clampf(float(now_ms - _last_sim_ms), 0.0, MAX_SIM_STEP_MS)
+	var sim_dt_ms: float = raw_step_ms * speed_multiplier
+	_last_sim_ms = now_ms
+
 	# Step 1: spawn
 	if enemies_spawned < get_wave_spawn_total() and now_ms >= next_spawn_ms:
 		spawn_enemy(now_ms)
@@ -881,18 +899,21 @@ func update_simulation(now_ms: int) -> void:
 	for enemy in enemies:
 		# Apply DOT effects
 		if now_ms < enemy.burn_until:
-			var dot: int = maxi(1, int(float(enemy.burn_dps) * 0.016))
+			var dot: int = maxi(1, int(float(enemy.burn_dps) * sim_dt_ms / 1000.0))
 			enemy.health -= dot
-			if now_ms % 250 == 0:
+			# Timer-gated (not now_ms % 250): burst density no longer depends
+			# on wall-clock phase or frame quantization.
+			if now_ms - enemy.last_flame_burst_ms >= 250:
+				enemy.last_flame_burst_ms = now_ms
 				_add_particle_burst(enemy.pos, "flame", Color(1.0, 0.4, 0.2), 3, now_ms)
 
-		# BossRegenerator — regen 8 HP/s
+		# BossRegenerator — regen 8 HP/s (same clamped dt as all other motion)
 		if enemy is Enemy.BossRegenerator and enemy.health > 0 and enemy.health < enemy.max_health:
-			var regen_amount: int = int(enemy.regen_dps * float(now_ms - _last_sim_ms) / 1000.0)
+			var regen_amount: int = int(enemy.regen_dps * sim_dt_ms / 1000.0)
 			if regen_amount > 0:
 				enemy.health = mini(enemy.max_health, enemy.health + regen_amount)
 
-		var leaked: bool = enemy.move(now_ms, speed_multiplier)
+		var leaked: bool = enemy.move(now_ms, sim_dt_ms)
 		if leaked:
 			leaked_enemies.append(enemy)
 	for enemy in leaked_enemies:
@@ -921,7 +942,7 @@ func update_simulation(now_ms: int) -> void:
 		if projectile.target == null or projectile.target.health <= 0:
 			dead_projectiles.append(projectile)
 			continue
-		projectile.move()
+		projectile.move(sim_dt_ms)
 		var hit_dist: float = float(projectile.target.radius + projectile.radius)
 		if projectile.pos.distance_to(projectile.target.pos) <= hit_dist:
 			apply_projectile_hit(projectile, now_ms)
@@ -974,10 +995,8 @@ func update_simulation(now_ms: int) -> void:
 		effects = effects.filter(func(e): return e.until_ms > now_ms)
 
 	# Step 7: particle physics (frame-rate-independent exponential friction)
-	if _last_sim_ms == 0:
-		_last_sim_ms = now_ms
-	var dt: float = float(now_ms - _last_sim_ms) * speed_multiplier
-	_last_sim_ms = now_ms
+	# Particle velocities are px/ms, so keep this delta in milliseconds.
+	var dt: float = sim_dt_ms
 
 	var alive_particles: Array = []
 	for p in particles:

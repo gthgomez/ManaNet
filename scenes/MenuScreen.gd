@@ -340,7 +340,6 @@ func _update_last_run_label() -> void:
 
 	var best_wave: int  = 0
 	var last_wave: int  = 0
-	var last_map: String = ""
 	var wins: int       = 0
 	var losses: int     = 0
 	for entry in history:
@@ -352,7 +351,6 @@ func _update_last_run_label() -> void:
 			losses += 1
 	if not history.is_empty():
 		last_wave = history[-1].get("waves", 0)
-		last_map  = history[-1].get("map_id", "")
 
 	var parts: Array[String] = []
 	if best_wave > 0:
@@ -440,12 +438,17 @@ func _update_play_context_label() -> void:
 		_play_context_lbl.text = "15 waves  ·  Normal difficulty"
 		return
 	var last: Dictionary = history[-1]
-	var last_map: String = last.get("map_id", "")
+	# run_history stores map_id as a number (int in-memory, float after JSON
+	# round-trip) — coerce before use instead of assigning into a String.
+	var last_map_id: int = int(last.get("map_id", -1))
 	var last_wave: int   = last.get("waves",  0)
-	if last_map != "" and last_wave > 0:
-		_play_context_lbl.text = "%s  ·  Last reached Wave %d" % [last_map, last_wave]
-	elif last_map != "":
-		_play_context_lbl.text = "Last map: %s" % last_map
+	var map_name: String = ""
+	if last_map_id >= 0 and last_map_id < _MAPS_DATA.MAPS.size():
+		map_name = str(_MAPS_DATA.MAPS[last_map_id].get("name", ""))
+	if map_name != "" and last_wave > 0:
+		_play_context_lbl.text = "%s  ·  Last reached Wave %d" % [map_name, last_wave]
+	elif map_name != "":
+		_play_context_lbl.text = "Last map: %s" % map_name
 	elif last_wave > 0:
 		_play_context_lbl.text = "Last reached Wave %d" % last_wave
 	else:

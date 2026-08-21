@@ -1381,6 +1381,13 @@ func _control_tree_captures_point(node: Node, pos: Vector2) -> bool:
 func _dispatch(action: Dictionary, now_ms: int) -> void:
 	if action.is_empty():
 		return
+	# Restart must rebuild the whole screen (fresh ViewState, _prev_* edge
+	# trackers, renderer state). Never send it to apply_action(), whose
+	# in-place _init() re-run leaves screen-level state stale.
+	if action.get("type", "") == "restart_game":
+		view_state.confirm_restart = false
+		_restart_current_run()
+		return
 	if action.get("type", "") == "placement_failed":
 		view_state.show_toast(_PLACEMENT_HINTS.format_ui_reason(str(action.get("reason", "Cannot place here"))), now_ms, 1200)
 		return

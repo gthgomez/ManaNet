@@ -18,6 +18,9 @@ func _init() -> void:
 	_test_invalid_wave_shop_card()
 	_test_cannon_shock_stuns_target_and_chills_aoe()
 	_test_cannon_siege_splash_and_rapid_cooldown()
+	_test_movement_scales_with_sim_delta()
+	_test_large_time_gaps_are_clamped()
+	_test_flame_burst_density_is_tick_phase_independent()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass_count)
 	print("FAIL: %d" % _fail_count)
@@ -183,3 +186,87 @@ func _test_cannon_siege_splash_and_rapid_cooldown() -> void:
 	_check(rapid.effective_cooldown() == int(float(rapid.base_cooldown) * 0.55),
 		"Rapid L5 reduces cannon cooldown by 45% (capped)")
 	state.dispose()
+
+# --- Frame-rate independence guards (P0 timing fix) --------------------------
+
+# Long straight path so enemies never hit a waypoint inside the test window
+# (waypoint snapping is step-size sensitive by design).
+func _make_straight_state() -> GameState:
+	var straight_path: Array = [Vector2(0, 300), Vector2(4000, 300)]
+	return GameStateScript.new(straight_path, {}, 0)
+
+func _inject_enemy(state: GameState) -> Enemy:
+	var enemy := EnemyScript.new(state.path)
+	state.enemies.append(enemy)
+	return enemy
+
+func _run_unpaused(state: GameState, t_start: int, steps: int, dt_ms: int) -> void:
+	state.wave_ready = false
+	state.next_spawn_ms = 999999999   # isolate from the spawner
+	state.update_simulation(t_start)  # prime: consume the cold-start sentinel tick
+	for i in range(1, steps + 1):
+		state.update_simulation(t_start + i * dt_ms)
+
+func _test_movement_scales_with_sim_delta() -> void:
+	var a := _make_straight_state()
+	var b := _make_straight_state()
+	var c := _make_straight_state()
+	var ea := _inject_enemy(a)
+	_inject_enemy(b)
+	_inject_enemy(c)
+	_run_unpaused(a, 100000, 60, 16)    # 960 ms at ~60 fps
+	_run_unpaused(b, 100000, 120, 8)    # 960 ms at ~120 fps
+	_run_unpaused(c, 100000, 30, 32)    # 960 ms at ~30 fps
+	_check(ea.pos.x > 100.0, "enemy actually travels during stepped sim")
+	_check(absf(ea.pos.x - 115.2) < 5.0,
+		"travel matches analytic px/frame@60 scaling (got %.2f, expect ~115.2)" % ea.pos.x)
+	_check(ea.pos.distance_to(b.enemies[0].pos) < 0.05,
+		"960 ms of travel matches between 16 ms and 8 ms ticks")
+	_check(ea.pos.distance_to(c.enemies[0].pos) < 0.05,
+		"960 ms of travel matches between 16 ms and 32 ms ticks")
+	a.dispose()
+	b.dispose()
+	c.dispose()
+
+func _test_large_time_gaps_are_clamped() -> void:
+	var state := _make_straight_state()
+	var enemy := _inject_enemy(state)
+	state.wave_ready = false
+	state.update_simulation(100000)
+	var before := enemy.pos
+	state.update_simulation(110000)   # 10 s hitch in one tick
+	var moved: float = before.distance_to(enemy.pos)
+	var max_step: float = 2.0 * state.MAX_SIM_STEP_MS / state.SIM_REFERENCE_FRAME_MS + 0.5
+	_check(moved > 0.0 and moved <= max_step,
+		"10 s hitch advances the enemy by at most one clamped step")
+	_check(state._last_sim_ms == 110000, "hitch tick consumes the gap (no repeated catch-up)")
+	state.dispose()
+
+func _test_flame_burst_density_is_tick_phase_independent() -> void:
+	# Same simulated burn duration from two different wall-clock phases must
+	# produce identical flame-burst cadence (old now_ms % 250 gate failed this).
+	# Counts emission events via last_flame_burst_ms transitions — particle
+	# survival is lifespan-random and therefore not a usable signal.
+	var results := []
+	for offset in [123456, 123456 + 137]:
+		var state := _make_straight_state()
+		state.wave_ready = false
+		state.next_spawn_ms = 999999999
+		var enemy := _inject_enemy(state)
+		enemy.health = 1000000
+		enemy.burn_dps = 10
+		enemy.burn_until = 999999999
+		var emissions: Array = []
+		var last_seen: int = -999999
+		for i in range(63):   # covers [offset, offset + 992] ms of burn
+			state.update_simulation(offset + i * 16)
+			if enemy.last_flame_burst_ms != last_seen:
+				emissions.append(enemy.last_flame_burst_ms - offset)
+				last_seen = enemy.last_flame_burst_ms
+		results.append(emissions)
+		state.dispose()
+	_check(results[0].size() == 4 and results[1].size() == 4,
+		"flame bursts fire every ~250 ms regardless of clock phase (4 in 1000 ms; got %d vs %d)"
+			% [results[0].size(), results[1].size()])
+	_check(results[0] == results[1],
+		"flame burst cadence identical across phases %s vs %s" % [str(results[0]), str(results[1])])
