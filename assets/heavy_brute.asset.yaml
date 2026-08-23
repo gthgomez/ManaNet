@@ -1,0 +1,20 @@
+schema_version: "2.0.0"
+id: "heavy_brute_sprite"
+type: "sprite_2d"
+width: 1024
+height: 1024
+require_alpha: true
+frame_width: 1024
+frame_height: 1024
+frame_count: 1
+pivot: [0.5, 0.5]
+style_profile: "mana_cyber_cyberpunk"
+# Pilot contract points at an EXISTING ManaNet asset (structural validation only).
+# style_profile / palette / silhouette are DECLARED but NOT ENFORCED by AssetValidator.
+expected_path: "assets/sprites/enemies/heavy_brute.png"
+validation_scope: "structural"
+deferred_fields:
+  - palette
+  - silhouette
+  - style_compliance
+  - animation_consistency

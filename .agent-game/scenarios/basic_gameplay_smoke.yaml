@@ -1,0 +1,28 @@
+scenario:
+  id: "basic_gameplay_smoke"
+  name: "ManaNet Tower Placement & Wave Simulation Smoke"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+
+steps:
+  - op: "launch"
+    entrypoint: "res://scenes/Main.tscn"
+  - op: "checkpoint"
+    name: "initial"
+  - op: "input_action"
+    action: "place_tower_archer"
+    position: [200, 150]
+  - op: "wait"
+    ticks: 10
+  - op: "checkpoint"
+    name: "after_action"
+  - op: "assert"
+    target: "telemetry.state_snapshot.player.gold"
+    operator: "less_than"
+    value: 300
+  - op: "assert"
+    target: "telemetry.state_snapshot.towers_count"
+    operator: "equals"
+    value: 1

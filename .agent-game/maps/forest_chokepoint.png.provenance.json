@@ -1,0 +1,11 @@
+{
+  "schema_version": "2.0.0",
+  "tool": "ages_map_preview",
+  "generated_at": "2026-08-20T04:49:43.868190Z",
+  "map_id": "forest_chokepoint",
+  "dimensions": [
+    28,
+    18
+  ],
+  "output_sha256": "f61f83a871b18e1d013209014fb2d82a9e2e17c1a4661deaf2987e0737f1c0bc"
+}

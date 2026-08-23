@@ -1,0 +1,27 @@
+schema_version: "2.0.0"
+scenario:
+  id: "visual_checkpoint_smoke"
+  name: "First-class visual_compare scenario gate"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+telemetry_mode: "full"
+screenshot_mode: "real"
+render_mode: "windowed"
+steps:
+  - op: launch
+    entrypoint: "res://scenes/GameScreen.tscn"
+  - op: wait
+    frames: 12
+  - op: input_action
+    action: set_placement_mode
+    params:
+      mode: drop
+  - op: input_action
+    action: clear_onboarding
+  - op: checkpoint
+    name: visual_ready
+  - op: visual_compare
+    checkpoint: visual_ready
+    tolerance: 0.02

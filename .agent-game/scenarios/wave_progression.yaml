@@ -1,0 +1,24 @@
+schema_version: "2.0.0"
+scenario:
+  id: "wave_progression"
+  name: "ManaNet Wave Start & Progression Fixture"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+
+telemetry_mode: "full"
+screenshot_mode: "none"
+render_mode: "headless"
+
+steps:
+  - op: "launch"
+    entrypoint: "res://simulation/core/GameState.gd"
+  - op: "domain_action"
+    action: "start_wave"
+  - op: "checkpoint"
+    name: "wave_started"
+  - op: "assert"
+    target: "telemetry.state_snapshot.wave"
+    operator: "equals"
+    value: 1

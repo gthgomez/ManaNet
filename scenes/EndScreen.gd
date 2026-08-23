@@ -7,6 +7,7 @@ class_name EndScreen
 const _MAPS_DATA := preload("res://data/maps.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 
 @onready var _panel: PanelContainer = $Panel
@@ -61,12 +62,12 @@ func _ready() -> void:
 	else:
 		_sub_lbl.text = "Survived %d of 15 waves  |  Map: %s" % [waves, map_name]
 
-	_add_stat("Towers Built",      str(towers),                         Color.WHITE)
-	_add_stat("Enemies Killed",    str(kills),                          Color.WHITE)
-	_add_stat("Credits Earned",    str(gold),                           Color(1.0, 0.82, 0.2))
-	_add_stat("Lives Remaining",   str(lives),                          Color.WHITE)
+	_add_stat("Defenders Built",   str(towers),                         Color.WHITE)
+	_add_stat("Intrusions Cleared", str(kills),                         Color.WHITE)
+	_add_stat("%s Earned" % _BRAND.CURRENCY_RUN, str(gold),             Color(1.0, 0.82, 0.2))
+	_add_stat("%s Remaining" % _BRAND.CORE_RESOURCE, str(lives),        Color.WHITE)
 	_add_stat("Perfect Waves",     "%d / %d" % [perfect_waves, waves],  Color(0.2, 0.8, 1.0))
-	_add_stat("Research Points",   "+%d  (total: %d)" % [rp_earned, total_rp], Color(0.47, 0.9, 1.0))
+	_add_stat(_BRAND.CURRENCY_META, _BRAND.end_stat_shards(rp_earned, total_rp), Color(0.47, 0.9, 1.0))
 
 	var newly_unlocked: Array = stats.get("newly_unlocked_variants", [])
 	var milestone_deltas: Array = stats.get("milestone_deltas", [])
@@ -91,26 +92,22 @@ func _ready() -> void:
 func _add_milestone_row(delta: Dictionary) -> void:
 	var row := HBoxContainer.new()
 	var name_lbl := Label.new()
-	name_lbl.text = delta.get("ttype", "?").capitalize()
+	name_lbl.text = str(delta.get("label", "?"))
 	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_THEME.apply_label(name_lbl, "muted")
 	row.add_child(name_lbl)
-	var uses_after: int = delta.get("uses_after", 0)
-	var kills_after: int = delta.get("kills_after", 0)
-	var uses_needed: int = delta.get("uses_needed", 0)
-	var kills_needed: int = delta.get("kills_needed", 0)
-	var unlocked: bool = delta.get("unlocked", false)
-	var prog_text: String
-	if unlocked:
-		prog_text = "✓ VARIANT UNLOCKED"
-	else:
-		var u_pct: int = int(float(uses_after) / float(maxi(1, uses_needed)) * 100.0)
-		var k_pct: int = int(float(kills_after) / float(maxi(1, kills_needed)) * 100.0)
-		prog_text = "Place %d%%  Kill %d%%" % [mini(100, u_pct), mini(100, k_pct)]
+	# Key contract mirrors Progression.record_run()'s milestone_deltas entries.
+	var uses_now: int = delta.get("uses_now", 0)
+	var kills_now: int = delta.get("kills_now", 0)
+	var uses_max: int = maxi(1, delta.get("uses_max", 0))
+	var kills_max: int = maxi(1, delta.get("kills_max", 0))
+	var u_pct: int = mini(100, int(float(uses_now) / float(uses_max) * 100.0))
+	var k_pct: int = mini(100, int(float(kills_now) / float(kills_max) * 100.0))
+	var prog_text: String = "Place %d%%  Kill %d%%" % [u_pct, k_pct]
 	var prog_lbl := Label.new()
 	prog_lbl.text = prog_text
 	_THEME.apply_label(prog_lbl, "body")
-	prog_lbl.add_theme_color_override("font_color", _THEME.GOLD if unlocked else Color(0.75, 0.80, 0.90))
+	prog_lbl.add_theme_color_override("font_color", Color(0.75, 0.80, 0.90))
 	prog_lbl.add_theme_font_size_override("font_size", 12)
 	row.add_child(prog_lbl)
 	_stats_box.add_child(row)

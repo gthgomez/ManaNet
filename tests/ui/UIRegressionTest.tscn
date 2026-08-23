@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/ui/UIRegressionTest.gd" id="1_uireg"]
+
+[node name="UIRegressionTest" type="Node"]
+script = ExtResource("1_uireg")

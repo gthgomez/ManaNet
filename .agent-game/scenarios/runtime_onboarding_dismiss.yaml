@@ -1,0 +1,54 @@
+schema_version: "2.0.0"
+scenario:
+  id: "runtime_onboarding_dismiss"
+  name: "Onboarding modal dismiss then placement"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+telemetry_mode: "full"
+screenshot_mode: "real"
+render_mode: "windowed"
+steps:
+  - op: launch
+    entrypoint: "res://scenes/GameScreen.tscn"
+  - op: wait
+    frames: 12
+  - op: input_action
+    action: set_placement_mode
+    params:
+      mode: drop
+  - op: input_action
+    action: force_onboarding
+  - op: input_action
+    action: enter_placement
+    params:
+      tower_type: archer
+  - op: pointer_touch
+    position: [200, 250]
+  - op: wait
+    frames: 4
+  - op: checkpoint
+    name: after_dismiss_only
+  - op: assert
+    target: telemetry.state_snapshot.towers_count
+    operator: equals
+    value: 0
+  - op: assert
+    target: telemetry.state_snapshot.player.gold
+    operator: equals
+    value: 300
+  - op: pointer_touch
+    position: [200, 250]
+  - op: wait
+    frames: 6
+  - op: checkpoint
+    name: after_place
+  - op: assert
+    target: telemetry.state_snapshot.towers_count
+    operator: equals
+    value: 1
+  - op: assert
+    target: telemetry.state_snapshot.player.gold
+    operator: equals
+    value: 220

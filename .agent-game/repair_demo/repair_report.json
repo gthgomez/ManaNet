@@ -1,0 +1,66 @@
+{
+  "ok": true,
+  "loop": "GOOD\u2192DEFECT\u2192DETECT\u2192DIAGNOSE\u2192FIX\u2192VERIFY",
+  "fixture": "C:\\Workspace\\Project_Games\\ManaNet\\.agent-game\\repair_demo\\tower_costs.json",
+  "runs": {
+    "before": "run-20260820-050626",
+    "failure": "run-repair-failure-synthetic",
+    "after": "run-20260820-050627"
+  },
+  "steps": [
+    {
+      "name": "GOOD",
+      "status": "PASS",
+      "detail": "archer cost=80",
+      "run_id": null
+    },
+    {
+      "name": "FREEZE_BEFORE",
+      "status": "PASS",
+      "detail": "Frozen phase8_before_canonical from run-20260820-050626",
+      "run_id": "run-20260820-050626"
+    },
+    {
+      "name": "DEFECT",
+      "status": "PASS",
+      "detail": "archer cost 999 != expected 80",
+      "run_id": null
+    },
+    {
+      "name": "DETECT",
+      "status": "PASS",
+      "detail": "archer cost 999 != expected 80",
+      "run_id": null
+    },
+    {
+      "name": "DIAGNOSE",
+      "status": "PASS",
+      "detail": "DIAGNOSIS: Domain placement assertions fail because archer cost is wrong. Detail: archer cost 999 != expected 80. Fix: restore cost to contract value (80).",
+      "run_id": null
+    },
+    {
+      "name": "FREEZE_FAILURE",
+      "status": "PASS",
+      "detail": "Frozen phase8_failure_canonical from run-repair-failure-synthetic",
+      "run_id": "run-repair-failure-synthetic"
+    },
+    {
+      "name": "FIX",
+      "status": "PASS",
+      "detail": "restored cost=80",
+      "run_id": null
+    },
+    {
+      "name": "VERIFY",
+      "status": "PASS",
+      "detail": "Frozen phase8_after_canonical from run-20260820-050627",
+      "run_id": "run-20260820-050627"
+    },
+    {
+      "name": "FREEZE_AFTER",
+      "status": "PASS",
+      "detail": "Frozen phase8_after_canonical from run-20260820-050627",
+      "run_id": "run-20260820-050627"
+    }
+  ]
+}

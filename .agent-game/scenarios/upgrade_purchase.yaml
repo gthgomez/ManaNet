@@ -1,0 +1,35 @@
+schema_version: "2.0.0"
+scenario:
+  id: "upgrade_purchase"
+  name: "ManaNet Tower Base Upgrade Fixture"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+
+telemetry_mode: "full"
+screenshot_mode: "none"
+render_mode: "headless"
+
+steps:
+  - op: "launch"
+    entrypoint: "res://simulation/core/GameState.gd"
+  - op: "domain_action"
+    action: "place_tower"
+    params:
+      tower_type: "archer"  # Cost 80 -> remaining gold 220
+      pos: [200, 150]
+  - op: "domain_action"
+    action: "upgrade_base"
+    params:
+      tower_id: 0          # Base upgrade level 1->2 cost 45 -> remaining gold 175
+  - op: "checkpoint"
+    name: "after_upgrade"
+  - op: "assert"
+    target: "telemetry.state_snapshot.player.gold"
+    operator: "equals"
+    value: 175
+  - op: "assert"
+    target: "telemetry.state_snapshot.towers_count"
+    operator: "equals"
+    value: 1

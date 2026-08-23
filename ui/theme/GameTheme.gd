@@ -227,9 +227,10 @@ static func _on_button_pressed(btn: Button) -> void:
 		if tweener:
 			tweener.from(-1.0)
 
-	# Spawn juice burst at button center
+	# Spawn juice burst + button press SFX at button center
 	var juice = btn.get_node_or_null("/root/JuiceManager")
 	if juice:
+		juice.play(juice.SFX.BTN_PRESS)
 		juice.spawn_burst(btn.global_position + btn.size * 0.5, CYAN)
 
 static func apply_label(label: Label, kind: String = "body") -> void:

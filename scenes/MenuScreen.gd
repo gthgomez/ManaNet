@@ -4,6 +4,7 @@ class_name MenuScreen
 const _MAPS_DATA := preload("res://data/maps.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 
 @onready var _vbox: VBoxContainer   = $VBox
@@ -107,15 +108,17 @@ func _apply_visuals() -> void:
 			_bg.material = null
 
 	_THEME.apply_label(_subtitle, "muted")
-	_subtitle.text = "Survive 15 waves. Build smart. Upgrade wisely."
+	_subtitle.text = _BRAND.FANTASY_SUBTITLE
 
 	_THEME.apply_button(_play_btn, "primary")
 	_THEME.apply_button(_base_btn, "secondary")
 	_THEME.apply_button(_settings_btn, "secondary")
 
 	# Gap 9 — Accessibility: tooltip_text and FOCUS_ALL on all interactive controls
-	_play_btn.tooltip_text     = "Start a new run"
-	_base_btn.tooltip_text     = "Open Cyber-Deck — spend Shards on permanent software upgrades"
+	_play_btn.tooltip_text     = "Start a new network defense run"
+	_base_btn.tooltip_text     = "Open %s — spend %s on permanent software upgrades" % [
+		_BRAND.META_SCREEN, _BRAND.CURRENCY_META
+	]
 	_settings_btn.tooltip_text = "Gameplay settings"
 	_play_btn.focus_mode     = Control.FOCUS_ALL
 	_base_btn.focus_mode     = Control.FOCUS_ALL
@@ -131,7 +134,7 @@ func _apply_visuals() -> void:
 	var pt := create_tween().set_loops()
 	pt.tween_callback(func(): _THEME.trigger_glint(_play_btn)).set_delay(3.5)
 
-	# Gap 6 — Robo Base glows when unspent RP is available (not just on just_won)
+	# Cyber-Deck glows when unspent Shards are available (not just on just_won)
 	var profile: Dictionary = Progression.load_profile()
 	if Progression.just_won() or profile.get("banked_rp", 0) > 0:
 		_THEME.set_button_glow(_base_btn, true)
@@ -177,11 +180,11 @@ func _apply_layout() -> void:
 	var top    := _LAYOUT.top_margin(viewport)
 	var bottom := _LAYOUT.bottom_margin(viewport)
 
-	# RP pill — top-right corner
+	# Shards pill — top-right corner
 	if _rp_pill:
 		_rp_pill.position = Vector2(viewport.x - 118.0 - margin, top + 6.0)
 
-	# Gap 4 — mute toggle — top-left corner, symmetric with RP pill
+	# Gap 4 — mute toggle — top-left corner, symmetric with Shards pill
 	if _mute_btn:
 		_mute_btn.position = Vector2(margin + 4.0, top + 6.0)
 
@@ -337,7 +340,6 @@ func _update_last_run_label() -> void:
 
 	var best_wave: int  = 0
 	var last_wave: int  = 0
-	var last_map: String = ""
 	var wins: int       = 0
 	var losses: int     = 0
 	for entry in history:
@@ -349,7 +351,6 @@ func _update_last_run_label() -> void:
 			losses += 1
 	if not history.is_empty():
 		last_wave = history[-1].get("waves", 0)
-		last_map  = history[-1].get("map_id", "")
 
 	var parts: Array[String] = []
 	if best_wave > 0:
@@ -437,12 +438,17 @@ func _update_play_context_label() -> void:
 		_play_context_lbl.text = "15 waves  ·  Normal difficulty"
 		return
 	var last: Dictionary = history[-1]
-	var last_map: String = last.get("map_id", "")
+	# run_history stores map_id as a number (int in-memory, float after JSON
+	# round-trip) — coerce before use instead of assigning into a String.
+	var last_map_id: int = int(last.get("map_id", -1))
 	var last_wave: int   = last.get("waves",  0)
-	if last_map != "" and last_wave > 0:
-		_play_context_lbl.text = "%s  ·  Last reached Wave %d" % [last_map, last_wave]
-	elif last_map != "":
-		_play_context_lbl.text = "Last map: %s" % last_map
+	var map_name: String = ""
+	if last_map_id >= 0 and last_map_id < _MAPS_DATA.MAPS.size():
+		map_name = str(_MAPS_DATA.MAPS[last_map_id].get("name", ""))
+	if map_name != "" and last_wave > 0:
+		_play_context_lbl.text = "%s  ·  Last reached Wave %d" % [map_name, last_wave]
+	elif map_name != "":
+		_play_context_lbl.text = "Last map: %s" % map_name
 	elif last_wave > 0:
 		_play_context_lbl.text = "Last reached Wave %d" % last_wave
 	else:
@@ -473,7 +479,7 @@ func _add_decor_icon(texture: Texture2D) -> void:
 	float_tween.tween_property(decor, "position:y",  10.0, 3.0).from(-20.0).set_trans(Tween.TRANS_SINE)
 	float_tween.tween_property(decor, "position:y", -20.0, 3.0).set_trans(Tween.TRANS_SINE)
 
-# ── RP pill ────────────────────────────────────────────────────────────────────
+# ── Shards pill ────────────────────────────────────────────────────────────────
 
 func _add_rp_pill() -> void:
 	_rp_pill = PanelContainer.new()
@@ -497,7 +503,7 @@ func _add_rp_pill() -> void:
 	_rp_pill.add_child(hbox)
 
 	var icon_lbl := Label.new()
-	icon_lbl.text = "RP"
+	icon_lbl.text = _BRAND.CURRENCY_META
 	icon_lbl.add_theme_color_override("font_color", _THEME.GOLD)
 	icon_lbl.add_theme_font_size_override("font_size", 10)
 	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER

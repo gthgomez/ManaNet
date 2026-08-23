@@ -1,0 +1,35 @@
+schema_version: "2.0.0"
+scenario:
+  id: "basic_tower_placement"
+  name: "ManaNet Basic Tower Placement Fixture"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+
+telemetry_mode: "full"
+screenshot_mode: "none"
+render_mode: "headless"
+
+steps:
+  - op: "launch"
+    entrypoint: "res://simulation/core/GameState.gd"
+  - op: "checkpoint"
+    name: "initial"
+  - op: "domain_action"
+    action: "place_tower"
+    params:
+      tower_type: "archer"
+      pos: [200, 250]
+  - op: "wait"
+    ticks: 10
+  - op: "checkpoint"
+    name: "after_action"
+  - op: "assert"
+    target: "telemetry.state_snapshot.player.gold"
+    operator: "equals"
+    value: 220
+  - op: "assert"
+    target: "telemetry.state_snapshot.towers_count"
+    operator: "equals"
+    value: 1

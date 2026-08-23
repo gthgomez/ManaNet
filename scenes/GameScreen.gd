@@ -9,7 +9,12 @@ const _MAPS := preload("res://data/maps.gd")
 const _TT   := preload("res://data/tower_types.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _UP   := preload("res://data/upgrade_paths.gd")
+const _PLACEMENT_HINTS := preload("res://ui/controllers/PlacementHints.gd")
+const _RUN_SETUP := preload("res://ui/controllers/RunSetup.gd")
+const _WAVE_SHOP_CTRL := preload("res://ui/controllers/WaveShopModalController.gd")
+const _DETAILS_CTRL := preload("res://ui/controllers/TowerDetailsOverlayController.gd")
 const _MAP_BG_PATHS: Dictionary = {
 	0: "res://assets/sprites/maps/map_bg_s_curve.jpg",
 	1: "res://assets/sprites/maps/map_bg_gauntlet.jpg",
@@ -60,6 +65,7 @@ var _placement_cancel_btn: Button = null
 var _top_bar: HBoxContainer = null
 var _speed_bar: HBoxContainer = null
 var _shop_bar: HBoxContainer = null
+var _shop_scroll: ScrollContainer = null
 var _modifier_badge: Label = null
 var _active_modifier_id: String = ""
 var _placement_confirm_bar: HBoxContainer = null
@@ -68,11 +74,11 @@ var _cancel_placement_btn: Button = null
 var _info_btn: Button = null
 var _instruction_banner: PanelContainer = null
 var _instruction_label: Label = null
-var _tower_details_overlay: PanelContainer = null
-var _info_auto_paused: bool = false
+var _details = null   # TowerDetailsOverlayController
 var _tower_stats_label: Label = null
 var _wave_progress_bar: ProgressBar = null
 var _wave_shop_modal: PanelContainer = null
+var _wave_shop = null   # WaveShopModalController
 var _restart_confirm_start_ms: int = 0
 var _restart_confirm_bar: ProgressBar = null
 var _world_rect: Rect2 = Rect2(Vector2.ZERO, _LAYOUT.BASE_SIZE)
@@ -104,6 +110,8 @@ const _Z_OVERLAY: int = 120
 # Previous lives count to detect leaks for screen shake
 var _prev_lives: int = 10
 var _prev_wave: int = 0
+var _prev_kills: int = 0
+var _prev_wave_shop_pending: bool = false
 
 # ---------------------------------------------------------------------------
 # Lifecycle
@@ -119,8 +127,8 @@ func _ready() -> void:
 	var map_id: int = Progression.pending_map_id
 	var map_data: Dictionary = _MAPS.MAPS[map_id]
 	game_state = GameState.new(map_data["path"], run_config, map_id)
-	_apply_variant_stats(game_state)
-	_place_starting_tower(game_state, run_config)
+	_RUN_SETUP.apply_variant_stats(game_state)
+	_RUN_SETUP.place_starting_tower(game_state, run_config)
 	_active_modifier_id = run_config.get("modifier_id", "")
 	_backdrop_texture = load(_MAP_BG_PATHS.get(map_id, ""))
 
@@ -140,6 +148,8 @@ func _ready() -> void:
 
 	_prev_lives = game_state.lives
 	_prev_wave = game_state.wave
+	_prev_kills = game_state.stat_enemies_killed
+	_prev_wave_shop_pending = game_state.wave_shop_pending
 
 	# Show active modifier(s) as a persistent instruction for the first few seconds
 	var mod_ids: Array = Progression.get_active_modifier_ids()
@@ -169,54 +179,8 @@ func _exit_tree() -> void:
 	if game_state:
 		game_state.dispose()
 
-func _apply_variant_stats(gs: GameState) -> void:
-	gs._variant_deltas = {}
-	for ttype in _TT.TOWER_TYPES_LIST:
-		var variant: Dictionary = Progression.get_variant_for_type(ttype)
-		if not variant.is_empty():
-			gs._variant_deltas[ttype] = variant
-
-func _place_starting_tower(gs: GameState, run_config: Dictionary) -> void:
-	var st_type: String = run_config.get("starting_tower_type", "")
-	if st_type == "" or st_type == "choice":
-		return
-	if not st_type in _TT.TOWER_TYPES:
-		return
-	if gs.path.size() < 2:
-		return
-
-	var start: Vector2 = gs.path[0]
-	var next: Vector2 = gs.path[1]
-	var direction: Vector2 = next - start
-	var length: float = direction.length()
-	if length == 0.0:
-		return
-
-	var perp: Vector2 = Vector2(-direction.y / length, direction.x / length)
-	var offset: float = float(_MAPS.PATH_RADIUS + _MAPS.TOWER_RADIUS + 6)
-	var anchor: Vector2 = start + direction * 0.25
-
-	for sign in [1.0, -1.0]:
-		var candidate: Vector2 = anchor + perp * offset * sign
-		if _try_place_free_starting_tower(gs, candidate, st_type):
-			return
-
-	for radius in range(10, 160, 10):
-		for angle_deg in range(0, 360, 30):
-			var angle: float = deg_to_rad(float(angle_deg))
-			var candidate: Vector2 = start + Vector2(cos(angle), sin(angle)) * float(radius)
-			if _try_place_free_starting_tower(gs, candidate, st_type):
-				return
-
-func _try_place_free_starting_tower(gs: GameState, candidate: Vector2, st_type: String) -> bool:
-	var check: Array = gs.can_place_tower(candidate, st_type)
-	if not check[0]:
-		return false
-	var tower := gs._configure_tower(Tower.new(candidate, st_type, gs.tower_id_counter))
-	gs.tower_id_counter += 1
-	gs.towers.append(tower)
-	gs.stat_tower_use_by_type[st_type] = gs.stat_tower_use_by_type.get(st_type, 0) + 1
-	return true
+func _current_game_state() -> GameState:
+	return game_state
 
 func _build_hud() -> void:
 	# All HUD lives in a CanvasLayer so it renders on top of the game world
@@ -233,12 +197,12 @@ func _build_hud() -> void:
 	_top_bar.add_child(_wave_label)
 
 	_lives_label = Label.new()
-	_lives_label.text = "Lives: 10"
+	_lives_label.text = _BRAND.integrity(10)
 	_THEME.apply_label(_lives_label, "body")
 	_top_bar.add_child(_lives_label)
 
 	_gold_label = Label.new()
-	_gold_label.text = "Credits: 300"
+	_gold_label.text = _BRAND.credits(300)
 	_THEME.apply_label(_gold_label, "currency")
 	_top_bar.add_child(_gold_label)
 
@@ -271,7 +235,7 @@ func _build_hud() -> void:
 
 	# ---- Wave button ----
 	_wave_btn = Button.new()
-	_wave_btn.text = "Start Wave"
+	_wave_btn.text = _BRAND.START_WAVE
 	_wave_btn.custom_minimum_size = Vector2(210.0, _LAYOUT.min_touch_height(true))
 	_wave_btn.z_index = _Z_WAVE_BUTTON
 	_THEME.apply_button(_wave_btn, "primary")
@@ -362,11 +326,17 @@ func _build_hud() -> void:
 	_target_btn.pressed.connect(_on_target_pressed)
 	act_row.add_child(_target_btn)
 
-	# ---- Shop strip ----
+	# ---- Shop strip (ScrollContainer when cards exceed phone width) ----
+	_shop_scroll = ScrollContainer.new()
+	_shop_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_shop_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_shop_scroll.z_index = _Z_SHOP_BAR
+	hud_layer.add_child(_shop_scroll)
+
 	_shop_bar = HBoxContainer.new()
 	_shop_bar.add_theme_constant_override("separation", 6)
-	_shop_bar.z_index = _Z_SHOP_BAR
-	hud_layer.add_child(_shop_bar)
+	_shop_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shop_scroll.add_child(_shop_bar)
 
 	for ttype in _TT.TOWER_TYPES_LIST:
 		var info: Dictionary = _TT.TOWER_TYPES[ttype]
@@ -388,7 +358,7 @@ func _build_hud() -> void:
 		shop_vbox.add_child(name_lbl)
 		_shop_name_labels[ttype] = name_lbl
 		var cost_lbl := Label.new()
-		cost_lbl.text = "%dg" % info["cost"]
+		cost_lbl.text = _BRAND.credits_amount_suffix(int(info["cost"]))
 		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cost_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_THEME.apply_label(cost_lbl, "currency")
@@ -445,7 +415,7 @@ func _build_hud() -> void:
 	
 	_instruction_label = Label.new()
 	_instruction_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_instruction_label.text = "Pick a tower to begin defense"
+	_instruction_label.text = _BRAND.INSTRUCTION_PICK_TOWER
 	_instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_instruction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -467,13 +437,21 @@ func _build_hud() -> void:
 	_build_promotion_modal()
 	_build_pause_modal()
 	_build_placement_confirm_modal()
-	_build_wave_shop_modal()
+	_wave_shop = _WAVE_SHOP_CTRL.new(hud_layer)
+	_wave_shop.button_readability = _apply_button_readability
+	_wave_shop.card_picked.connect(_on_wave_shop_pick)
+	_wave_shop.skipped.connect(_on_wave_shop_skip)
+	_wave_shop_modal = _wave_shop.modal
+	_details = _DETAILS_CTRL.new(hud_layer)
+	_details.resolve_game_state = _current_game_state
+	_details.raise_to_top = _raise_visible_modal_controls
 	_wire_hud_dpad()
 
 func _build_promotion_modal() -> void:
 	_promotion_modal = PanelContainer.new()
 	_promotion_modal.visible = false
-	_promotion_modal.custom_minimum_size = Vector2(330.0, 150.0)
+	_promotion_modal.custom_minimum_size = Vector2.ZERO
+	_promotion_modal.clip_contents = true
 	_promotion_modal.z_index = _Z_MODAL
 	_promotion_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	_THEME.apply_panel(_promotion_modal, "modal")
@@ -513,7 +491,8 @@ func _build_promotion_modal() -> void:
 func _build_pause_modal() -> void:
 	_pause_modal = PanelContainer.new()
 	_pause_modal.visible = false
-	_pause_modal.custom_minimum_size = Vector2(330.0, 300.0)
+	_pause_modal.custom_minimum_size = Vector2.ZERO
+	_pause_modal.clip_contents = true
 	_pause_modal.z_index = _Z_MODAL
 	_pause_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	_THEME.apply_panel(_pause_modal, "modal")
@@ -586,9 +565,12 @@ func _build_pause_modal() -> void:
 	vbox.add_child(_placement_confirm_toggle_btn)
 
 func _build_placement_confirm_modal() -> void:
+	# Built for potential future / accessibility, but P0 uses only the floating bar
+	# so confirm UI never double-stacks over the map on short phone viewports.
 	_placement_confirm_modal = PanelContainer.new()
 	_placement_confirm_modal.visible = false
-	_placement_confirm_modal.custom_minimum_size = Vector2(300.0, 120.0)
+	_placement_confirm_modal.custom_minimum_size = Vector2.ZERO
+	_placement_confirm_modal.clip_contents = true
 	_placement_confirm_modal.z_index = _Z_MODAL
 	_placement_confirm_modal.mouse_filter = Control.MOUSE_FILTER_STOP
 	_THEME.apply_panel(_placement_confirm_modal, "modal")
@@ -624,15 +606,6 @@ func _build_placement_confirm_modal() -> void:
 	_apply_button_readability(_placement_cancel_btn)
 	_placement_cancel_btn.pressed.connect(_on_cancel_placement_pressed)
 	row.add_child(_placement_cancel_btn)
-
-func _build_wave_shop_modal() -> void:
-	_wave_shop_modal = PanelContainer.new()
-	_wave_shop_modal.visible = false
-	_wave_shop_modal.custom_minimum_size = Vector2(580.0, 300.0)
-	_wave_shop_modal.z_index = _Z_MODAL
-	_wave_shop_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	_THEME.apply_panel(_wave_shop_modal, "modal")
-	hud_layer.add_child(_wave_shop_modal)
 
 func _wire_hud_dpad() -> void:
 	# Ordered shop button list (matches _shop_bar child order)
@@ -697,138 +670,14 @@ func _dpad_return_focus() -> void:
 		_shop_btns.values()[0].grab_focus()
 
 func _show_wave_shop(now_ms: int) -> void:
-	if _wave_shop_modal == null:
+	if _wave_shop == null or _wave_shop.modal == null:
 		return
-	# Rebuild content each time
-	for child in _wave_shop_modal.get_children():
-		child.queue_free()
-
-	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	var card_columns: int = _LAYOUT.wave_shop_card_columns(viewport)
-	var card_min: Vector2 = _LAYOUT.wave_shop_card_min_size()
-
-	var margin := MarginContainer.new()
-	var m_side := 18 if card_columns == 3 else 12
-	var m_top  := 16 if card_columns == 3 else 8
-	margin.add_theme_constant_override("margin_left", m_side)
-	margin.add_theme_constant_override("margin_top", m_top)
-	margin.add_theme_constant_override("margin_right", m_side)
-	margin.add_theme_constant_override("margin_bottom", m_top)
-	_wave_shop_modal.add_child(margin)
-
-	var vbox := VBoxContainer.new()
-	var vbox_sep := 16 if card_columns == 3 else 6
-	vbox.add_theme_constant_override("separation", vbox_sep)
-	margin.add_child(vbox)
-
-	var is_milestone: bool = game_state.wave in [5, 10, 15]
-	var title := Label.new()
-	title.text = "BOSS CLEARED - CHOOSE A BONUS" if is_milestone else "CHOOSE A BONUS BEFORE WAVE %d" % game_state.wave
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2) if is_milestone else _THEME.GOLD)
-	title.add_theme_font_size_override("font_size", 17)
-	vbox.add_child(title)
-
-	var help := Label.new()
-	help.text = "Pick one card, or skip the bonus to continue."
-	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help.add_theme_color_override("font_color", _PANEL_MUTED)
-	help.add_theme_font_size_override("font_size", 12)
-	vbox.add_child(help)
-
-	var _CARDS := preload("res://data/wave_shop_cards.gd")
-	var pool := _CARDS.filtered_pool(_active_modifier_id)
-	var drawn: Array = _CARDS.draw_cards(pool, 3, game_state.wave)
-
-	var scroll := ScrollContainer.new()
-	scroll.scroll_deadzone = 12
-	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size = Vector2(0.0, 144.0 if card_columns < 3 else 126.0)
-	vbox.add_child(scroll)
-
-	var card_grid := GridContainer.new()
-	card_grid.mouse_filter = Control.MOUSE_FILTER_PASS
-	card_grid.columns = card_columns
-	card_grid.add_theme_constant_override("h_separation", 12)
-	card_grid.add_theme_constant_override("v_separation", 12)
-	card_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(card_grid)
-
-	var card_btns: Array = []
-	for card in drawn:
-		var card_panel := PanelContainer.new()
-		card_panel.mouse_filter = Control.MOUSE_FILTER_PASS
-		card_panel.custom_minimum_size = Vector2(card_min.x, maxf(card_min.y + 20.0, 120.0))
-		card_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_THEME.apply_panel(card_panel, "card")
-		card_grid.add_child(card_panel)
-
-		var card_margin := MarginContainer.new()
-		card_margin.mouse_filter = Control.MOUSE_FILTER_PASS
-		card_margin.add_theme_constant_override("margin_left", 10)
-		card_margin.add_theme_constant_override("margin_top", 8)
-		card_margin.add_theme_constant_override("margin_right", 10)
-		card_margin.add_theme_constant_override("margin_bottom", 8)
-		card_panel.add_child(card_margin)
-
-		var card_vbox := VBoxContainer.new()
-		card_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
-		card_vbox.add_theme_constant_override("separation", 6)
-		card_margin.add_child(card_vbox)
-
-		var card_title := Label.new()
-		card_title.text = "%s %s" % [card.get("icon", ""), card["label"]]
-		card_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		card_title.add_theme_color_override("font_color", _PANEL_TEXT)
-		card_title.add_theme_font_size_override("font_size", 14)
-		card_vbox.add_child(card_title)
-
-		var card_desc := Label.new()
-		card_desc.text = card["desc"]
-		card_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		card_desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		card_desc.add_theme_color_override("font_color", _PANEL_MUTED)
-		card_desc.add_theme_font_size_override("font_size", 12)
-		card_vbox.add_child(card_desc)
-
-		var card_btn := Button.new()
-		card_btn.text = "Choose"
-		card_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(false))
-		card_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_THEME.apply_button(card_btn, "primary")
-		card_btn.add_theme_font_size_override("font_size", 12)
-		card_btn.pressed.connect(_on_wave_shop_pick.bind(card["id"], now_ms))
-		card_vbox.add_child(card_btn)
-		card_btns.append(card_btn)
-
-	var skip_btn := Button.new()
-	skip_btn.text = "Skip Bonus - Start Wave %d" % game_state.wave
-	skip_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.min_touch_height(true))
-	_apply_button_readability(skip_btn)
-	skip_btn.pressed.connect(_on_wave_shop_skip.bind(now_ms))
-	vbox.add_child(skip_btn)
-
-	var desired_w: float = 640.0
-	if card_columns == 1:
-		desired_w = 340.0
-	elif card_columns == 2:
-		desired_w = 500.0
-
-	var desired_h: float = 320.0 if card_columns < 3 else 280.0
-	_layout_modal(_wave_shop_modal, Vector2(desired_w, desired_h))
-	_wave_shop_modal.visible = true
+	_wave_shop.show_shop(game_state.wave, _active_modifier_id, now_ms, self)
+	_layout_modal(_wave_shop.modal, _wave_shop.desired_size)
+	_wave_shop.modal.visible = true
 	_raise_visible_modal_controls()
 	JuiceManager.play(JuiceManager.SFX.WAVE_SHOP_OPEN)
-	# Wire card buttons horizontally and focus the first; skip_btn is reachable via down
-	FocusManager.setup_dpad_neighbors(card_btns, false)
-	if not card_btns.is_empty():
-		for cb in card_btns:
-			FocusManager.set_neighbor(cb, "bottom", skip_btn)
-		FocusManager.set_neighbor(skip_btn, "top", card_btns[0])
-		card_btns[0].grab_focus()
+	_wave_shop.finish_open()
 
 func _on_wave_shop_pick(card_id: String, now_ms: int) -> void:
 	_wave_shop_modal.visible = false
@@ -869,11 +718,17 @@ func _apply_responsive_layout() -> void:
 	renderer.position = _world_rect.position
 	renderer.scale = Vector2(_world_scale, _world_scale)
 
-	var margin: float = _LAYOUT.edge_margin(viewport)
-	var top: float = _LAYOUT.top_margin(viewport)
+	var margins: Dictionary = _LAYOUT.content_margins(viewport, self)
+	var margin_l: float = float(margins["left"])
+	var margin_r: float = float(margins["right"])
+	var top: float = float(margins["top"])
+	var bottom: float = float(margins["bottom"])
+	var margin: float = maxf(margin_l, margin_r)
 	var top_bar_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.074)
-	_LAYOUT.apply_rect(_top_bar, Rect2(Vector2(margin, top), Vector2(maxf(0.0, viewport.x - margin * 2.0), top_bar_h)))
-	_LAYOUT.apply_rect(_speed_bar, Rect2(Vector2(margin, top + top_bar_h + 6.0), Vector2(166.0, _LAYOUT.min_touch_height(false))))
+	if _LAYOUT.is_short_height(viewport):
+		top_bar_h = maxf(_LAYOUT.min_touch_height(false), minf(top_bar_h, 44.0))
+	_LAYOUT.apply_rect(_top_bar, Rect2(Vector2(margin_l, top), Vector2(maxf(0.0, viewport.x - margin_l - margin_r), top_bar_h)))
+	_LAYOUT.apply_rect(_speed_bar, Rect2(Vector2(margin_l, top + top_bar_h + 6.0), Vector2(166.0, _LAYOUT.min_touch_height(false))))
 
 	# Scale font sizes with viewport height so they stay readable at all sizes
 	var top_font: int = int(clampf(viewport.y * 0.026, 13.0, 18.0))
@@ -881,35 +736,48 @@ func _apply_responsive_layout() -> void:
 		if lbl:
 			lbl.add_theme_font_size_override("font_size", top_font)
 
-	# Shop strip: fit within the game world width with side margins, min 6 towers visible
+	# Shop strip: fit within viewport; horizontal scroll when 6 towers exceed width
 	var tower_count: int = max(1, _shop_btns.size())
 	var gap_count: int = max(0, tower_count - 1)
 	var shop_sep: float = 6.0
 	var compact_shop: bool = viewport.y < 620.0 or _LAYOUT.shop_strip_needs_compaction(viewport, tower_count)
-	var preferred_card_w: float = 106.0 if compact_shop else 126.0
-	var min_card_w: float = 76.0 if compact_shop else 92.0
+	var preferred_card_w: float = 100.0 if compact_shop else 120.0
+	var min_card_w: float = 72.0 if compact_shop else 88.0
 	var shop_h: float = 76.0 if compact_shop else 88.0
-	var shop_max_w: float = minf(viewport.x - margin * 2.0, _world_rect.size.x - margin * 2.0)
-	var min_shop_w: float = float(tower_count) * min_card_w + float(gap_count) * shop_sep
-	var preferred_shop_w: float = float(tower_count) * preferred_card_w + float(gap_count) * shop_sep
-	var shop_w: float = minf(preferred_shop_w, shop_max_w)
-	shop_w = maxf(shop_w, min_shop_w)
-	var card_w: float = floor((shop_w - float(gap_count) * shop_sep) / float(tower_count))
+	var shop_max_w: float = minf(viewport.x - margin_l - margin_r, _world_rect.size.x - margin * 2.0)
+	var preferred_content_w: float = float(tower_count) * preferred_card_w + float(gap_count) * shop_sep
+	var min_content_w: float = float(tower_count) * min_card_w + float(gap_count) * shop_sep
+	var needs_scroll: bool = min_content_w > shop_max_w + 1.0
+	var shop_w: float = shop_max_w if needs_scroll else minf(preferred_content_w, shop_max_w)
+	var card_w: float
+	if needs_scroll:
+		card_w = min_card_w
+	else:
+		card_w = floor((shop_w - float(gap_count) * shop_sep) / float(tower_count))
+		card_w = maxf(card_w, min_card_w)
 	var card_h: float = shop_h
-	var shop_x: float = (viewport.x - shop_w) * 0.5
-	var shop_y: float = viewport.y - _LAYOUT.bottom_margin(viewport) - shop_h
+	var shop_x: float = margin_l + (viewport.x - margin_l - margin_r - shop_w) * 0.5
+	var shop_y: float = viewport.y - bottom - shop_h
 	_shop_bar.add_theme_constant_override("separation", int(shop_sep))
 	for ttype in _shop_btns.keys():
 		var shop_btn: Button = _shop_btns[ttype]
-		shop_btn.size_flags_horizontal = Control.SIZE_FILL
+		shop_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN if needs_scroll else Control.SIZE_FILL
 		shop_btn.custom_minimum_size = Vector2(card_w, card_h)
 		if ttype in _shop_name_labels:
 			var name_lbl: Label = _shop_name_labels[ttype]
-			name_lbl.add_theme_font_size_override("font_size", 11 if compact_shop else 13)
+			name_lbl.add_theme_font_size_override("font_size", 10 if compact_shop or needs_scroll else 13)
 		if ttype in _shop_cost_labels:
 			var cost_lbl: Label = _shop_cost_labels[ttype]
-			cost_lbl.add_theme_font_size_override("font_size", 12 if compact_shop else 14)
-	_LAYOUT.apply_rect(_shop_bar, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
+			cost_lbl.add_theme_font_size_override("font_size", 11 if compact_shop or needs_scroll else 14)
+	var content_w: float = float(tower_count) * card_w + float(gap_count) * shop_sep
+	_shop_bar.custom_minimum_size = Vector2(content_w if needs_scroll else shop_w, shop_h)
+	if _shop_scroll != null:
+		_shop_scroll.horizontal_scroll_mode = (
+			ScrollContainer.SCROLL_MODE_SHOW_ALWAYS if needs_scroll else ScrollContainer.SCROLL_MODE_DISABLED
+		)
+		_LAYOUT.apply_rect(_shop_scroll, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
+	else:
+		_LAYOUT.apply_rect(_shop_bar, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
 
 	# Wave button: docked flush to top of shop strip, visually grouped
 	var wave_size: Vector2 = Vector2(clampf(viewport.x * 0.23, 180.0, 240.0), _LAYOUT.min_touch_height(true))
@@ -922,28 +790,33 @@ func _apply_responsive_layout() -> void:
 
 	# Position modifier badge right of speed bar if present
 	if _modifier_badge != null:
-		var badge_x: float = margin + 166.0 + 8.0
+		var badge_x: float = margin_l + 166.0 + 8.0
 		var badge_y: float = top + top_bar_h + 9.0
 		_modifier_badge.position = Vector2(badge_x, badge_y)
 
 	# Instruction banner: centered below top bar
 	if _instruction_banner != null:
-		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin * 2.0))
-		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) else 52.0
-		var banner_font: int = int(clampf(viewport.y * 0.032, 15.0, 20.0))
+		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin_l - margin_r))
+		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport) else 52.0
+		var banner_font: int = int(clampf(viewport.y * 0.032, 14.0, 20.0))
 		_instruction_label.add_theme_font_size_override("font_size", banner_font)
-		_LAYOUT.apply_rect(_instruction_banner, Rect2(Vector2((viewport.x - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
+		_LAYOUT.apply_rect(_instruction_banner, Rect2(Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
 
 	_layout_tower_panel(null)
 
 	_layout_modal(_promotion_modal, Vector2(360.0, 160.0))
 	_layout_modal(_pause_modal, Vector2(400.0, 360.0))
-	_layout_modal(_placement_confirm_modal, Vector2(360.0, 146.0))
+	# Placement confirm modal is intentionally not shown (floating bar only).
+	if _placement_confirm_modal != null:
+		_placement_confirm_modal.visible = false
+	if _wave_shop != null and _wave_shop.is_open():
+		_wave_shop.desired_size = _LAYOUT.wave_shop_desired_size(viewport, self)
+		_layout_modal(_wave_shop.modal, _wave_shop.desired_size)
 	_raise_core_hud_controls()
 	_raise_visible_modal_controls()
 
 func _raise_core_hud_controls() -> void:
-	for node in [_wave_btn, _shop_bar, _instruction_banner, _placement_confirm_bar]:
+	for node in [_wave_btn, _shop_scroll if _shop_scroll != null else _shop_bar, _instruction_banner, _placement_confirm_bar]:
 		if node != null and node.get_parent() == hud_layer:
 			hud_layer.move_child(node, hud_layer.get_child_count() - 1)
 
@@ -951,12 +824,12 @@ func _raise_visible_modal_controls() -> void:
 	for node in [_promotion_modal, _pause_modal, _placement_confirm_modal, _wave_shop_modal]:
 		if node != null and node.get_parent() == hud_layer and node.is_visible_in_tree():
 			hud_layer.move_child(node, hud_layer.get_child_count() - 1)
-	if _tower_details_overlay != null and _tower_details_overlay.get_parent() == hud_layer:
-		if _tower_details_overlay.has_meta("backdrop"):
-			var backdrop: Node = _tower_details_overlay.get_meta("backdrop")
+	if _details != null and _details.overlay != null and _details.overlay.get_parent() == hud_layer:
+		if _details.overlay.has_meta("backdrop"):
+			var backdrop: Node = _details.overlay.get_meta("backdrop")
 			if is_instance_valid(backdrop) and backdrop.get_parent() == hud_layer:
 				hud_layer.move_child(backdrop, hud_layer.get_child_count() - 1)
-		hud_layer.move_child(_tower_details_overlay, hud_layer.get_child_count() - 1)
+		hud_layer.move_child(_details.overlay, hud_layer.get_child_count() - 1)
 
 static func _mod_short_name(mod_id: String) -> String:
 	match mod_id:
@@ -970,8 +843,11 @@ static func _mod_short_name(mod_id: String) -> String:
 func _layout_modal(panel: PanelContainer, desired_size: Vector2) -> void:
 	if panel == null:
 		return
-	var rect: Rect2 = _LAYOUT.modal_rect(_LAYOUT.viewport_size(self), desired_size)
-	_LAYOUT.apply_rect(panel, rect)
+	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	# Center over the playfield when present so letterbox gutters don't pull modals off-map.
+	var center_on: Rect2 = _world_rect if _world_rect.size.x > 1.0 and _world_rect.size.y > 1.0 else Rect2()
+	var rect: Rect2 = _LAYOUT.modal_rect(viewport, desired_size, self, center_on)
+	_LAYOUT.apply_modal(panel, rect)
 
 func _screen_to_world(pos: Vector2) -> Vector2:
 	if _world_scale <= 0.0:
@@ -985,24 +861,28 @@ func _layout_tower_panel(selected: Tower) -> void:
 	if _tower_panel == null:
 		return
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	var margin: float = _LAYOUT.edge_margin(viewport)
-	var top: float = _LAYOUT.top_margin(viewport)
-	var bottom: float = _LAYOUT.bottom_margin(viewport)
-	# INCREASED SIZE: 220px height for better mobile touch targets
-	var size: Vector2 = Vector2(minf(460.0, maxf(340.0, viewport.x - margin * 2.0)), 220.0)
+	var margins: Dictionary = _LAYOUT.content_margins(viewport, self)
+	var margin_l: float = float(margins["left"])
+	var margin_r: float = float(margins["right"])
+	var top: float = float(margins["top"])
+	var bottom: float = float(margins["bottom"])
+	var panel_h: float = 220.0
+	if _LAYOUT.is_short_height(viewport) or _LAYOUT.is_phone_ultrawide(viewport):
+		panel_h = 168.0
+	var size: Vector2 = Vector2(minf(460.0, maxf(300.0, viewport.x - margin_l - margin_r)), panel_h)
 	var shop_y: float = viewport.y - bottom - 92.0
 	var low_y: float = maxf(top + 102.0, shop_y - size.y - 12.0)
 	var high_y: float = top + 102.0
-	var x: float = margin
+	var x: float = margin_l
 	var y: float = low_y
 
 	if selected != null:
 		var selected_screen: Vector2 = _world_to_screen(selected.pos)
-		x = margin if selected_screen.x > viewport.x * 0.5 else viewport.x - margin - size.x
+		x = margin_l if selected_screen.x > viewport.x * 0.5 else viewport.x - margin_r - size.x
 		y = high_y if selected_screen.y > viewport.y * 0.52 else low_y
 		y = clampf(y, top + 92.0, maxf(top + 92.0, shop_y - size.y - 8.0))
 	else:
-		x = viewport.x - margin - size.x
+		x = viewport.x - margin_r - size.x
 		y = low_y
 
 	_LAYOUT.apply_rect(_tower_panel, Rect2(Vector2(x, y), size))
@@ -1062,12 +942,22 @@ func _process(_delta: float) -> void:
 	if game_state.lives < _prev_lives:
 		var lost: int = _prev_lives - game_state.lives
 		view_state.start_screen_shake(now_ms, 7.0, 400)
-		var life_word: String = "Life" if lost == 1 else "%d Lives" % lost
-		view_state.show_toast("%s lost - %d left" % [life_word, game_state.lives], now_ms, 1200)
+		view_state.show_toast(
+			"%s — %d left" % [_BRAND.life_lost_toast(lost), game_state.lives],
+			now_ms,
+			1200
+		)
 	_prev_lives = game_state.lives
 
 	view_state.tick(now_ms)
 	game_state.update_simulation(now_ms)
+	# Juice: kills and wave-clear (rising edges after sim step)
+	if game_state.stat_enemies_killed > _prev_kills:
+		JuiceManager.play(JuiceManager.SFX.ENEMY_DEATH)
+	_prev_kills = game_state.stat_enemies_killed
+	if game_state.wave_shop_pending and not _prev_wave_shop_pending:
+		JuiceManager.play(JuiceManager.SFX.WAVE_CLEAR)
+	_prev_wave_shop_pending = game_state.wave_shop_pending
 	renderer.render_frame(now_ms)
 	_update_selection_ring()
 	_update_virtual_cursor(now_ms)
@@ -1085,20 +975,23 @@ func _update_hud(now_ms: int) -> void:
 	_wave_label.text  = "Wave %d / %d" % [game_state.wave, _MAPS.MAX_WAVE]
 
 	if _wave_progress_bar != null:
-		var in_wave: bool = not game_state.wave_ready and not game_state.wave_shop_pending and game_state.wave_enemy_total > 0
+		var spawn_total: int = game_state.get_wave_spawn_total()
+		var in_wave: bool = not game_state.wave_ready and not game_state.wave_shop_pending and spawn_total > 0
 		_wave_progress_bar.visible = in_wave
 		if in_wave:
 			var killed := game_state.enemies_spawned - game_state.enemies.size()
-			var ratio: float = float(maxi(0, killed)) / float(game_state.wave_enemy_total)
+			var ratio: float = float(maxi(0, killed)) / float(spawn_total)
 			_wave_progress_bar.value = ratio
 			_apply_wave_progress_style(ratio)
 
-	if _lives_label.text != "Lives: %d" % game_state.lives:
-		_lives_label.text = "Lives: %d" % game_state.lives
+	var lives_txt: String = _BRAND.integrity(game_state.lives)
+	if _lives_label.text != lives_txt:
+		_lives_label.text = lives_txt
 		_juice_label(_lives_label)
-		
-	if _gold_label.text != "Credits: %d" % game_state.gold:
-		_gold_label.text  = "Credits: %d" % game_state.gold
+
+	var gold_txt: String = _BRAND.credits(game_state.gold)
+	if _gold_label.text != gold_txt:
+		_gold_label.text = gold_txt
 		_juice_label(_gold_label)
 
 	var sel: Tower = game_state.get_tower_by_id(view_state.selected_tower_id) if view_state.selected_tower_id >= 0 else null
@@ -1107,7 +1000,7 @@ func _update_hud(now_ms: int) -> void:
 	var pause_visible: bool = game_state.paused and game_state.game_state == "playing"
 	var has_pending: bool = view_state.has_pending_placement()
 	var wave_shop_visible: bool = game_state.wave_shop_pending
-	var details_visible: bool = _tower_details_overlay != null
+	var details_visible: bool = _details.is_open()
 	var blocking_menu_visible: bool = wave_shop_visible or promo_visible or pause_visible or has_pending or details_visible
 	
 	# Instruction banner: persistent instructions have priority over contextual hints
@@ -1119,13 +1012,13 @@ func _update_hud(now_ms: int) -> void:
 			_instruction_label.text = view_state.instruction_banner
 		elif game_state.towers.size() == 0 and not view_state.placement_active:
 			_instruction_banner.visible = true
-			_instruction_label.text = "CHOOSE A TOWER TO BEGIN DEFENSE"
+			_instruction_label.text = _BRAND.INSTRUCTION_CHOOSE_TOWER
 		elif view_state.placement_active:
 			_instruction_banner.visible = true
 			_instruction_label.text = _placement_hint_text()
 		elif game_state.wave_ready and game_state.wave == 1 and game_state.enemies.size() == 0:
 			_instruction_banner.visible = true
-			_instruction_label.text = "START WAVE WHEN READY"
+			_instruction_label.text = _BRAND.INSTRUCTION_START_WAVE
 		else:
 			_instruction_banner.visible = false
 
@@ -1135,7 +1028,9 @@ func _update_hud(now_ms: int) -> void:
 	var toast: String = view_state.get_toast(now_ms)
 	_msg_label.text = toast if toast != "" else game_state.last_message
 
-	if _shop_bar != null:
+	if _shop_scroll != null:
+		_shop_scroll.visible = not blocking_menu_visible
+	elif _shop_bar != null:
 		_shop_bar.visible = not blocking_menu_visible
 
 	# Wave button visibility
@@ -1210,7 +1105,7 @@ func _update_hud(now_ms: int) -> void:
 	if _pause_modal:
 		_pause_modal.visible = pause_visible
 		if pause_visible:
-			_pause_title.text = "Paused  |  Wave %d  Lives %d  Credits %d" % [game_state.wave, game_state.lives, game_state.gold]
+			_pause_title.text = _BRAND.pause_status(game_state.wave, game_state.lives, game_state.gold)
 			if view_state.confirm_restart:
 				var elapsed_ms: int = now_ms - _restart_confirm_start_ms
 				var remaining_s: int = maxi(0, 4 - elapsed_ms / 1000)
@@ -1239,22 +1134,15 @@ func _update_hud(now_ms: int) -> void:
 			_dpad_return_focus()
 		_dpad_pause_open = pause_visible
 
+	# P0: floating confirm bar only — keep center modal hidden so it never stacks over the map.
 	if _placement_confirm_modal:
-		_placement_confirm_modal.visible = has_pending
-		if has_pending:
-			var pos: Vector2 = view_state.pending_placement_pos
-			var name: String = _TT.TOWER_TYPES.get(view_state.pending_placement_type, {}).get("name", "Tower")
-			if view_state.pending_placement_valid:
-				_placement_confirm_title.text = "Place %s at (%d, %d)?" % [name, int(pos.x), int(pos.y)]
-			else:
-				var check: Array = _placement_check(pos, view_state.pending_placement_type)
-				_placement_confirm_title.text = "Cannot place %s: %s" % [name, _placement_reason_hint(str(check[1]))]
-			_placement_confirm_btn.disabled = not view_state.pending_placement_valid
-		if has_pending and not _dpad_place_open:
-			_placement_confirm_btn.grab_focus()
-		elif not has_pending and _dpad_place_open:
-			_dpad_return_focus()
-		_dpad_place_open = has_pending
+		_placement_confirm_modal.visible = false
+	if has_pending and not _dpad_place_open:
+		if _confirm_placement_btn != null:
+			_confirm_placement_btn.grab_focus()
+	elif not has_pending and _dpad_place_open:
+		_dpad_return_focus()
+	_dpad_place_open = has_pending
 
 	# Shop button affordability — block active menus, dim-only for unaffordable towers.
 	for ttype in _shop_btns:
@@ -1336,29 +1224,6 @@ func _show_wave_banner(wave_num: int) -> void:
 	var sfx := JuiceManager.SFX.BOSS_APPEAR if wave_num in [5, 10, 15] else JuiceManager.SFX.WAVE_START
 	JuiceManager.play(sfx)
 
-func _format_ui_reason(reason: String) -> String:
-	var text: String = reason.strip_edges()
-	if text == "":
-		return "Cannot place here"
-	if "_" in text:
-		text = text.replace("_", " ").capitalize()
-	return text
-
-func _placement_reason_hint(reason: String) -> String:
-	var text: String = _format_ui_reason(reason)
-	match text:
-		"Too close to the path":
-			return "MOVE AWAY FROM PATH"
-		"Too close to another tower":
-			return "TOO CLOSE TO TOWER"
-		"Cannot place on shop area":
-			return "MOVE ABOVE SHOP"
-		"Out of bounds":
-			return "STAY INSIDE MAP"
-		"Not enough gold":
-			return "NOT ENOUGH CREDITS"
-	return text.to_upper()
-
 func _placement_check(pos: Vector2, tower_type: String) -> Array:
 	if game_state == null or tower_type == "":
 		return [false, "Cannot place here"]
@@ -1373,10 +1238,11 @@ func _placement_hint_text() -> String:
 		if view_state.placement_mode == "drag":
 			return "VALID PLACEMENT - RELEASE TO BUILD"
 		return "VALID PLACEMENT - TAP TO BUILD"
-	return "INVALID - %s" % _placement_reason_hint(str(check[1]))
+	return "INVALID - %s" % _PLACEMENT_HINTS.reason_hint(str(check[1]))
 
 func _update_placement_confirm_bar() -> void:
-	if _placement_confirm_bar == null: return
+	if _placement_confirm_bar == null:
+		return
 	if view_state.has_pending_placement():
 		_placement_confirm_bar.visible = true
 		var pos: Vector2 = _world_to_screen(view_state.pending_placement_pos)
@@ -1384,10 +1250,14 @@ func _update_placement_confirm_bar() -> void:
 		if bar_size.x <= 1.0 or bar_size.y <= 1.0:
 			bar_size = _placement_confirm_bar.get_combined_minimum_size()
 		var viewport: Vector2 = _LAYOUT.viewport_size(self)
-		var margin: float = _LAYOUT.edge_margin(viewport)
+		var margins: Dictionary = _LAYOUT.content_margins(viewport, self)
+		var margin_l: float = float(margins["left"])
+		var margin_r: float = float(margins["right"])
+		var margin_t: float = float(margins["top"])
+		var margin_b: float = float(margins["bottom"])
 		var next_pos: Vector2 = pos + Vector2(-bar_size.x * 0.5, 40.0)
-		next_pos.x = clampf(next_pos.x, margin, maxf(margin, viewport.x - bar_size.x - margin))
-		next_pos.y = clampf(next_pos.y, margin, maxf(margin, viewport.y - bar_size.y - margin))
+		next_pos.x = clampf(next_pos.x, margin_l, maxf(margin_l, viewport.x - bar_size.x - margin_r))
+		next_pos.y = clampf(next_pos.y, margin_t, maxf(margin_t, viewport.y - bar_size.y - margin_b))
 		_placement_confirm_bar.position = next_pos
 		_confirm_placement_btn.disabled = not view_state.pending_placement_valid
 	else:
@@ -1425,8 +1295,8 @@ func _input(event: InputEvent) -> void:
 
 	# Dpad / keyboard cancel — layered dismiss (innermost modal first)
 	if event.is_action_pressed("ui_cancel"):
-		if _tower_details_overlay != null:
-			_close_tower_details()
+		if _details.is_open():
+			_details.close(game_state)
 			get_viewport().set_input_as_handled()
 			return
 		if _wave_shop_modal != null and _wave_shop_modal.visible:
@@ -1511,8 +1381,15 @@ func _control_tree_captures_point(node: Node, pos: Vector2) -> bool:
 func _dispatch(action: Dictionary, now_ms: int) -> void:
 	if action.is_empty():
 		return
+	# Restart must rebuild the whole screen (fresh ViewState, _prev_* edge
+	# trackers, renderer state). Never send it to apply_action(), whose
+	# in-place _init() re-run leaves screen-level state stale.
+	if action.get("type", "") == "restart_game":
+		view_state.confirm_restart = false
+		_restart_current_run()
+		return
 	if action.get("type", "") == "placement_failed":
-		view_state.show_toast(_format_ui_reason(str(action.get("reason", "Cannot place here"))), now_ms, 1200)
+		view_state.show_toast(_PLACEMENT_HINTS.format_ui_reason(str(action.get("reason", "Cannot place here"))), now_ms, 1200)
 		return
 	var result := game_state.apply_action(action, now_ms)
 	_handle_action_result(result, action, now_ms)
@@ -1520,7 +1397,7 @@ func _dispatch(action: Dictionary, now_ms: int) -> void:
 func _handle_action_result(result: Dictionary, action: Dictionary, now_ms: int) -> void:
 	if not result.get("success", false):
 		if result.get("reason", "") != "":
-			view_state.show_toast(_format_ui_reason(str(result["reason"])), now_ms, 1000)
+			view_state.show_toast(_PLACEMENT_HINTS.format_ui_reason(str(result["reason"])), now_ms, 1000)
 		return
 
 	var atype: String = action.get("type", "")
@@ -1682,194 +1559,14 @@ func _on_cancel_placement_pressed() -> void:
 	view_state.show_toast("Placement cancelled.", Time.get_ticks_msec(), 700)
 
 func _on_info_pressed() -> void:
-	if _tower_details_overlay != null:
-		_close_tower_details()
+	if _details.is_open():
+		_details.close(game_state)
 		return
 	var sel_id: int = view_state.selected_tower_id
 	if sel_id < 0: return
 	var tower := game_state.get_tower_by_id(sel_id)
 	if tower == null: return
-	_show_tower_details(tower)
-
-func _show_tower_details(tower: Tower) -> void:
-	_close_tower_details()
-
-	# Auto-pause if the setting is enabled and the game is not already paused
-	if Progression.get_settings().get("pause_on_tower_info", true) and not game_state.paused:
-		game_state.paused = true
-		_info_auto_paused = true
-
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var panel_w: float = clampf(vp.x - 32.0, 280.0, 540.0)
-	var panel_h: float = clampf(vp.y - 64.0, 200.0, 560.0)
-
-	# Dim backdrop — click anywhere on it to dismiss
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.0, 0.0, 0.0, 0.55)
-	backdrop.z_index = _Z_OVERLAY_BACKDROP
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
-	backdrop.gui_input.connect(func(ev: InputEvent):
-		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
-			_close_tower_details()
-	)
-	hud_layer.add_child(backdrop)
-
-	_tower_details_overlay = PanelContainer.new()
-	_tower_details_overlay.z_index = _Z_OVERLAY
-	_tower_details_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.06, 0.11, 0.97)
-	style.set_border_width_all(2)
-	style.border_color = Color(0.18, 0.69, 1.0, 0.7)
-	style.set_corner_radius_all(10)
-	style.shadow_color = Color(0.0, 0.5, 1.0, 0.25)
-	style.shadow_size = 12
-	_tower_details_overlay.add_theme_stylebox_override("panel", style)
-	_tower_details_overlay.set_meta("backdrop", backdrop)
-
-	# Position centred, but anchored to top-left so size doesn't fight the anchor
-	_tower_details_overlay.position = Vector2(
-		(vp.x - panel_w) * 0.5,
-		(vp.y - panel_h) * 0.5
-	)
-	_tower_details_overlay.size = Vector2(panel_w, panel_h)
-	hud_layer.add_child(_tower_details_overlay)
-	_raise_visible_modal_controls()
-
-	var scroll := ScrollContainer.new()
-	scroll.scroll_deadzone = 12
-	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
-	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_tower_details_overlay.add_child(scroll)
-
-	var margin := MarginContainer.new()
-	margin.mouse_filter = Control.MOUSE_FILTER_PASS
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_bottom", 12)
-	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(margin)
-
-	var vbox := VBoxContainer.new()
-	vbox.mouse_filter = Control.MOUSE_FILTER_PASS
-	vbox.add_theme_constant_override("separation", 10)
-	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	margin.add_child(vbox)
-
-	# ── Header ──────────────────────────────────────────────────────────────
-	var header := HBoxContainer.new()
-	header.mouse_filter = Control.MOUSE_FILTER_PASS
-	vbox.add_child(header)
-
-	var title := Label.new()
-	title.text = "%s — Upgrade Paths" % tower.tower_name
-	title.add_theme_font_size_override("font_size", 17)
-	title.add_theme_color_override("font_color", Color(0.18, 0.69, 1.0))
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	header.add_child(title)
-
-	var close_btn := Button.new()
-	close_btn.text = "✕"
-	close_btn.custom_minimum_size = Vector2(32.0, 32.0)
-	_THEME.apply_button(close_btn, "secondary")
-	close_btn.pressed.connect(_close_tower_details)
-	header.add_child(close_btn)
-
-	var sep := HSeparator.new()
-	vbox.add_child(sep)
-
-	# ── Current stats row ───────────────────────────────────────────────────
-	var now_ms: int = Time.get_ticks_msec()
-	var stats_lbl := Label.new()
-	stats_lbl.text = "DMG %d   Range %d   CD %dms" % [
-		tower.get_effective_damage(now_ms),
-		int(tower.effective_range()),
-		tower.effective_cooldown()
-	]
-	stats_lbl.add_theme_font_size_override("font_size", 12)
-	stats_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.85))
-	vbox.add_child(stats_lbl)
-
-	# ── One card per upgrade path ────────────────────────────────────────────
-	for path in _MAPS.PATH_KEYS:
-		var p_data := _UP.get_path_data(tower.ttype, path)
-		var cur: int = tower.tracker.path_levels[path]
-
-		var card := PanelContainer.new()
-		card.mouse_filter = Control.MOUSE_FILTER_PASS
-		var card_sb := StyleBoxFlat.new()
-		card_sb.bg_color = Color(0.10, 0.13, 0.18, 0.85)
-		card_sb.set_border_width_all(1)
-		card_sb.border_color = Color(0.18, 0.69, 1.0, 0.25)
-		card_sb.set_corner_radius_all(6)
-		card_sb.content_margin_left = 10
-		card_sb.content_margin_right = 10
-		card_sb.content_margin_top = 8
-		card_sb.content_margin_bottom = 8
-		card.add_theme_stylebox_override("panel", card_sb)
-		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		vbox.add_child(card)
-
-		var cvbox := VBoxContainer.new()
-		cvbox.mouse_filter = Control.MOUSE_FILTER_PASS
-		cvbox.add_theme_constant_override("separation", 4)
-		card.add_child(cvbox)
-
-		# Path name + level dots on one line
-		var top_row := HBoxContainer.new()
-		top_row.mouse_filter = Control.MOUSE_FILTER_PASS
-		cvbox.add_child(top_row)
-
-		var p_name := Label.new()
-		p_name.text = p_data["name"]
-		p_name.add_theme_font_size_override("font_size", 14)
-		p_name.add_theme_color_override("font_color", Color(0.18, 0.69, 1.0))
-		p_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		top_row.add_child(p_name)
-
-		var dots := ""
-		for k in range(5):
-			dots += "●" if k < cur else "○"
-		var p_prog := Label.new()
-		p_prog.text = dots
-		p_prog.add_theme_font_size_override("font_size", 14)
-		p_prog.add_theme_color_override("font_color",
-			Color(0.3, 0.9, 0.55) if cur > 0 else Color(0.4, 0.45, 0.5))
-		top_row.add_child(p_prog)
-
-		var p_desc := Label.new()
-		p_desc.text = p_data["desc"]
-		p_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		p_desc.add_theme_font_size_override("font_size", 12)
-		p_desc.add_theme_color_override("font_color", Color(0.75, 0.78, 0.88))
-		p_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cvbox.add_child(p_desc)
-
-		var next_lvl := mini(4, cur)
-		var power := int((p_data["tiers"][next_lvl] - 1.0) * 100.0)
-		var p_stats := Label.new()
-		p_stats.text = "Next upgrade: +%d%% power" % power if cur < 5 else "MAX LEVEL"
-		p_stats.add_theme_font_size_override("font_size", 11)
-		p_stats.add_theme_color_override("font_color",
-			Color(1.0, 0.84, 0.0) if cur < 5 else Color(0.3, 0.9, 0.55))
-		cvbox.add_child(p_stats)
-
-func _close_tower_details() -> void:
-	if _tower_details_overlay == null:
-		return
-	if _tower_details_overlay.has_meta("backdrop"):
-		var bd: Node = _tower_details_overlay.get_meta("backdrop")
-		if is_instance_valid(bd):
-			bd.queue_free()
-	_tower_details_overlay.queue_free()
-	_tower_details_overlay = null
-	if _info_auto_paused:
-		_info_auto_paused = false
-		game_state.paused = false
+	_details.open(tower, game_state)
 
 func _on_promotion_confirm_pressed() -> void:
 	if view_state.selected_tower_id >= 0:
@@ -1891,8 +1588,8 @@ func _restart_current_run() -> void:
 	input_ctrl.view_state = view_state
 
 	game_state = GameState.new(map_data["path"], run_config, map_id)
-	_apply_variant_stats(game_state)
-	_place_starting_tower(game_state, run_config)
+	_RUN_SETUP.apply_variant_stats(game_state)
+	_RUN_SETUP.place_starting_tower(game_state, run_config)
 	_backdrop_texture = load(_MAP_BG_PATHS.get(map_id, ""))
 	input_ctrl.game_state = game_state
 	renderer.game_state = game_state
@@ -1900,6 +1597,9 @@ func _restart_current_run() -> void:
 	renderer.rebuild_path_for_map(map_data["path"])
 
 	_prev_lives = game_state.lives
+	_prev_wave = game_state.wave
+	_prev_kills = game_state.stat_enemies_killed
+	_prev_wave_shop_pending = game_state.wave_shop_pending
 	_hud_rects_ready = false
 	set_process(true)
 	view_state.show_toast("Game restarted.", Time.get_ticks_msec(), 900)

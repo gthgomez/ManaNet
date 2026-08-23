@@ -1,0 +1,127 @@
+schema_version: "2.0.0"
+project:
+  id: "mananet"
+  name: "ManaNet"
+  type: "game"
+  engine:
+    id: "godot"
+    version: "4.6.2"
+    rendering_method: "gl_compatibility"
+  targets:
+    - "windows"
+    - "android"
+
+# Capability flags reflect EXECUTED_VERIFIED / PARTIAL / BLOCKED state after
+# Phase 2D–4 false-completion recovery + AGES v2 verified completion stages A–E.
+capabilities:
+  static_verify: true
+  logic_test: true
+  scene_test: true
+  scenario_ir_execution: true
+  scenario_input: true
+  runtime_input: true
+  state_telemetry: true
+  real_screenshot_capture: true
+  screenshot_capture: true
+  video_capture: false
+  visual_diff: true
+  heuristic_visual_inspection: true
+  vlm_visual_evaluation: false
+  asset_structural_validation: true
+  asset_style_validation: false
+  asset_processing: true
+  asset_generation: false
+  audio_processing: true
+  scene_ir_compiler: true
+  autonomous_repair_demo: true
+  device_install: false
+  performance_capture: false
+
+capability_status:
+  scenario_ir_execution: EXECUTED_VERIFIED
+  runtime_input: EXECUTED_VERIFIED
+  real_screenshot_capture: EXECUTED_VERIFIED
+  visual_diff: EXECUTED_VERIFIED
+  visual_compare_scenario_gate: EXECUTED_VERIFIED
+  heuristic_visual_inspection: EXECUTED_VERIFIED
+  vlm_visual_evaluation: BLOCKED
+  asset_structural_validation: EXECUTED_VERIFIED
+  asset_style_validation: PARTIAL_DETERMINISTIC
+  asset_processing: EXECUTED_VERIFIED
+  asset_generation: BLOCKED
+  audio_processing: EXECUTED_VERIFIED
+  scene_ir_compiler: EXECUTED_VERIFIED
+  autonomous_repair_demo: EXECUTED_VERIFIED
+  device_lab: BLOCKED
+  performance_capture: BLOCKED
+  prior_phase_2d_3a_3c_go_claims: INVALIDATED
+  ready_for_phase_5: YES
+  ages_v2_verdict: AGES_V2_CONDITIONAL
+
+architecture:
+  domain_path: "simulation/core"
+  scenes_path: "scenes"
+  ui_components_path: "ui"
+  assets_path: "assets"
+
+runtime:
+  scenario_bridge: "res://.agent-game/godot_scenario_bridge.gd"
+
+governance:
+  allow_agent_baseline_mutation: false
+  allow_agent_asset_promotion: false
+  allow_agent_scene_mutation: false
+  allow_agent_map_mutation: false
+
+art_direction:
+  guide: "art/ART_DIRECTION.md"
+  palette:
+    path: "art/palette.png"
+    required: false
+    colors:
+      - "#1EB0FF"
+      - "#FFB400"
+      - "#FF3C3C"
+      - "#0A0F1C"
+  references:
+    good: "art/references/good"
+    avoid: "art/references/avoid"
+  profiles:
+    ui_icon:
+      asset_class: "ui_icon"
+      resolution: [64, 64]
+      perspective: "flat_2d"
+      outline: "none"
+      lighting: "self_illuminated"
+      palette_strict: false
+      alpha_required: true
+    pixel_sprite:
+      asset_class: "pixel_sprite"
+      resolution: [32, 32]
+      perspective: "top_down_isometric"
+      outline: "1px_dark_contour"
+      lighting: "top_left_45deg"
+      palette_strict: false
+      alpha_required: true
+
+entrypoints:
+  main_scene: "res://scenes/Main.tscn"
+  test_runner: "scripts/full_audit.gd"
+
+verification:
+  T0_fast:
+    - name: "godot_headless_quit"
+      command: ["pwsh", "-File", "C:/Workspace/tools/Godot/godot.ps1", "--headless", "--path", "C:/Workspace/Project_Games/ManaNet", "--quit"]
+  T1_logic:
+    - name: "full_audit_script"
+      command: ["pwsh", "-File", "C:/Workspace/tools/Godot/godot.ps1", "--headless", "--path", "C:/Workspace/Project_Games/ManaNet", "-s", "scripts/full_audit.gd"]
+  T2_scene:
+    - name: "basic_tower_placement"
+      scenario_id: "basic_tower_placement"
+    - name: "runtime_input_smoke"
+      scenario_id: "runtime_input_smoke"
+    - name: "basic_gameplay_smoke"
+      scenario_id: "basic_gameplay_smoke"
+  T3_visual:
+    - name: "visual_checkpoint_smoke"
+      scenario_id: "visual_checkpoint_smoke"

@@ -11,13 +11,13 @@ Agent-neutral startup router for the Godot tower defense port. Root `ENGINEERING
    - `CLAUDE.md` for Claude
    - `CODEX.md` for Codex, if present
    - `GEMINI.md` for Gemini, if present
-5. If porting from Kivy, inspect the matching source in `C:\Workspace\td_v712` before translating behavior.
+5. If porting from Kivy, inspect the matching source in `C:\Workspace\Project_Games\TowerDefenseKivy` before translating behavior.
 
 ## Local Rules
 
 - `PROJECT_CONTEXT.md` is the canonical project context for all agents.
 - `simulation/` must stay UI-free. Do not add Node references or scene coupling there.
-- Port mechanics faithfully from `td_v712`; do not invent new mechanics without user approval.
+- Port mechanics faithfully from `TowerDefenseKivy`; do not invent new mechanics without user approval.
 - Treat upgrade paths, Research Point progression, balance tuning, and Android export config as risk zones.
 
 ## Verification

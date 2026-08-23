@@ -21,6 +21,7 @@ var revealed_until: int
 var stealthed: bool
 var burn_until: int
 var burn_dps: int
+var last_flame_burst_ms: int = -999999  # timer-based flame VFX gate (250 ms)
 var last_teleport_time: int
 var last_damage_time: int
 var flash_until: int
@@ -33,6 +34,10 @@ var marked_until: int = 0   # Longshot Sniper variant — all towers deal +15% t
 
 # String tag used for death-rattle particle dispatch
 var type_name: String = "Enemy"
+
+# Legacy px-per-frame@60fps speed units (Kivy port); canonical value mirrors
+# GameState.SIM_REFERENCE_FRAME_MS (kept local to avoid class_name cycles).
+const SIM_REFERENCE_FRAME_MS: float = 1000.0 / 60.0
 
 func _init(p_path: Array) -> void:
 	path = p_path
@@ -100,18 +105,19 @@ func current_speed(now_ms: int) -> float:
 		return speed * 0.6
 	return speed
 
-func move(now_ms: int, speed_multiplier: float = 1.0) -> bool:
+func move(now_ms: int, sim_dt_ms: float) -> bool:
 	if path_index >= path.size() - 1:
 		return true
 	var target: Vector2 = path[path_index + 1]
 	var diff: Vector2 = target - pos
 	var dist: float = diff.length()
-	var spd: float = current_speed(now_ms) * speed_multiplier
-	if dist <= spd:
+	# speed is legacy px-per-frame@60fps; scale by the clamped sim delta.
+	var step: float = current_speed(now_ms) * sim_dt_ms / SIM_REFERENCE_FRAME_MS
+	if dist <= step:
 		pos = target
 		path_index += 1
 	elif dist > 0.0:
-		var move_vec: Vector2 = diff.normalized() * spd
+		var move_vec: Vector2 = diff.normalized() * step
 		pos += move_vec
 		if abs(move_vec.x) > 0.1:
 			facing_right = move_vec.x > 0

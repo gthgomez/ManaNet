@@ -5,15 +5,19 @@
 
 ---
 
-## Status (2026-05-22)
+## Status (2026-07-18 · Ship Program W1)
 
-Polish batch landed for UX/audio items below. **Done:** #1, #2, #3, #4, #5, #6, #7, #10, #11, #15. **Open:** #8 (boss waves), #9 (Cannon path abilities), #12 (Map 3 spiral), #13 (variant mechanic rework), #14 (Fire TV FocusManager).
+Polish batch landed for UX/audio items below. Ship program: `../SHIP_PROGRAM_90_DAY.md`. W1 inventory: `docs/W1_INVENTORY_AND_BOSS_CONTRACTS.md`.
 
 | # | Status | Notes |
 |---|--------|-------|
 | 1–6, 10–11, 15 | **DONE** | Shop affordance, live stats, milestone bars, wave shop, wave progress, run recap, restart timer bar, modifier stacking, banner split |
-| 7 | **DONE (partial SFX)** | `feedback/JuiceManager.gd` — pool + settings gate; wired in `GameScreen.gd` / menus. **Unused call sites:** `BTN_PRESS`, `ENEMY_DEATH`, `WAVE_CLEAR` (assets exist, no `JuiceManager.play` yet) |
-| 8–9, 12–14 | **Open** | See detailed sections |
+| 7 | **DONE (W1)** | Juice call sites complete: `BTN_PRESS` (GameTheme), `ENEMY_DEATH` + `WAVE_CLEAR` (GameScreen rising edges); place/upgrade/sell/boss/win already wired |
+| 8 | **DONE (core+density) / OPEN (feel)** | Boss classes + spawn + mechanics + BOSS_APPEAR + **60% trash density** (`get_wave_spawn_total`) + 600ms post-boss delay. Remaining: device feel pass, shield VFX clarity. Contracts in W1 doc |
+| 9 | **DONE (verified)** | All three Cannon paths have real mechanics since baseline; proven by regression tests (`_test_cannon_shock_stuns_target_and_chills_aoe`, `_test_cannon_siege_splash_and_rapid_cooldown`). Earlier "no gameplay effect" note was stale — see section 9 resolution |
+| 12 | **LIKELY DONE / VALIDATE** | Path coords already match proposed fix in `data/maps.gd`. Validate coverage before re-editing |
+| 13 | **Open** | Variant mechanics |
+| 14 | **OUT OF SCOPE** | Fire TV — skipped for 90-day mobile ship program |
 
 ---
 
@@ -29,7 +33,7 @@ Polish batch landed for UX/audio items below. **Done:** #1, #2, #3, #4, #5, #6, 
 | 6 | UX | Run recap — milestone deltas on EndScreen | Low | Medium |
 | 7 | Audio | JuiceManager implementation (SFX + haptics) | Medium | High |
 | 8 | Gameplay | Boss waves at W5 / W10 / W15 | Medium | High |
-| 9 | Content | Cannon tower — implement path abilities (Siege/Rapid/Shock) | Low | Medium |
+| 9 | Content | Cannon tower — implement path abilities (Siege/Rapid/Shock) — **DONE (verified by tests)** | Low | Medium |
 | 10 | UX | Restart confirmation visual timer bar | Low | Medium |
 | 11 | Gameplay | Challenge modifier stacking (compatible pairs + RP multiplier) | Low | Medium |
 | 12 | Map | Map 3 "Spiral" inner loop dead zone fix | Low | Medium |
@@ -273,6 +277,13 @@ if tower.type == "cannon" and tower.has_path_ability("shock"):
 ```
 
 Verify all three paths in a headless sim run before marking complete.
+
+**RESOLUTION (2026-08-21, verified):** Audit premise was stale — all three abilities were already implemented in the baseline port:
+- **Siege (Top):** `Tower.splash_radius()` (52+18×L px) + splash damage loop in `GameState.apply_hit()` (65% of hit damage) + screen shake; `siege_shockwave` effect for the Siege Mk.II variant.
+- **Rapid (Middle):** cooldown reduction in `Tower.effective_cooldown()` (−9%×L, capped −45%).
+- **Shock (Bottom):** `Tower.stun_duration_ms()` (400+150×L ms stun on primary target) + AoE chill in `GameState.apply_hit()` — all enemies within blast radius (splash radius if Top>0, else 35% range) are chilled for 300+100×L ms. Numbers match `upgrade_paths.gd` descriptions exactly.
+
+Regression coverage added in `tests/simulation/regression_checks.gd`: `_test_cannon_shock_stuns_target_and_chills_aoe()` and `_test_cannon_siege_splash_and_rapid_cooldown()`. No gameplay code changes were required.
 
 ---
 

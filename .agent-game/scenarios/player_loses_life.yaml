@@ -1,0 +1,22 @@
+schema_version: "2.0.0"
+scenario:
+  id: "player_loses_life"
+  name: "ManaNet Enemy Leak Life Deduction Fixture"
+  seed: 1337
+  viewport:
+    width: 900
+    height: 600
+
+telemetry_mode: "full"
+screenshot_mode: "none"
+render_mode: "headless"
+
+steps:
+  - op: "launch"
+    entrypoint: "res://simulation/core/GameState.gd"
+  - op: "checkpoint"
+    name: "initial"
+  - op: "assert"
+    target: "telemetry.state_snapshot.player.lives"
+    operator: "equals"
+    value: 10
