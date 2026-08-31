@@ -1,5 +1,14 @@
 # ManaNet — Visual / Theme / Sprite Audit
 
+> **Historical audit notice — 2026-08-31:** The implementation described below predates the
+> canonical ManaNet production pack. It remains useful as provenance for the original gaps,
+> but the current source of truth is `art/ART_DIRECTION.md`,
+> `art/contracts/mananet_asset_contract.yaml`, and
+> `assets/production/asset_manifest.json`. The production SVG cutouts now replace the
+> opaque raster path, boss fallback art, and single-projectile placeholder called out here;
+> the renderer and HUD are bound to those paths. Device/VLM review items remain open where
+> the AGES manifest explicitly blocks them.
+
 **Status:** DRAFT — source of truth for visual roadmap planning (not yet locked)  
 **Date:** 2026-07-19  
 **Device context:** Samsung S25 Ultra (wireless debug; landscape)  

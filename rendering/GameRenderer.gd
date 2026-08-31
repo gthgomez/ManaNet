@@ -12,9 +12,9 @@ class_name GameRenderer
 #   2. Path terrain (baked to SubViewport texture at load — not per-frame)
 #   3. Selected tower range circle
 #   4. Effects (flash, ring, explosion, lightning, sniper, ice, damage numbers, etc.)
-#   5. Enemies   (MultiMeshInstance2D, one per enemy type = 6 draw calls)
+#   5. Enemies   (MultiMeshInstance2D, one per enemy type = 9 draw calls)
 #   6. Towers    (MultiMeshInstance2D, one per tower type = 6 draw calls)
-#   7. Projectiles (MultiMeshInstance2D = 1 draw call)
+#   7. Projectiles (MultiMeshInstance2D, one readable VFX pool per tower family)
 #   8. Particles (custom _draw loop, ~200 max)
 #   9. HUD       (Control nodes in GameScreen scene — not drawn here)
 
@@ -24,25 +24,37 @@ const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _TOWER_FIDELITY_SHADER := preload("res://assets/shaders/TowerFidelity.gdshader")
 const _TOWER_CUTOUT_SHADER := preload("res://assets/shaders/tower_cutout.gdshader")
 const TOWER_SPRITE_PATHS: Dictionary = {
-	"archer": "res://assets/sprites/towers/archer_tower_icon.jpg",
-	"mage": "res://assets/sprites/towers/mage_tower_icon.jpg",
-	"cannon": "res://assets/sprites/towers/cannon_tower_icon.jpg",
-	"sniper": "res://assets/sprites/towers/sniper_tower_icon.jpg",
-	"frost": "res://assets/sprites/towers/frost_tower_icon.jpg",
-	"lightning": "res://assets/sprites/towers/lightning_tower_icon.jpg",
+	"archer": "res://assets/sprites/production/towers/plasma_repeater.svg",
+	"mage": "res://assets/sprites/production/towers/flux_crucible.svg",
+	"cannon": "res://assets/sprites/production/towers/nova_bombard.svg",
+	"sniper": "res://assets/sprites/production/towers/rail_ballista.svg",
+	"frost": "res://assets/sprites/production/towers/cryo_obelisk.svg",
+	"lightning": "res://assets/sprites/production/towers/tesla_spire.svg",
 }
 const ENEMY_SPRITE_PATHS: Dictionary = {
-	"Enemy": "res://assets/sprites/enemies/grunt_soldier.jpg",
-	"FastScout": "res://assets/sprites/enemies/fast_scout.jpg",
-	"ArmoredTank": "res://assets/sprites/enemies/armored_tank.jpg",
-	"FlyingDrone": "res://assets/sprites/enemies/flying_drone.jpg",
-	"SwarmMinion": "res://assets/sprites/enemies/swarm_minion.jpg",
-	"HeavyBrute": "res://assets/sprites/enemies/heavy_brute.png",
+	"Enemy": "res://assets/sprites/production/enemies/intrusion.svg",
+	"FastScout": "res://assets/sprites/production/enemies/fast_scout.svg",
+	"ArmoredTank": "res://assets/sprites/production/enemies/armored_firewall.svg",
+	"FlyingDrone": "res://assets/sprites/production/enemies/flying_drone.svg",
+	"SwarmMinion": "res://assets/sprites/production/enemies/swarm_minion.svg",
+	"HeavyBrute": "res://assets/sprites/production/enemies/heavy_brute.svg",
+	"BossShieldBrute": "res://assets/sprites/production/enemies/shielded_brute.svg",
+	"BossSwarmCarrier": "res://assets/sprites/production/enemies/swarm_carrier.svg",
+	"BossRegenerator": "res://assets/sprites/production/enemies/regenerator.svg",
 }
 const MAP_BG_PATHS: Dictionary = {
-	0: "res://assets/sprites/maps/map_bg_s_curve.jpg",
-	1: "res://assets/sprites/maps/map_bg_gauntlet.jpg",
-	2: "res://assets/sprites/maps/map_bg_spiral.jpg",
+	0: "res://assets/sprites/production/environment/s_curve.svg",
+	1: "res://assets/sprites/production/environment/gauntlet.svg",
+	2: "res://assets/sprites/production/environment/spiral.svg",
+}
+
+const PROJECTILE_SPRITE_PATHS: Dictionary = {
+	"archer": "res://assets/sprites/production/vfx/plasma_bolt.svg",
+	"mage": "res://assets/sprites/production/vfx/flux_burst.svg",
+	"cannon": "res://assets/sprites/production/vfx/nova_bomb.svg",
+	"sniper": "res://assets/sprites/production/vfx/rail_lance.svg",
+	"frost": "res://assets/sprites/production/vfx/cryo_pulse.svg",
+	"lightning": "res://assets/sprites/production/vfx/tesla_arc.svg",
 }
 
 # References set by GameScreen after scene is ready
@@ -57,21 +69,21 @@ var _path_baked: bool = false
 var _path_bake_size: Vector2 = Vector2.ZERO
 
 # --- MultiMesh pools ---
-# Enemies: 6 types, pre-allocated to MAX_ENEMIES instances each
+# Enemies: 9 types, pre-allocated to MAX_ENEMIES instances each
 const MAX_ENEMIES: int = 120
 const MAX_TOWERS: int = 60
 const MAX_PROJECTILES: int = 100
 
 # One MultiMeshInstance2D per enemy type (index matches ENEMY_TYPE_ORDER)
-const ENEMY_TYPE_ORDER: Array = ["Enemy","FastScout","ArmoredTank","FlyingDrone","SwarmMinion","HeavyBrute"]
+const ENEMY_TYPE_ORDER: Array = ["Enemy","FastScout","ArmoredTank","FlyingDrone","SwarmMinion","HeavyBrute","BossShieldBrute","BossSwarmCarrier","BossRegenerator"]
 var _enemy_mmis: Array = []   # Array[MultiMeshInstance2D]
 
 # One MultiMeshInstance2D per tower type
 const TOWER_TYPE_ORDER: Array = ["archer","mage","cannon","sniper","frost","lightning"]
 var _tower_mmis: Array = []   # Array[MultiMeshInstance2D]
 
-# Projectile pool — single MultiMeshInstance2D (all projectiles same quad)
-var _proj_mmi: MultiMeshInstance2D = null
+# Projectile pools — one MultiMeshInstance2D per tower family, each with its own VFX cutout
+var _proj_mmis: Array = []   # One textured pool per tower family for readable projectiles
 
 # Enemy colours per type (used for tinting the quad mesh)
 const ENEMY_COLORS: Dictionary = {
@@ -81,6 +93,9 @@ const ENEMY_COLORS: Dictionary = {
 	"FlyingDrone": Color(0.20, 0.75, 0.90),
 	"SwarmMinion": Color(0.70, 0.85, 0.20),
 	"HeavyBrute":  Color(0.60, 0.25, 0.70),
+	"BossShieldBrute": Color(0.30, 0.85, 1.0),
+	"BossSwarmCarrier": Color(0.72, 0.42, 1.0),
+	"BossRegenerator": Color(0.35, 1.0, 0.62),
 }
 
 # Cache for baked path draw — rebuild when viewport size changes
@@ -173,9 +188,15 @@ func _build_multimesh_pools() -> void:
 		add_child(mmi)
 		_tower_mmis.append(mmi)
 
-	# Projectile MMI
-	_proj_mmi = _make_mmi(MAX_PROJECTILES, Color(1.0, 1.0, 0.8))
-	add_child(_proj_mmi)
+	# Projectile pools are split by tower family so each attack reads at a glance.
+	_proj_mmis.clear()
+	for ttype in TOWER_TYPE_ORDER:
+		var proj_mmi := _make_mmi(MAX_PROJECTILES, Color.WHITE)
+		var proj_tex: Texture2D = load(PROJECTILE_SPRITE_PATHS[ttype])
+		if proj_tex:
+			proj_mmi.texture = proj_tex
+		add_child(proj_mmi)
+		_proj_mmis.append(proj_mmi)
 
 	# Overlay for Health Bars/Badges (must be last in tree to be on top)
 	var overlay := _OverlayDrawNode.new()
@@ -347,15 +368,28 @@ func _update_tower_meshes(now_ms: int) -> void:
 			mmi.multimesh.set_instance_color(j, col)
 
 func _update_projectile_meshes() -> void:
-	var count: int = mini(game_state.projectiles.size(), MAX_PROJECTILES)
-	_proj_mmi.multimesh.visible_instance_count = count
-	for i in range(count):
-		var proj: Projectile = game_state.projectiles[i]
-		var sz: float = float(proj.radius) * 2.0
-		var xform := Transform2D(0.0, Vector2(sz, sz), 0.0, proj.pos)
-		_proj_mmi.multimesh.set_instance_transform_2d(i, xform)
-		var col: Color = proj.tower.color if proj.tower else Color.YELLOW
-		_proj_mmi.multimesh.set_instance_color(i, col)
+	var buckets: Array = []
+	for _i in TOWER_TYPE_ORDER.size():
+		buckets.append([])
+	for proj in game_state.projectiles:
+		var ttype: String = proj.tower.ttype if proj.tower else "archer"
+		var idx: int = TOWER_TYPE_ORDER.find(ttype)
+		if idx < 0:
+			idx = 0
+		buckets[idx].append(proj)
+	for i in TOWER_TYPE_ORDER.size():
+		var mmi: MultiMeshInstance2D = _proj_mmis[i]
+		var bucket: Array = buckets[i]
+		var count: int = mini(bucket.size(), MAX_PROJECTILES)
+		mmi.multimesh.visible_instance_count = count
+		for j in range(count):
+			var proj: Projectile = bucket[j]
+			var sz: float = float(proj.radius) * 2.0
+			var rotation := proj.prev_pos.angle_to_point(proj.pos)
+			var xform := Transform2D(rotation, Vector2(sz, sz), 0.0, proj.pos)
+			mmi.multimesh.set_instance_transform_2d(j, xform)
+			var col: Color = proj.tower.color if proj.tower else Color.YELLOW
+			mmi.multimesh.set_instance_color(j, col.lightened(0.2))
 
 func _draw_projectile_trails(shake: Vector2) -> void:
 	if game_state == null:
