@@ -52,3 +52,8 @@ provenance:
   generation: "deterministic-authored-svg"
   ages_generation_provider: "blocked-no-provider-configured"
   vlm_style_review: "blocked-capability-not-configured"
+verification:
+  runtime_harness: "res://tests/runtime/RuntimeAssetCertification.tscn"
+  runtime_evidence_model: "present -> valid -> bound -> loaded -> exercised -> visually_reviewed"
+  latest_local_evidence: "build/verification/runtime_asset_coverage_visual.json"
+  latest_local_viewports: ["900x600", "1280x720", "1600x900"]

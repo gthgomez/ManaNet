@@ -31,6 +31,17 @@
 - HUD: `scenes/GameScreen.gd`
 - Assets: `assets/sprites/**`, `assets/shaders/**`, `assets/sfx/**`
 
+## Current reconciliation snapshot — 2026-08-31
+
+The historical gaps below describe the pre-production-pack baseline. The current
+reconciliation branch has runtime evidence for all 30 declared production assets:
+six towers, nine enemy/boss roles, three environment maps, six projectile/VFX
+families, and six UI icons. The evidence was captured from the live Godot scene
+at 900×600, 1280×720, and 1600×900. Structural/runtime integration is verified;
+the pack remains deterministic-authored first-generation artwork, not a claim of
+final high-fidelity illustration. Provider-backed AGES generation, VLM review,
+and physical device-lab capture remain unavailable.
+
 ---
 
 ## 1. Purpose of this document
@@ -77,6 +88,10 @@ Identity direction already says: *prefer cutout + unified tint; no full reskin u
 ---
 
 ## 4. Critical integration gaps (ship-visible)
+
+The following items are retained as historical baseline findings from before the
+canonical SVG pack and runtime certification work. Recheck the current manifest
+and runtime evidence before reopening any item.
 
 ### 4.1 Sprites are full-bleed JPGs, not game cutouts
 
@@ -364,11 +379,12 @@ After each WP:
 | `.ogg` | 12 | 0.04 |
 | `.svg` | 6 | ~0 |
 
-### Runtime sprite maps (`GameRenderer.gd`)
+### Historical runtime sprite maps (`GameRenderer.gd`)
 
-**Towers:** archer, mage, cannon, sniper, frost, lightning → `*_tower_icon.jpg`  
-**Enemies:** Enemy, FastScout, ArmoredTank, FlyingDrone, SwarmMinion, HeavyBrute  
-**Missing from MultiMesh keys:** BossShieldBrute, BossSwarmCarrier, other bosses  
+**Historical baseline:** Towers used `*_tower_icon.jpg`; bosses fell back to a
+regular enemy sprite. Current production mappings are the canonical SVG IDs in
+`assets/production/asset_manifest.json`, and the runtime certification harness
+exercises every mapped boss role.
 
 ### Unused / underused
 

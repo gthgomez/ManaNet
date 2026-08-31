@@ -28,6 +28,7 @@ capabilities:
   heuristic_visual_inspection: true
   vlm_visual_evaluation: false
   asset_structural_validation: true
+  asset_runtime_certification: true
   asset_style_validation: false
   asset_processing: true
   asset_generation: false
@@ -46,6 +47,7 @@ capability_status:
   heuristic_visual_inspection: EXECUTED_VERIFIED
   vlm_visual_evaluation: BLOCKED
   asset_structural_validation: EXECUTED_VERIFIED
+  asset_runtime_certification: EXECUTED_VERIFIED
   asset_style_validation: PARTIAL_DETERMINISTIC
   asset_processing: EXECUTED_VERIFIED
   asset_generation: BLOCKED
@@ -126,3 +128,6 @@ verification:
   T3_visual:
     - name: "visual_checkpoint_smoke"
       scenario_id: "visual_checkpoint_smoke"
+  T4_asset_runtime:
+    - name: "runtime_asset_certification"
+      command: ["godot", "--scene", "res://tests/runtime/RuntimeAssetCertification.tscn"]

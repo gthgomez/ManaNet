@@ -6,6 +6,10 @@ const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
+const _UI_ICONS: Dictionary = {
+	"shards": preload("res://assets/sprites/production/ui/shards.svg"),
+	"cyber_deck": preload("res://assets/sprites/production/ui/cyber_deck.svg"),
+}
 
 @onready var _vbox: VBoxContainer   = $VBox
 @onready var _title: TextureRect      = $VBox/Title
@@ -113,6 +117,7 @@ func _apply_visuals() -> void:
 	_THEME.apply_button(_play_btn, "primary")
 	_THEME.apply_button(_base_btn, "secondary")
 	_THEME.apply_button(_settings_btn, "secondary")
+	_base_btn.icon = _UI_ICONS["cyber_deck"]
 
 	# Gap 9 — Accessibility: tooltip_text and FOCUS_ALL on all interactive controls
 	_play_btn.tooltip_text     = "Start a new network defense run"
@@ -499,8 +504,18 @@ func _add_rp_pill() -> void:
 	_rp_pill.add_theme_stylebox_override("panel", sb)
 
 	var hbox := HBoxContainer.new()
+	hbox.name = "ShardRow"
 	hbox.add_theme_constant_override("separation", 5)
 	_rp_pill.add_child(hbox)
+
+	var shard_icon := TextureRect.new()
+	shard_icon.name = "ShardsIcon"
+	shard_icon.texture = _UI_ICONS["shards"]
+	shard_icon.custom_minimum_size = Vector2(22.0, 22.0)
+	shard_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	shard_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	shard_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hbox.add_child(shard_icon)
 
 	var icon_lbl := Label.new()
 	icon_lbl.text = _BRAND.CURRENCY_META
@@ -515,6 +530,13 @@ func _add_rp_pill() -> void:
 	_rp_pill_label.add_theme_font_size_override("font_size", 14)
 	_rp_pill_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(_rp_pill_label)
+
+func get_ui_asset_runtime_snapshot() -> Dictionary:
+	# Runtime certification reads the visible menu controls and assigned texture.
+	return {
+		"ui.shards": {"path": "res://assets/sprites/production/ui/shards.svg", "loaded": _UI_ICONS["shards"] != null, "rendered": _rp_pill != null and _rp_pill.get_node_or_null("ShardRow/ShardsIcon") != null and _rp_pill.get_node("ShardRow/ShardsIcon").is_visible_in_tree()},
+		"ui.cyber_deck": {"path": "res://assets/sprites/production/ui/cyber_deck.svg", "loaded": _UI_ICONS["cyber_deck"] != null, "rendered": _base_btn != null and _base_btn.visible and _base_btn.icon == _UI_ICONS["cyber_deck"]},
+	}
 
 # ── Navigation ─────────────────────────────────────────────────────────────────
 

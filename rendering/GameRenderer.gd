@@ -127,6 +127,84 @@ func _load_map_backgrounds() -> void:
 		if tex:
 			_map_bg_textures[map_id] = tex
 
+func get_asset_runtime_snapshot() -> Dictionary:
+	# Runtime certification reads the live render pools, not source bindings.
+	# `loaded` means the pool owns a decoded texture; `rendered` means at least
+	# one live instance was submitted to that pool during the current frame.
+	var assets: Array = []
+	for i in TOWER_TYPE_ORDER.size():
+		var mmi: MultiMeshInstance2D = _tower_mmis[i]
+		assets.append({
+			"id": "towers.%s" % _tower_asset_stem(TOWER_TYPE_ORDER[i]),
+			"path": TOWER_SPRITE_PATHS[TOWER_TYPE_ORDER[i]],
+			"loaded": mmi.texture != null,
+			"rendered": mmi.multimesh.visible_instance_count > 0,
+			"frame_count_seen": 1 if mmi.multimesh.visible_instance_count > 0 else 0,
+		})
+	for i in ENEMY_TYPE_ORDER.size():
+		var mmi: MultiMeshInstance2D = _enemy_mmis[i]
+		assets.append({
+			"id": "enemies.%s" % _enemy_asset_stem(ENEMY_TYPE_ORDER[i]),
+			"path": ENEMY_SPRITE_PATHS[ENEMY_TYPE_ORDER[i]],
+			"loaded": mmi.texture != null,
+			"rendered": mmi.multimesh.visible_instance_count > 0,
+			"frame_count_seen": 1 if mmi.multimesh.visible_instance_count > 0 else 0,
+		})
+	for i in TOWER_TYPE_ORDER.size():
+		var mmi: MultiMeshInstance2D = _proj_mmis[i]
+		assets.append({
+			"id": "vfx.%s" % _projectile_asset_stem(TOWER_TYPE_ORDER[i]),
+			"path": PROJECTILE_SPRITE_PATHS[TOWER_TYPE_ORDER[i]],
+			"loaded": mmi.texture != null,
+			"rendered": mmi.multimesh.visible_instance_count > 0,
+			"frame_count_seen": 1 if mmi.multimesh.visible_instance_count > 0 else 0,
+		})
+	for map_id in MAP_BG_PATHS:
+		assets.append({
+			"id": "environment.%s" % _environment_asset_stem(int(map_id)),
+			"path": MAP_BG_PATHS[map_id],
+			"loaded": _map_bg_textures.has(map_id),
+			"rendered": game_state != null and game_state.map_id == int(map_id),
+			"frame_count_seen": 1 if game_state != null and game_state.map_id == int(map_id) else 0,
+		})
+	return {"assets": assets}
+
+func _enemy_asset_stem(etype: String) -> String:
+	return {
+		"Enemy": "intrusion",
+		"FastScout": "fast_scout",
+		"ArmoredTank": "armored_firewall",
+		"FlyingDrone": "flying_drone",
+		"SwarmMinion": "swarm_minion",
+		"HeavyBrute": "heavy_brute",
+		"BossShieldBrute": "shielded_brute",
+		"BossSwarmCarrier": "swarm_carrier",
+		"BossRegenerator": "regenerator",
+	}.get(etype, etype.to_snake_case())
+
+func _tower_asset_stem(ttype: String) -> String:
+	return {
+		"archer": "plasma_repeater",
+		"cannon": "nova_bombard",
+		"sniper": "rail_ballista",
+		"lightning": "tesla_spire",
+		"frost": "cryo_obelisk",
+		"mage": "flux_crucible",
+	}.get(ttype, ttype.to_snake_case())
+
+func _projectile_asset_stem(ttype: String) -> String:
+	return {
+		"archer": "plasma_bolt",
+		"mage": "flux_burst",
+		"cannon": "nova_bomb",
+		"sniper": "rail_lance",
+		"frost": "cryo_pulse",
+		"lightning": "tesla_arc",
+	}.get(ttype, ttype.to_snake_case())
+
+func _environment_asset_stem(map_id: int) -> String:
+	return {0: "s_curve", 1: "gauntlet", 2: "spiral"}.get(map_id, "unknown")
+
 func _generate_starfield() -> void:
 	_stars.clear()
 	var rng := RandomNumberGenerator.new()
@@ -438,6 +516,9 @@ func _draw() -> void:
 # --- 1. Background ---
 
 func _draw_background(shake: Vector2) -> void:
+	# GameScreen owns the responsive screen matte. This node owns the canonical
+	# 900x600 gameplay-world background so the map is not drawn twice or stretched
+	# differently from the path and entity layers.
 	var map_id: int = game_state.map_id if game_state else 0
 	var bg: Texture2D = _map_bg_textures.get(map_id, null)
 	if bg:

@@ -15,18 +15,13 @@ const _PLACEMENT_HINTS := preload("res://ui/controllers/PlacementHints.gd")
 const _RUN_SETUP := preload("res://ui/controllers/RunSetup.gd")
 const _WAVE_SHOP_CTRL := preload("res://ui/controllers/WaveShopModalController.gd")
 const _DETAILS_CTRL := preload("res://ui/controllers/TowerDetailsOverlayController.gd")
-const _MAP_BG_PATHS: Dictionary = {
-	0: "res://assets/sprites/production/environment/s_curve.svg",
-	1: "res://assets/sprites/production/environment/gauntlet.svg",
-	2: "res://assets/sprites/production/environment/spiral.svg",
-}
-const _UI_ICON_PATHS: Dictionary = {
-	"credits": "res://assets/sprites/production/ui/credits.svg",
-	"integrity": "res://assets/sprites/production/ui/integrity.svg",
-	"shards": "res://assets/sprites/production/ui/shards.svg",
-	"patch": "res://assets/sprites/production/ui/patch.svg",
-	"cyber_deck": "res://assets/sprites/production/ui/cyber_deck.svg",
-	"boss_warning": "res://assets/sprites/production/ui/boss_warning.svg",
+const _UI_ICONS: Dictionary = {
+	"credits": preload("res://assets/sprites/production/ui/credits.svg"),
+	"integrity": preload("res://assets/sprites/production/ui/integrity.svg"),
+	"shards": preload("res://assets/sprites/production/ui/shards.svg"),
+	"patch": preload("res://assets/sprites/production/ui/patch.svg"),
+	"cyber_deck": preload("res://assets/sprites/production/ui/cyber_deck.svg"),
+	"boss_warning": preload("res://assets/sprites/production/ui/boss_warning.svg"),
 }
 
 # Child node references (assigned in _ready)
@@ -97,7 +92,6 @@ var _dpad_promo_open: bool = false
 var _dpad_shop_open: bool  = false
 var _dpad_place_open: bool = false
 var _world_scale: float = 1.0
-var _backdrop_texture: Texture2D = null
 var _selection_ring: SelectionRing = null
 var _virtual_cursor: VirtualCursor = null
 var _cursor_accel_time: float = 0.0
@@ -138,8 +132,6 @@ func _ready() -> void:
 	_RUN_SETUP.apply_variant_stats(game_state)
 	_RUN_SETUP.place_starting_tower(game_state, run_config)
 	_active_modifier_id = run_config.get("modifier_id", "")
-	_backdrop_texture = load(_MAP_BG_PATHS.get(map_id, ""))
-
 	# Wire renderer
 	renderer.game_state = game_state
 	renderer.view_state = view_state
@@ -190,15 +182,39 @@ func _exit_tree() -> void:
 func _current_game_state() -> GameState:
 	return game_state
 
+func _add_top_bar_icon(icon_key: String, node_name: String) -> TextureRect:
+	var icon := TextureRect.new()
+	icon.name = node_name
+	icon.texture = _UI_ICONS[icon_key]
+	icon.custom_minimum_size = Vector2(22.0, 22.0)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.tooltip_text = icon_key.capitalize()
+	_top_bar.add_child(icon)
+	return icon
+
+func get_ui_asset_runtime_snapshot() -> Dictionary:
+	# Runtime certification reads the visible controls and the actual texture
+	# object assigned to them. This is intentionally separate from source paths.
+	return {
+		"ui.credits": {"path": "res://assets/sprites/production/ui/credits.svg", "loaded": _UI_ICONS["credits"] != null, "rendered": _top_bar != null and _top_bar.get_node_or_null("CreditsIcon") != null and _top_bar.get_node("CreditsIcon").visible},
+		"ui.integrity": {"path": "res://assets/sprites/production/ui/integrity.svg", "loaded": _UI_ICONS["integrity"] != null, "rendered": _top_bar != null and _top_bar.get_node_or_null("IntegrityIcon") != null and _top_bar.get_node("IntegrityIcon").visible},
+		"ui.patch": {"path": "res://assets/sprites/production/ui/patch.svg", "loaded": _UI_ICONS["patch"] != null, "rendered": _wave_btn != null and _wave_btn.visible and _wave_btn.icon == _UI_ICONS["patch"]},
+		"ui.cyber_deck": {"path": "res://assets/sprites/production/ui/cyber_deck.svg", "loaded": _UI_ICONS["cyber_deck"] != null, "rendered": _info_btn != null and _info_btn.visible and _info_btn.icon == _UI_ICONS["cyber_deck"]},
+		"ui.boss_warning": {"path": "res://assets/sprites/production/ui/boss_warning.svg", "loaded": _UI_ICONS["boss_warning"] != null, "rendered": _wave_btn != null and _wave_btn.visible and _wave_btn.icon == _UI_ICONS["boss_warning"]},
+	}
+
 func _build_hud() -> void:
 	# All HUD lives in a CanvasLayer so it renders on top of the game world
 	# and is not affected by screen shake.
 
 	# ---- Top bar ----
 	_top_bar = HBoxContainer.new()
-	_top_bar.add_theme_constant_override("separation", 12)
+	_top_bar.add_theme_constant_override("separation", 8)
 	hud_layer.add_child(_top_bar)
 
+	_add_top_bar_icon("integrity", "IntegrityIcon")
 	_wave_label = Label.new()
 	_wave_label.text = "Wave 1 / 15"
 	_THEME.apply_label(_wave_label, "body")
@@ -209,6 +225,7 @@ func _build_hud() -> void:
 	_THEME.apply_label(_lives_label, "body")
 	_top_bar.add_child(_lives_label)
 
+	_add_top_bar_icon("credits", "CreditsIcon")
 	_gold_label = Label.new()
 	_gold_label.text = _BRAND.credits(300)
 	_THEME.apply_label(_gold_label, "currency")
@@ -216,7 +233,11 @@ func _build_hud() -> void:
 
 	_msg_label = Label.new()
 	_msg_label.text = ""
-	_msg_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_msg_label.custom_minimum_size = Vector2.ZERO
+	_msg_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL | Control.SIZE_SHRINK_CENTER
+	_msg_label.size_flags_stretch_ratio = 1.0
+	_msg_label.clip_text = true
+	_msg_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_THEME.apply_label(_msg_label, "muted")
 	_top_bar.add_child(_msg_label)
 
@@ -244,7 +265,7 @@ func _build_hud() -> void:
 	# ---- Wave button ----
 	_wave_btn = Button.new()
 	_wave_btn.text = _BRAND.START_WAVE
-	_wave_btn.icon = load(_UI_ICON_PATHS["patch"])
+	_wave_btn.icon = _UI_ICONS["patch"]
 	_wave_btn.custom_minimum_size = Vector2(210.0, _LAYOUT.min_touch_height(true))
 	_wave_btn.z_index = _Z_WAVE_BUTTON
 	_THEME.apply_button(_wave_btn, "primary")
@@ -281,7 +302,7 @@ func _build_hud() -> void:
 
 	_info_btn = Button.new()
 	_info_btn.text = "i"
-	_info_btn.icon = load(_UI_ICON_PATHS["cyber_deck"])
+	_info_btn.icon = _UI_ICONS["cyber_deck"]
 	_info_btn.custom_minimum_size = Vector2(32.0, 32.0)
 	_THEME.apply_button(_info_btn, "tab")
 	_info_btn.pressed.connect(_on_info_pressed)
@@ -715,11 +736,10 @@ func _on_viewport_size_changed() -> void:
 
 func _draw() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	if _backdrop_texture != null:
-		draw_texture_rect(_backdrop_texture, Rect2(Vector2.ZERO, viewport), false)
-		draw_rect(Rect2(Vector2.ZERO, viewport), Color(0.02, 0.03, 0.06, 0.34))
-	else:
-		draw_rect(Rect2(Vector2.ZERO, viewport), _LAYOUT.BG_COLOR)
+	# Responsive screen matte only. GameRenderer owns the canonical map texture
+	# inside the 900x600 gameplay world; keeping this layer matte prevents the
+	# environment SVG from being drawn twice or stretched against the path.
+	draw_rect(Rect2(Vector2.ZERO, viewport), _LAYOUT.BG_COLOR)
 
 func _apply_responsive_layout() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
@@ -983,7 +1003,7 @@ func _update_hud(now_ms: int) -> void:
 		_prev_wave = game_state.wave
 		
 	_wave_label.text  = "Wave %d / %d" % [game_state.wave, _MAPS.MAX_WAVE]
-	_wave_btn.icon = load(_UI_ICON_PATHS["boss_warning"] if game_state.wave % 5 == 0 else _UI_ICON_PATHS["patch"])
+	_wave_btn.icon = _UI_ICONS["boss_warning"] if game_state.wave % 5 == 0 else _UI_ICONS["patch"]
 
 	if _wave_progress_bar != null:
 		var spawn_total: int = game_state.get_wave_spawn_total()
@@ -1037,7 +1057,8 @@ func _update_hud(now_ms: int) -> void:
 
 	# Toast / message
 	var toast: String = view_state.get_toast(now_ms)
-	_msg_label.text = toast if toast != "" else game_state.last_message
+	var message_text: String = toast if toast != "" else game_state.last_message
+	_msg_label.text = ("  ·  " + message_text) if message_text != "" else ""
 
 	if _shop_scroll != null:
 		_shop_scroll.visible = not blocking_menu_visible
@@ -1601,7 +1622,6 @@ func _restart_current_run() -> void:
 	game_state = GameState.new(map_data["path"], run_config, map_id)
 	_RUN_SETUP.apply_variant_stats(game_state)
 	_RUN_SETUP.place_starting_tower(game_state, run_config)
-	_backdrop_texture = load(_MAP_BG_PATHS.get(map_id, ""))
 	input_ctrl.game_state = game_state
 	renderer.game_state = game_state
 	renderer.view_state = view_state
