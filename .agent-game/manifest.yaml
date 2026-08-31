@@ -75,19 +75,15 @@ governance:
 
 art_direction:
   guide: "art/ART_DIRECTION.md"
+  contract: "art/contracts/mananet_asset_contract.yaml"
   palette:
     path: "art/palette.png"
     required: false
     colors:
-      - "#1EB0FF"
-      - "#FFB400"
-      - "#FF3C3C"
-      - "#0A0F1C"
-      - "#FFE566"
-      - "#A854F7"
-      - "#3EE7FF"
-      - "#22C55E"
-      - "#FF8C1A"
+      - "#28D7FF"
+      - "#FFB84A"
+      - "#FF4664"
+      - "#07111F"
   references:
     good: "art/references/good"
     avoid: "art/references/avoid"
@@ -95,31 +91,15 @@ art_direction:
     ui_icon:
       asset_class: "ui_icon"
       resolution: [64, 64]
-      perspective: "flat_iso_crop"
+      perspective: "flat_2d"
       outline: "none"
       lighting: "self_illuminated"
       palette_strict: false
       alpha_required: true
-    world_sprite:
-      asset_class: "world_sprite"
-      resolution: [256, 256]
-      perspective: "top_down_isometric"
-      outline: "1px_dark_contour"
-      lighting: "top_left_45deg"
-      palette_strict: false
-      alpha_required: true
-    boss_sprite:
-      asset_class: "world_sprite"
-      resolution: [384, 384]
-      perspective: "top_down_isometric"
-      outline: "1px_dark_contour"
-      lighting: "top_left_45deg"
-      palette_strict: false
-      alpha_required: true
     pixel_sprite:
-      asset_class: "world_sprite"
-      resolution: [256, 256]
-      perspective: "top_down_isometric"
+      asset_class: "pixel_sprite"
+      resolution: [96, 96]
+      perspective: "top_down_slight_isometric"
       outline: "1px_dark_contour"
       lighting: "top_left_45deg"
       palette_strict: false

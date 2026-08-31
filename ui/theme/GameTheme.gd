@@ -1,19 +1,19 @@
 class_name TDGameTheme
 
-const BG: Color = Color(0.059, 0.102, 0.180, 1.0)          # #0F1A2E  Deep Navy
+const BG: Color = Color(0.027, 0.067, 0.122, 1.0)          # #07111F  Deep Navy
 const PANEL: Color = Color(0.080, 0.122, 0.212, 0.88)      # #14203A  Frosted Navy Glass
 const PANEL_ALT: Color = Color(0.098, 0.145, 0.245, 0.93)  # #182540  Deep Navy Panel
 const PANEL_SOFT: Color = Color(0.062, 0.100, 0.182, 0.72) # #10192E  Ghost Navy
 const TEXT: Color = Color(0.930, 0.942, 0.968, 1.0)        # #EDF0F7  Soft Blue-White
 const MUTED: Color = Color(0.490, 0.565, 0.682, 1.0)       # #7D90AE  Blue-Steel Gray
 const DISABLED: Color = Color(0.165, 0.212, 0.318, 1.0)    # #2A3651  Navy Void
-const GOLD: Color = Color(0.910, 0.627, 0.125, 1.0)        # #E8A020  Amber Gold
+const GOLD: Color = Color(1.000, 0.722, 0.290, 1.0)        # #FFB84A  Signal Gold
 const GOLD_DARK: Color = Color(0.255, 0.165, 0.024, 1.0)   # #412A06  Deep Bronze
-const CYAN: Color = Color(0.290, 0.565, 0.851, 1.0)        # #4A90D9  Steel Blue
+const CYAN: Color = Color(0.157, 0.843, 1.000, 1.0)        # #28D7FF  Network Cyan
 const CYAN_DARK: Color = Color(0.085, 0.210, 0.392, 1.0)   # #163564  Deep Steel
-const VIOLET: Color = Color(0.66, 0.33, 0.97, 1.0)         # Hyper Violet (milestone/special only)
+const VIOLET: Color = Color(0.655, 0.545, 0.980, 1.0)      # #A78BFA  Signal Violet
 const GREEN: Color = Color(0.13, 0.77, 0.37, 1.0)          # Neo Green
-const RED: Color = Color(0.902, 0.224, 0.275, 1.0)         # #E63946  Soft Crimson
+const RED: Color = Color(1.000, 0.275, 0.392, 1.0)         # #FF4664  Alert Crimson
 const ORANGE: Color = Color(1.0, 0.36, 0.0, 1.0)           # Alert Orange
 
 static func shader_effects_enabled() -> bool:
@@ -102,18 +102,12 @@ static func apply_button(btn: Button, kind: String = "secondary") -> void:
 		btn.focus_exited.connect(_on_focus_exited.bind(btn))
 		btn.pressed.connect(_on_button_pressed.bind(btn))
 
-	if shader_effects_enabled():
-		var mat := ShaderMaterial.new()
-		mat.shader = preload("res://assets/shaders/LightSweep.gdshader")
-		mat.set_shader_parameter("sweep_pos", -1.0)
-		mat.set_shader_parameter("sweep_width", 0.14)
-		if kind == "primary":
-			mat.set_shader_parameter("sweep_color", Color(1.0, 0.94, 0.74, 0.44)) # warm gold glint
-		else:
-			mat.set_shader_parameter("sweep_color", Color(0.5, 0.8, 1.0, 0.38)) # cyan ice glint
-		btn.material = mat
-	else:
-		btn.material = null
+	# Button styleboxes are the source of truth for these dynamic controls. A
+	# canvas shader on a Button samples its default white texture instead of the
+	# stylebox draw, which turns the control into a blank white pill on desktop.
+	# Keep the restrained glint for dedicated art surfaces only; buttons remain
+	# crisp, themed, and cheap on mobile.
+	btn.material = null
 
 	# Default: secondary — visible navy fill, steel-blue border, clear hover lift
 	var base:   Color = Color(0.110, 0.178, 0.318, 1.0)
