@@ -1,13 +1,14 @@
 schema_version: "2.0.0"
 style_profile:
-  id: "mana_cyber_cyberpunk"
-  name: "ManaNet Cyberpunk Tower Defense Style"
+  id: "mananet_futuristic_network_defense"
+  name: "ManaNet Futuristic Network Defense"
   palette:
-    primary: "#1EB0FF"     # Cyan
-    secondary: "#FFB400"   # Gold
-    danger: "#FF3C3C"      # Crimson
-    background: "#0A0F1C"  # Dark Obsidian
-  pixel_art: true
+    primary: "#28D7FF"     # Network cyan
+    secondary: "#FFB84A"   # Gold
+    danger: "#FF4664"      # Crimson
+    advanced: "#A78BFA"    # Quantum violet
+    background: "#07111F"  # Obsidian navy
+  pixel_art: false
   alpha_required: true
   default_viewport:
     width: 900
