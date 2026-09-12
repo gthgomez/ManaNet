@@ -1,14 +1,45 @@
-schema_version: "2.0.0"
+schema_version: "2.1.0"
 style_profile:
-  id: "mana_cyber_cyberpunk"
-  name: "ManaNet Cyberpunk Tower Defense Style"
-  palette:
-    primary: "#1EB0FF"     # Cyan
-    secondary: "#FFB400"   # Gold
-    danger: "#FF3C3C"      # Crimson
-    background: "#0A0F1C"  # Dark Obsidian
-  pixel_art: true
+  id: "mana_weapon_tech"
+  name: "ManaNet Weapon-Tech Iso"
+  pixel_art: false
   alpha_required: true
+  palette:
+    primary: "#1EB0FF"
+    secondary: "#FFB400"
+    danger: "#FF3C3C"
+    background: "#0A0F1C"
+    tesla: "#FFE566"
+    mage: "#A854F7"
+    frost: "#3EE7FF"
+    archer: "#22C55E"
+    cannon: "#FF8C1A"
   default_viewport:
     width: 900
     height: 600
+  fantasy: "medieval_weapon_forms_as_modern_energy_hardware"
+profiles:
+  world_sprite:
+    asset_class: "world_sprite"
+    resolution: [256, 256]
+    perspective: "top_down_isometric"
+    outline: "1px_dark_contour"
+    lighting: "top_left_45deg"
+    palette_strict: false
+    alpha_required: true
+  ui_icon:
+    asset_class: "ui_icon"
+    resolution: [64, 64]
+    perspective: "flat_iso_crop"
+    outline: "none"
+    lighting: "self_illuminated"
+    palette_strict: false
+    alpha_required: true
+  boss_sprite:
+    asset_class: "world_sprite"
+    resolution: [384, 384]
+    perspective: "top_down_isometric"
+    outline: "1px_dark_contour"
+    lighting: "top_left_45deg"
+    palette_strict: false
+    alpha_required: true

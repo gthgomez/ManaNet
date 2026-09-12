@@ -1,0 +1,16 @@
+schema_version: "2.0.0"
+id: "tower_cannon_world"
+type: "sprite_2d"
+width: 256
+height: 256
+require_alpha: true
+frame_width: 256
+frame_height: 256
+frame_count: 1
+pivot: [0.5, 0.78]
+baseline_y: 0.86
+style_profile: "mana_weapon_tech"
+allowed_formats: ["PNG"]
+expected_path: "assets/sprites/towers/cannon.png"
+validation_scope: "structural"
+notes: "Futuristic bombard. Orange barrel plus a visible plasma bomb/shell. Compact hex pad only."

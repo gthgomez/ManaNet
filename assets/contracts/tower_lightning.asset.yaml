@@ -1,0 +1,16 @@
+schema_version: "2.0.0"
+id: "tower_lightning_world"
+type: "sprite_2d"
+width: 256
+height: 256
+require_alpha: true
+frame_width: 256
+frame_height: 256
+frame_count: 1
+pivot: [0.5, 0.82]
+baseline_y: 0.90
+style_profile: "mana_weapon_tech"
+allowed_formats: ["PNG"]
+expected_path: "assets/sprites/towers/lightning.png"
+validation_scope: "structural"
+notes: "Edgeworld-style Tesla. Tall lattice, stacked coils/rings, arcing sphere. Industrial, not toy."
