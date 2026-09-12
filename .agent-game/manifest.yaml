@@ -83,6 +83,11 @@ art_direction:
       - "#FFB400"
       - "#FF3C3C"
       - "#0A0F1C"
+      - "#FFE566"
+      - "#A854F7"
+      - "#3EE7FF"
+      - "#22C55E"
+      - "#FF8C1A"
   references:
     good: "art/references/good"
     avoid: "art/references/avoid"
@@ -90,14 +95,30 @@ art_direction:
     ui_icon:
       asset_class: "ui_icon"
       resolution: [64, 64]
-      perspective: "flat_2d"
+      perspective: "flat_iso_crop"
       outline: "none"
       lighting: "self_illuminated"
       palette_strict: false
       alpha_required: true
+    world_sprite:
+      asset_class: "world_sprite"
+      resolution: [256, 256]
+      perspective: "top_down_isometric"
+      outline: "1px_dark_contour"
+      lighting: "top_left_45deg"
+      palette_strict: false
+      alpha_required: true
+    boss_sprite:
+      asset_class: "world_sprite"
+      resolution: [384, 384]
+      perspective: "top_down_isometric"
+      outline: "1px_dark_contour"
+      lighting: "top_left_45deg"
+      palette_strict: false
+      alpha_required: true
     pixel_sprite:
-      asset_class: "pixel_sprite"
-      resolution: [32, 32]
+      asset_class: "world_sprite"
+      resolution: [256, 256]
       perspective: "top_down_isometric"
       outline: "1px_dark_contour"
       lighting: "top_left_45deg"
