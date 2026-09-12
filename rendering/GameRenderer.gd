@@ -24,12 +24,12 @@ const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _TOWER_FIDELITY_SHADER := preload("res://assets/shaders/TowerFidelity.gdshader")
 const _TOWER_CUTOUT_SHADER := preload("res://assets/shaders/tower_cutout.gdshader")
 const TOWER_SPRITE_PATHS: Dictionary = {
-	"archer": "res://assets/sprites/towers/archer_tower_icon.jpg",
-	"mage": "res://assets/sprites/towers/mage_tower_icon.jpg",
-	"cannon": "res://assets/sprites/towers/cannon_tower_icon.jpg",
-	"sniper": "res://assets/sprites/towers/sniper_tower_icon.jpg",
-	"frost": "res://assets/sprites/towers/frost_tower_icon.jpg",
-	"lightning": "res://assets/sprites/towers/lightning_tower_icon.jpg",
+	"archer": "res://assets/sprites/towers/archer.png",
+	"mage": "res://assets/sprites/towers/mage.png",
+	"cannon": "res://assets/sprites/towers/cannon.png",
+	"sniper": "res://assets/sprites/towers/sniper.png",
+	"frost": "res://assets/sprites/towers/frost.png",
+	"lightning": "res://assets/sprites/towers/lightning.png",
 }
 const ENEMY_SPRITE_PATHS: Dictionary = {
 	"Enemy": "res://assets/sprites/enemies/grunt_soldier.jpg",

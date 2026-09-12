@@ -47,6 +47,7 @@ var _path_upg_btns: Array = []   # [Button x3]
 var _shop_btns: Dictionary = {}  # tower_type -> Button
 var _shop_name_labels: Dictionary = {}  # tower_type -> Label
 var _shop_cost_labels: Dictionary = {}  # tower_type -> Label
+var _shop_icons: Dictionary = {}  # tower_type -> TextureRect
 var _promotion_modal: PanelContainer = null
 var _promotion_title: Label = null
 var _promotion_confirm_btn: Button = null
@@ -342,13 +343,22 @@ func _build_hud() -> void:
 		var info: Dictionary = _TT.TOWER_TYPES[ttype]
 		var sbtn := Button.new()
 		sbtn.text = ""
-		sbtn.custom_minimum_size = Vector2(126.0, 88.0)
+		sbtn.custom_minimum_size = Vector2(126.0, 124.0)
 		_THEME.apply_button(sbtn, "shop")
 		var shop_vbox := VBoxContainer.new()
 		shop_vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		shop_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 		shop_vbox.add_theme_constant_override("separation", 2)
 		shop_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var icon := TextureRect.new()
+		icon.texture = load("res://assets/sprites/towers/%s_icon.png" % ttype)
+		if icon.texture:
+			icon.custom_minimum_size = Vector2(40, 40)
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			shop_vbox.add_child(icon)
+			_shop_icons[ttype] = icon
 		var name_lbl := Label.new()
 		name_lbl.text = info["name"]
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -743,7 +753,7 @@ func _apply_responsive_layout() -> void:
 	var compact_shop: bool = viewport.y < 620.0 or _LAYOUT.shop_strip_needs_compaction(viewport, tower_count)
 	var preferred_card_w: float = 100.0 if compact_shop else 120.0
 	var min_card_w: float = 72.0 if compact_shop else 88.0
-	var shop_h: float = 76.0 if compact_shop else 88.0
+	var shop_h: float = 104.0 if compact_shop else 124.0
 	var shop_max_w: float = minf(viewport.x - margin_l - margin_r, _world_rect.size.x - margin * 2.0)
 	var preferred_content_w: float = float(tower_count) * preferred_card_w + float(gap_count) * shop_sep
 	var min_content_w: float = float(tower_count) * min_card_w + float(gap_count) * shop_sep
@@ -769,6 +779,10 @@ func _apply_responsive_layout() -> void:
 		if ttype in _shop_cost_labels:
 			var cost_lbl: Label = _shop_cost_labels[ttype]
 			cost_lbl.add_theme_font_size_override("font_size", 11 if compact_shop or needs_scroll else 14)
+		if ttype in _shop_icons:
+			var shop_icon: TextureRect = _shop_icons[ttype]
+			var icon_px: float = 32.0 if compact_shop or needs_scroll else 40.0
+			shop_icon.custom_minimum_size = Vector2(icon_px, icon_px)
 	var content_w: float = float(tower_count) * card_w + float(gap_count) * shop_sep
 	_shop_bar.custom_minimum_size = Vector2(content_w if needs_scroll else shop_w, shop_h)
 	if _shop_scroll != null:
