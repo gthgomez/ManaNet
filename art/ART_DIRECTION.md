@@ -45,7 +45,7 @@ The game uses a strict 4-tier cyber palette for semantic readability:
 
 - **Silhouette Readability:** Every character, tower, and icon must have a distinct silhouette recognizable within 50ms at 0.5x mobile zoom.
 - **Outline Rules:**
-  - Game World Sprites (`pixel_sprite`, `environment_prop`): 1px dark contour (`#050810`) around outer hull to ensure separation from glowing map terrain.
+  - Game World Sprites (`world_sprite`, `environment_prop`): 1px dark contour (`#030711`) around outer hull to ensure separation from glowing map terrain.
   - UI Icons (`ui_icon`): No heavy black border; crisp flat vector/pixel geometry with transparent alpha background.
 - **Lighting Direction:** Fixed key light from **Top-Left (45°)**. Self-illumination is reserved for active energy, charging, heat, targeting, and status effects.
 

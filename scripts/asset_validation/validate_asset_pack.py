@@ -47,8 +47,9 @@ def main() -> int:
             if not path.exists():
                 errors.append(f"missing:{path.relative_to(ROOT)}")
                 continue
+            svg_text = path.read_text(encoding="utf-8")
             try:
-                root = ElementTree.fromstring(path.read_text(encoding="utf-8"))
+                root = ElementTree.fromstring(svg_text)
             except Exception as exc:
                 errors.append(f"decode:{path.name}:{exc}")
                 continue
@@ -57,7 +58,11 @@ def main() -> int:
             expected_width = {"towers": "96", "enemies": "96", "environment": "900", "vfx": "32", "ui": "64"}[family]
             if root.attrib.get("width") != expected_width:
                 errors.append(f"dimensions:{path.name}:expected {expected_width}")
-            if re.search(r"<rect[^>]+(?:fill|style)=['\"]#(?:05070d|000000)['\"]", path.read_text(encoding="utf-8"), re.I):
+            # Sprite families must stay transparent cutouts; environment maps are
+            # intentionally opaque full-viewport backdrops and are exempt.
+            if family != "environment" and re.search(
+                r"<rect[^>]+(?:fill|style)=['\"]#(?:05070d|000000|07111f)['\"]", svg_text, re.I
+            ):
                 errors.append(f"opaque-background:{path.name}")
             resource_path = f"res://assets/sprites/production/{family}/{stem}.svg"
             digest = sha256(path)
@@ -67,8 +72,21 @@ def main() -> int:
             integrated = resource_path in binding_text[family]
             entries.append({"id": f"{family}.{stem}", "path": resource_path, "status": "integrated" if integrated else "accepted", "exercised": "pending-runtime-proof", "sha256": digest})
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    manifest["assets"] = entries
-    MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    # The committed manifest is the source of truth. Assert that the recomputed
+    # hashes match it instead of rewriting it: a rewrite can never fail, and it
+    # would silently dirty the tree on every validation run.
+    manifest_assets = {asset.get("id"): asset for asset in manifest.get("assets", [])}
+    for entry in entries:
+        declared = manifest_assets.pop(entry["id"], None)
+        if declared is None:
+            errors.append(f"manifest-missing:{entry['id']}")
+            continue
+        if declared.get("path") != entry["path"]:
+            errors.append(f"manifest-path:{entry['id']}:{declared.get('path')}->{entry['path']}")
+        if declared.get("sha256") != entry["sha256"]:
+            errors.append(f"manifest-drift:{entry['id']}:{declared.get('sha256')}->{entry['sha256']}")
+    for stale_id in manifest_assets:
+        errors.append(f"manifest-extra:{stale_id}")
     if errors:
         print("ASSET_PACK_FAIL")
         print("\n".join(errors))
