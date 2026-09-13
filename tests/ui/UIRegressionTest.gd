@@ -8,11 +8,12 @@ extends Node
 # - EndScreen test uses only the in-memory pending_end_stats autoload var.
 # - Menu/GameScreen tests swap user://td_progression.json for a seeded profile,
 #   then restore the original bytes and verify restoration. A second copy of
-#   the original save is written to the OS temp dir before anything is touched.
+#   the original save is written to a separate (portable) harness path before
+#   anything is touched.
 
 const SAVE_PATH := "user://td_progression.json"
 const BACKUP_PATH := "user://td_progression.harness_backup.json"
-const EXT_BACKUP_PATH := "C:/WINDOWS/TEMP/opencode/mananet_td_progression_backup.json"
+const EXT_BACKUP_PATH := "user://td_progression.harness_ext_backup.json"
 
 var _pass: int = 0
 var _fail: int = 0
@@ -151,6 +152,8 @@ func _close_save_sandbox_and_verify() -> void:
 	_check(now_bytes == _original_bytes, "real save file byte-identical after harness run")
 	if FileAccess.file_exists(BACKUP_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(BACKUP_PATH))
+	if FileAccess.file_exists(EXT_BACKUP_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(EXT_BACKUP_PATH))
 
 # ---------------------------------------------------------------------------
 # 2) MenuScreen — run-history driven labels (int AND float map_id entries)

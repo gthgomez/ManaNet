@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.6.2"
+
+jobs:
+  test:
+    name: Import & headless tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Godot
+        # Pinned to the v2 tag commit for supply-chain stability.
+        uses: chickensoft-games/setup-godot@c233594225991af5aec714e52457cc76d6df8fa2 # v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: false
+
+      - name: Cache Godot import data
+        uses: actions/cache@v4
+        with:
+          path: .godot/imported
+          key: godot-import-${{ runner.os }}-${{ env.GODOT_VERSION }}-${{ hashFiles('assets/**', '**/*.tscn', '**/*.gd', 'project.godot') }}
+          restore-keys: |
+            godot-import-${{ runner.os }}-${{ env.GODOT_VERSION }}-
+
+      - name: Import project headlessly
+        run: |
+          set -o pipefail
+          godot --headless --path . --import 2>&1 | tee import.log
+
+      - name: Fail on fatal import or parse errors
+        run: |
+          # The nested android/ project emits a known, benign warning, so gate
+          # only on fatal errors rather than a blanket "ERROR" grep. Patterns
+          # are anchored to Godot's error prefixes so benign prose that merely
+          # mentions "Cannot load" cannot trip the gate.
+          test -f import.log || { echo "::error::import.log was not produced."; exit 1; }
+          if grep -E "^(SCRIPT ERROR|ERROR: .*(Parse Error|Failed to load script|Cannot open file|Cannot load))" import.log; then
+            echo "::error::Godot reported fatal import/parse errors (see import.log)."
+            exit 1
+          fi
+
+      - name: Simulation regression checks
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/simulation/regression_checks.gd 2>&1 | tee regression.log
+
+      # NOTE: `res://scenes/SimTest.tscn` is intentionally excluded. It hits its
+      # internal 10-minute simulated-time cap ("Timed out — simulation did not
+      # finish within tick budget") in headless CI, so it needs a fix before it
+      # can be a gate. See the PR description.
+
+      - name: UI regression harness (advisory)
+        # Not yet verified on Linux headless; report without blocking.
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          godot --headless --path . res://tests/ui/UIRegressionTest.tscn 2>&1 | tee uiregression.log
+
+      - name: Full audit (gates on FAIL count)
+        # `full_audit.gd` always exits 0, so gate on its summary line.
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://scripts/full_audit.gd 2>&1 | tee audit.log
+          grep -q "FAIL  : 0" audit.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-logs
+          path: "*.log"
+          if-no-files-found: ignore
