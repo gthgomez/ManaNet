@@ -35,7 +35,8 @@ families:
   enemies:
     size: [96, 96]
     pivot: [0.5, 0.72]
-    roles: ["intrusion", "fast_scout", "armored_firewall", "flying_drone", "swarm_minion", "heavy_brute", "boss"]
+    roles: ["intrusion", "fast_scout", "armored_firewall", "flying_drone", "swarm_minion", "heavy_brute"]
+    boss_roles: ["shielded_brute", "swarm_carrier", "regenerator"]
   environment:
     size: [900, 600]
     pivot: [0.5, 0.5]

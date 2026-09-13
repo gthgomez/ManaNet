@@ -83,6 +83,7 @@ art_direction:
       - "#28D7FF"
       - "#FFB84A"
       - "#FF4664"
+      - "#A78BFA"
       - "#07111F"
   references:
     good: "art/references/good"
@@ -96,8 +97,8 @@ art_direction:
       lighting: "self_illuminated"
       palette_strict: false
       alpha_required: true
-    pixel_sprite:
-      asset_class: "pixel_sprite"
+    world_sprite:
+      asset_class: "world_sprite"
       resolution: [96, 96]
       perspective: "top_down_slight_isometric"
       outline: "1px_dark_contour"
