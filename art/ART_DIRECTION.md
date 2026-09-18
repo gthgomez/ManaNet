@@ -1,131 +1,68 @@
 # ManaNet — Art Direction Guide
 
-**Version:** 2.0.0  
-**Status:** LOCKED for sprite + icon generation (2026-09-12)  
-**Consumers:** humans, coding agents, AGES `ArtDirectionManager` (first ~1000 chars are injected into gen prompts)
-
----
-
-## AGENT LOCK (read this first)
-
-Fantasy: **medieval weapon archetypes built as modern energy hardware** on a dark data-grid. Not castle TD. Not generic neon city. Not pixel art.
-
-- Plasma **crossbow** (archer) fires plasma bolts, not wooden arrows.
-- **Cannon** launches glowing futuristic bombs / plasma shells, not iron balls.
-- **Tesla** is an Edgeworld-style industrial coil pylon (tall lattice, stacked rings, arcing sphere) — not a toy yellow ball, not Clash of Clans cute.
-- Mage / frost / sniper are the same rule: recognizable old weapon or siege form, executed in steel + conduit + energy.
-
-World sprites: **256px max edge, ¾ isometric, true alpha PNG, no navy plate, no display plinth, no baked motion streaks.** Display size is 40–64px. If a detail dies at 48px, delete it.
-
-UI icons: **64×64 and 128×128, flat-iso crop of the weapon head, transparent, subject ≥80% of frame.**
-
-Palette accents: cyan `#1EB0FF` allied, gold `#FFB400` power/credits, crimson `#FF3C3C` threat, yellow-white arcs for Tesla, violet for netrunner. Backdrop `#0A0F1C` is scene only — never baked into the sprite.
-
-Forbidden: JPEG unit art, opaque cards, photoreal textures, 1024 gameplay files, full walk cycles, second palette, castle stone / wood bows / cartoon knights.
+**Version:** 2.0.0
+**Domain:** Futuristic network-defense tower defense (Godot 4.6.2)
+**Target Viewport:** 900x600 (Reference) / Responsive Landscape Mobile  
 
 ---
 
 ## 1. Visual Theme & Tone
 
-ManaNet is a **network-defense command surface**. The player places weapon-nodes that look like historic arms upgraded into grid hardware.
-
-| Layer | Intent |
-|---|---|
-| World | Dark obsidian grid, hex pads, circuit veins |
-| Towers | One readable weapon silhouette + one energy accent |
-| Enemies | Corrupted constructs / drones / mechs, not fantasy orcs |
-| UI | Navy panels, gold CTA, cyan secondary (`GameTheme.gd`) |
-| Lexicon | Credits, Integrity, Shards, Cyber-Deck, Patch (`BrandCopy.gd`) |
-
-Identity lock (`docs/IDENTITY_AND_UX_DIRECTION.md`) stays: you defend a **data grid**, not a castle. Medieval is **form language only**.
+ManaNet is futuristic first and historical weapon archetype second. Its defensive nodes are engineered aerospace machines descended from durable combat geometries: a crossbow becomes a plasma repeater, a ballista becomes a rail accelerator, and an obelisk becomes a cryogenic field generator.
+- **Theme:** Physicalized data infrastructure under assault by hostile software.
+- **Mood:** Tense, precise, industrial, and legible at mobile scale.
+- **Contrast:** Deep navy structural mass with restrained cyan, gold, crimson, and violet energy accents.
+- **Forbidden read:** medieval equipment with neon decorations, fantasy castles, wizard props, rustic wood/rope/leather, or generic rainbow cyberpunk.
 
 ---
 
 ## 2. Palette & Color Script
 
-| Role | Name | Hex | Use |
+The game uses a strict 5-role cyber palette for semantic readability:
+
+| Role | Color Name | Hex Code | Purpose |
 |---|---|---|---|
-| Allied energy | Cyan Glow | `#1EB0FF` | player conduits, sniper beam, shields |
-| Power / CTA | Gold Core | `#FFB400` | credits, upgrades, gold trim |
-| Threat | Crimson Surge | `#FF3C3C` | enemies, breach, swarm optics |
-| Tesla arc | Volt White-Gold | `#FFE566` | lightning coil core only |
-| Mage | Hyper Violet | `#A854F7` | netrunner crystal |
-| Frost | Ice Cyan | `#3EE7FF` | thermal siphon |
-| Archer | Plasma Lime | `#22C55E` | bow string / bolts |
-| Cannon | Shell Orange | `#FF8C1A` | bomb / barrel glow |
-| Backdrop | Obsidian | `#0A0F1C` | maps and UI chrome — not sprite fill |
-
-Do not paint the whole tower in its accent. Chassis is cool grey steel. Accent is 10–20% of pixels and must survive a 48px shrink.
+| **Network** | Cyan Conduit | `#28D7FF` | Allied energy, rails, shields, support systems |
+| **High value** | Gold Core | `#FFB84A` | Credits, targeting, primary power elements |
+| **Danger** | Crimson Surge | `#FF4664` | Hostile processes, threat vectors, breach alerts |
+| **Advanced** | Violet Quantum | `#A78BFA` | Stasis, computation, milestones, Flux systems |
+| **Structure** | Obsidian Navy | `#07111F` | Chassis, map substrate, negative space |
 
 ---
 
-## 3. Perspective, Scale, Roles
+## 3. Perspective & Scale
 
-- Playfield camera: top-down 2D with **¾ isometric** (about 15–25° foreshortening). Same camera for towers and enemies.
-- **World sprite (`world_sprite`)**: 256×256 source canvas, subject packed in the middle 80%, pivot `[0.5, 0.78]` (feet / pad).
-- **Boss sprite**: 384×384 source, display ≤64px.
-- **UI icon (`ui_icon`)**: 64 and 128, weapon-head crop, no pad, no environment.
-- **Projectile**: 16–32px glowing bolt / shell / arc knot, alpha.
-- **Map background**: 1024 max, JPEG/WebP OK (no alpha required).
-
-Current on-disk 1024 JPGs are **marketing / bestiary only**. Runtime must not point at them.
-
----
-
-## 4. Silhouette, Outline, Lighting
-
-- 50ms readability at 0.5× mobile zoom.
-- World sprites: 2px source dark contour `#050810` (reads as 1px at display).
-- Icons: no heavy black border.
-- Key light: **top-left 45°**. Neon is self-illuminated.
-- Ground contact: small circular/hex shadow **as a separate layer or baked under feet only**. No museum plinth, stairs, or grated stand.
+- **World Playfield:** Top-down 2D grid with a slight isometric projection angle (15° vertical foreshortening).
+- **Sprite Dimensions:** these are contract sizes and must match `art/contracts/mananet_asset_contract.yaml`.
+  - **Towers / Turrets:** $96 \times 96\text{ px}$ square.
+  - **Enemy Units:** $96 \times 96\text{ px}$ square (boss units share the same canvas).
+  - **Environment Maps:** $900 \times 600\text{ px}$ full-viewport backdrop.
+  - **VFX / Projectiles:** $32 \times 32\text{ px}$ square glowing energy bolts.
+  - **UI Icons:** $64 \times 64\text{ px}$ square, centered, borderless flat silhouette.
 
 ---
 
-## 5. Weapon bible (existing six)
+## 4. Silhouette, Outlines & Lighting
 
-| id | Player name | Medieval form | Modern execution | Accent | Must read at 48px |
-|---|---|---|---|---|---|
-| `archer` | Cyber-Ranger | Crossbow / arbalest | Plasma-string bow on a short bunker; bolts are energy | lime | bow limbs + glowing string |
-| `cannon` | Plasma Artillery | Bombard / siege mortar | Short wide barrel launching luminous bombs | orange | barrel + loaded shell |
-| `lightning` | Tesla Node | Wardenclyffe / coil | **Edgeworld Tesla**: tall industrial lattice, stacked copper rings, arcing sphere, blue-white forks | volt gold | sphere + coil stack |
-| `mage` | Netrunner | Wizard staff / spire | Crystal focus on a thin pylon; runes are circuit traces | violet | crystal + ring |
-| `frost` | Thermal Siphon | Ice staff / bombard | Cryo emitter, not a snow castle | ice cyan | emitter head + vapor |
-| `sniper` | Sniper Proxy | Longbow / arbalest sight | Optic rail on a slim mast | cyan | scope + beam |
+- **Silhouette Readability:** Every character, tower, and icon must have a distinct silhouette recognizable within 50ms at 0.5x mobile zoom.
+- **Outline Rules:**
+  - Game World Sprites (`world_sprite`, `environment_prop`): 1px dark contour (`#030711`) around outer hull to ensure separation from glowing map terrain.
+  - UI Icons (`ui_icon`): No heavy black border; crisp flat vector/pixel geometry with transparent alpha background.
+- **Lighting Direction:** Fixed key light from **Top-Left (45°)**. Self-illumination is reserved for active energy, charging, heat, targeting, and status effects.
 
-Tesla anti-reference: do not ship the current “yellow orb on a short toy tower” as the final look. Keep the orb, **grow the coil, add lattice legs and visible arcs**.
+## 5. Material and silhouette rules
 
----
-
-## 6. Production rules for agents (AGES-aligned)
-
-AGES (`gthgomez/gamedev`) already provides:
-
-- `art_direction` in `.agent-game/manifest.yaml`
-- `AssetContract` YAML + `AssetValidator` (dims, alpha, format, grid)
-- promotion governance (`allow_agent_asset_promotion: false` until a human unlocks it)
-- first-1000-char guide injection + good/avoid reference folders
-
-**Required loop for any new sprite:**
-
-1. Read this file + `docs/SPRITE_AND_WEAPON_DIRECTION.md` + matching `assets/contracts/*.asset.yaml`.
-2. Generate or export **PNG RGBA** only into a candidate folder (never overwrite `assets/sprites/` without promotion).
-3. Validate against the contract (size, alpha, format). JPEG fails.
-4. Drop a 48px thumbnail next to the file. If the weapon type is ambiguous, reject.
-5. Wire runtime paths only after human + visual checkpoint (`visual_checkpoint_smoke`).
-
-`asset_generation` is BLOCKED in the ManaNet AGES manifest. Agents plan and validate; they do not autonomously promote art.
+- Use dark aerospace alloys, ceramic composite plates, carbon structures, articulated joints, electromagnetic rails, plasma chambers, cooling fins, containment rings, and synthetic circuitry.
+- Preserve one strong mechanical silhouette per entity. Color alone may not carry a gameplay role.
+- Historical cues may influence geometry and firing posture, but never the material. A Plasma Repeater has accelerator limbs and a chamber—not wood and a bowstring.
+- Keep a 1px dark contour around world sprites. UI icons remain clean, flat, and borderless.
+- Prefer transparent cutouts. Opaque photographic backgrounds are rejected for production sprites.
 
 ---
 
-## 7. Reference corpus
+## 6. Reference Corpus
 
-- Good: `art/references/good/` — keep `tower_archer_ref.png` as “readable weapon on a compact base.”
-- Avoid: `art/references/avoid/` — noisy photo texture, low-contrast mush, navy cards.
-- Add future refs: Edgeworld Tesla stills (coil lattice), one plasma-crossbow crop, one bomb-cannon crop.
+- Positive examples live in `art/references/good/`.
+- Anti-patterns to avoid (blurry photo textures, low-contrast gradients, cluttered noise) live in `art/references/avoid/`.
 
----
-
-## 8. Non-goals
-
-Full reskin of every unit before cutouts ship. Pixel-art reboot. Animated sheets for every tower. Fire TV chrome. New towers solely to show art.
+The machine-readable contract and acceptance matrix are in `art/contracts/mananet_asset_contract.yaml` and `assets/production/asset_manifest.json`.

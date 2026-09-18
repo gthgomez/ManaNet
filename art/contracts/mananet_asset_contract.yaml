@@ -1,0 +1,62 @@
+schema_version: "2.0.0"
+contract_id: "mananet-futuristic-asset-pack-v1"
+project: "mananet"
+identity_rule: "futuristic first / historical weapon archetype second"
+engine: "godot-4.6.2"
+rendering_method: "gl_compatibility"
+canvas:
+  viewport: [900, 600]
+  projection: "top_down_slight_isometric"
+  key_light: "top_left_45deg"
+palette:
+  structure: "#07111F"
+  network: "#28D7FF"
+  gold: "#FFB84A"
+  danger: "#FF4664"
+  quantum: "#A78BFA"
+  contour: "#030711"
+rules:
+  transparent_cutouts: true
+  opaque_photo_backgrounds: false
+  mobile_silhouette_read: true
+  medieval_materials: false
+  generic_rainbow_neon: false
+families:
+  towers:
+    size: [96, 96]
+    pivot: [0.5, 0.72]
+    assets:
+      archer: {name: "Plasma Repeater", archetype: "crossbow", projectile: "plasma_bolt"}
+      cannon: {name: "Nova Bombard", archetype: "siege_cannon", projectile: "nova_bomb"}
+      sniper: {name: "Rail Ballista", archetype: "ballista", projectile: "rail_lance"}
+      lightning: {name: "Tesla Spire", archetype: "spire", projectile: "tesla_arc"}
+      frost: {name: "Cryo Obelisk", archetype: "obelisk", projectile: "cryo_pulse"}
+      mage: {name: "Flux Crucible", archetype: "crucible", projectile: "flux_burst"}
+  enemies:
+    size: [96, 96]
+    pivot: [0.5, 0.72]
+    roles: ["intrusion", "fast_scout", "armored_firewall", "flying_drone", "swarm_minion", "heavy_brute"]
+    boss_roles: ["shielded_brute", "swarm_carrier", "regenerator"]
+  environment:
+    size: [900, 600]
+    pivot: [0.5, 0.5]
+    kit: ["s_curve", "gauntlet", "spiral"]
+  vfx:
+    size: [32, 32]
+    pivot: [0.5, 0.5]
+    readable_on_mobile: true
+  ui:
+    size: [64, 64]
+    pivot: [0.5, 0.5]
+    border: "none"
+    assets:
+      credits: {name: "Credits", role: "economy"}
+      integrity: {name: "Integrity", role: "status"}
+      shards: {name: "Shards", role: "economy"}
+      patch: {name: "Patch", role: "action"}
+      cyber_deck: {name: "Cyber Deck", role: "navigation"}
+      boss_warning: {name: "Boss Warning", role: "alert"}
+provenance:
+  generation: "deterministic-authored-svg"
+  ages_generation_provider: "blocked-no-provider-configured"
+  vlm_style_review: "blocked-capability-not-configured"

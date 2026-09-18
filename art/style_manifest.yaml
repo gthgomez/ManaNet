@@ -1,28 +1,24 @@
 schema_version: "2.1.0"
 style_profile:
-  id: "mana_weapon_tech"
-  name: "ManaNet Weapon-Tech Iso"
+  id: "mananet_futuristic_network_defense"
+  name: "ManaNet Futuristic Network Defense"
   pixel_art: false
   alpha_required: true
   palette:
-    primary: "#1EB0FF"
-    secondary: "#FFB400"
-    danger: "#FF3C3C"
-    background: "#0A0F1C"
-    tesla: "#FFE566"
-    mage: "#A854F7"
-    frost: "#3EE7FF"
-    archer: "#22C55E"
-    cannon: "#FF8C1A"
+    primary: "#28D7FF"     # Network cyan
+    secondary: "#FFB84A"   # Gold
+    danger: "#FF4664"      # Crimson
+    advanced: "#A78BFA"    # Quantum violet
+    background: "#07111F"  # Obsidian navy
   default_viewport:
     width: 900
     height: 600
-  fantasy: "medieval_weapon_forms_as_modern_energy_hardware"
+  fantasy: "futuristic_network_defense; historical weapon archetypes as energy hardware"
 profiles:
   world_sprite:
     asset_class: "world_sprite"
-    resolution: [256, 256]
-    perspective: "top_down_isometric"
+    resolution: [96, 96]
+    perspective: "top_down_slight_isometric"
     outline: "1px_dark_contour"
     lighting: "top_left_45deg"
     palette_strict: false
@@ -43,3 +39,26 @@ profiles:
     lighting: "top_left_45deg"
     palette_strict: false
     alpha_required: true
+  # Retained from main so the PNG/shop asset contracts
+  # (assets/contracts/*.asset.yaml -> style_profile: "mana_weapon_tech")
+  # continue to resolve after the v2 art-pack rebase.
+  mana_weapon_tech:
+    id: "mana_weapon_tech"
+    name: "ManaNet Weapon-Tech Iso"
+    asset_class: "world_sprite"
+    resolution: [256, 256]
+    perspective: "top_down_isometric"
+    outline: "1px_dark_contour"
+    lighting: "top_left_45deg"
+    palette_strict: false
+    alpha_required: true
+    palette:
+      primary: "#1EB0FF"
+      secondary: "#FFB400"
+      danger: "#FF3C3C"
+      background: "#0A0F1C"
+      tesla: "#FFE566"
+      mage: "#A854F7"
+      frost: "#3EE7FF"
+      archer: "#22C55E"
+      cannon: "#FF8C1A"
