@@ -18,7 +18,7 @@ ManaNet is futuristic first and historical weapon archetype second. Its defensiv
 
 ## 2. Palette & Color Script
 
-The game uses a strict 4-tier cyber palette for semantic readability:
+The game uses a strict 5-role cyber palette for semantic readability:
 
 | Role | Color Name | Hex Code | Purpose |
 |---|---|---|---|
@@ -33,11 +33,12 @@ The game uses a strict 4-tier cyber palette for semantic readability:
 ## 3. Perspective & Scale
 
 - **World Playfield:** Top-down 2D grid with a slight isometric projection angle (15° vertical foreshortening).
-- **Sprite Dimensions:**
-  - **Towers / Turrets:** $32 \times 32\text{ px}$ baseline footprint; up to $48\text{ px}$ height for antenna/cores.
-  - **Enemy Units:** $24 \times 24\text{ px}$ to $40 \times 40\text{ px}$ (boss units up to $64\text{ px}$).
+- **Sprite Dimensions:** these are contract sizes and must match `art/contracts/mananet_asset_contract.yaml`.
+  - **Towers / Turrets:** $96 \times 96\text{ px}$ square.
+  - **Enemy Units:** $96 \times 96\text{ px}$ square (boss units share the same canvas).
+  - **Environment Maps:** $900 \times 600\text{ px}$ full-viewport backdrop.
+  - **VFX / Projectiles:** $32 \times 32\text{ px}$ square glowing energy bolts.
   - **UI Icons:** $64 \times 64\text{ px}$ square, centered, borderless flat silhouette.
-  - **Projectiles:** $8 \times 8\text{ px}$ to $16 \times 16\text{ px}$ glowing energy bolts.
 
 ---
 

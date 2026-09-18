@@ -30,6 +30,14 @@ BINDING_SOURCES = {
     "vfx": ROOT / "rendering" / "GameRenderer.gd",
     "ui": ROOT / "scenes" / "GameScreen.gd",
 }
+# Full contract dimensions (width, height) from mananet_asset_contract.yaml.
+EXPECTED_DIMENSIONS = {
+    "towers": ("96", "96"),
+    "enemies": ("96", "96"),
+    "environment": ("900", "600"),
+    "vfx": ("32", "32"),
+    "ui": ("64", "64"),
+}
 
 
 def sha256(path: Path) -> str:
@@ -55,9 +63,16 @@ def main() -> int:
                 continue
             if root.tag.rsplit("}", 1)[-1] != "svg":
                 errors.append(f"root:{path.name}")
-            expected_width = {"towers": "96", "enemies": "96", "environment": "900", "vfx": "32", "ui": "64"}[family]
-            if root.attrib.get("width") != expected_width:
-                errors.append(f"dimensions:{path.name}:expected {expected_width}")
+            expected_width, expected_height = EXPECTED_DIMENSIONS[family]
+            if (root.attrib.get("width"), root.attrib.get("height")) != (expected_width, expected_height):
+                errors.append(f"dimensions:{path.name}:expected {expected_width}x{expected_height}")
+            view_box = root.attrib.get("viewBox")
+            if view_box is not None:
+                parts = view_box.replace(",", " ").split()
+                if len(parts) != 4 or parts[2:] != [expected_width, expected_height]:
+                    errors.append(
+                        f"viewbox:{path.name}:expected 0 0 {expected_width} {expected_height}"
+                    )
             # Sprite families must stay transparent cutouts; environment maps are
             # intentionally opaque full-viewport backdrops and are exempt.
             if family != "environment" and re.search(
@@ -85,6 +100,13 @@ def main() -> int:
             errors.append(f"manifest-path:{entry['id']}:{declared.get('path')}->{entry['path']}")
         if declared.get("sha256") != entry["sha256"]:
             errors.append(f"manifest-drift:{entry['id']}:{declared.get('sha256')}->{entry['sha256']}")
+        # The declared lifecycle fields must match what the renderer/UI sources
+        # actually bind; otherwise an asset can be de-integrated while the
+        # committed manifest keeps claiming "integrated".
+        if declared.get("status") != entry["status"]:
+            errors.append(f"manifest-status:{entry['id']}:{declared.get('status')}->{entry['status']}")
+        if declared.get("exercised") != entry["exercised"]:
+            errors.append(f"manifest-exercised:{entry['id']}:{declared.get('exercised')}->{entry['exercised']}")
     for stale_id in manifest_assets:
         errors.append(f"manifest-extra:{stale_id}")
     if errors:

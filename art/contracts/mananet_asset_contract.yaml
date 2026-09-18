@@ -49,6 +49,13 @@ families:
     size: [64, 64]
     pivot: [0.5, 0.5]
     border: "none"
+    assets:
+      credits: {name: "Credits", role: "economy"}
+      integrity: {name: "Integrity", role: "status"}
+      shards: {name: "Shards", role: "economy"}
+      patch: {name: "Patch", role: "action"}
+      cyber_deck: {name: "Cyber Deck", role: "navigation"}
+      boss_warning: {name: "Boss Warning", role: "alert"}
 provenance:
   generation: "deterministic-authored-svg"
   ages_generation_provider: "blocked-no-provider-configured"
