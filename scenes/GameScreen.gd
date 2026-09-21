@@ -16,9 +16,17 @@ const _RUN_SETUP := preload("res://ui/controllers/RunSetup.gd")
 const _WAVE_SHOP_CTRL := preload("res://ui/controllers/WaveShopModalController.gd")
 const _DETAILS_CTRL := preload("res://ui/controllers/TowerDetailsOverlayController.gd")
 const _MAP_BG_PATHS: Dictionary = {
-	0: "res://assets/sprites/maps/map_bg_s_curve.jpg",
-	1: "res://assets/sprites/maps/map_bg_gauntlet.jpg",
-	2: "res://assets/sprites/maps/map_bg_spiral.jpg",
+	0: "res://assets/sprites/production/environment/s_curve.svg",
+	1: "res://assets/sprites/production/environment/gauntlet.svg",
+	2: "res://assets/sprites/production/environment/spiral.svg",
+}
+const _UI_ICON_PATHS: Dictionary = {
+	"credits": "res://assets/sprites/production/ui/credits.svg",
+	"integrity": "res://assets/sprites/production/ui/integrity.svg",
+	"shards": "res://assets/sprites/production/ui/shards.svg",
+	"patch": "res://assets/sprites/production/ui/patch.svg",
+	"cyber_deck": "res://assets/sprites/production/ui/cyber_deck.svg",
+	"boss_warning": "res://assets/sprites/production/ui/boss_warning.svg",
 }
 
 # Child node references (assigned in _ready)
@@ -83,6 +91,9 @@ var _wave_shop = null   # WaveShopModalController
 var _restart_confirm_start_ms: int = 0
 var _restart_confirm_bar: ProgressBar = null
 var _world_rect: Rect2 = Rect2(Vector2.ZERO, _LAYOUT.BASE_SIZE)
+
+# HUD icon textures are loaded once on first use instead of every frame.
+var _ui_icon_cache: Dictionary = {}
 
 # Dpad: track modal visibility so we can grab focus on open and restore on close
 var _dpad_pause_open: bool = false
@@ -237,6 +248,7 @@ func _build_hud() -> void:
 	# ---- Wave button ----
 	_wave_btn = Button.new()
 	_wave_btn.text = _BRAND.START_WAVE
+	_wave_btn.icon = _ui_icon("patch")
 	_wave_btn.custom_minimum_size = Vector2(210.0, _LAYOUT.min_touch_height(true))
 	_wave_btn.z_index = _Z_WAVE_BUTTON
 	_THEME.apply_button(_wave_btn, "primary")
@@ -273,6 +285,7 @@ func _build_hud() -> void:
 
 	_info_btn = Button.new()
 	_info_btn.text = "i"
+	_info_btn.icon = _ui_icon("cyber_deck")
 	_info_btn.custom_minimum_size = Vector2(32.0, 32.0)
 	_THEME.apply_button(_info_btn, "tab")
 	_info_btn.pressed.connect(_on_info_pressed)
@@ -981,12 +994,18 @@ func _process(_delta: float) -> void:
 	if game_state.game_state == "game_over" or game_state.game_state == "won":
 		_on_run_ended()
 
+func _ui_icon(name: String) -> Texture2D:
+	if not _ui_icon_cache.has(name):
+		_ui_icon_cache[name] = load(_UI_ICON_PATHS[name])
+	return _ui_icon_cache[name]
+
 func _update_hud(now_ms: int) -> void:
 	if game_state.wave > _prev_wave:
 		_show_wave_banner(game_state.wave)
 		_prev_wave = game_state.wave
 		
 	_wave_label.text  = "Wave %d / %d" % [game_state.wave, _MAPS.MAX_WAVE]
+	_wave_btn.icon = _ui_icon("boss_warning" if game_state.wave % 5 == 0 else "patch")
 
 	if _wave_progress_bar != null:
 		var spawn_total: int = game_state.get_wave_spawn_total()
