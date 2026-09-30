@@ -57,6 +57,15 @@ func _init():
 	_section("13. Tower Types Data")
 	_test_tower_types_data()
 
+	# ---- Negative control (test invocation only) ----
+	# Reached ONLY when invoked with user args after "--", e.g.:
+	#   godot --headless --path . --script scripts/full_audit.gd -- --negative-control
+	# Injects one deliberate failure to prove the exit status reflects failures.
+	# Normal gameplay and normal audit runs never pass this flag.
+	if "--negative-control" in OS.get_cmdline_user_args():
+		_section("0. Negative Control (injected failure)")
+		_fail("DELIBERATE injected failure (negative control requested)")
+
 	# ---- SUMMARY ----
 	print("\n============================================================")
 	print("  AUDIT SUMMARY")
@@ -66,7 +75,9 @@ func _init():
 	print("  FAIL  : %d" % fail_count)
 	print("  TOTAL : %d" % (pass_count + warn_count + fail_count))
 	print("============================================================\n")
-	quit()
+	# Exit nonzero whenever any check failed, so CI/wrappers cannot mistake a
+	# printed summary for success. 0 = clean run, 1 = at least one failure.
+	quit(1 if fail_count > 0 else 0)
 
 # ------------------------------------------------------------
 # Helpers
@@ -139,18 +150,18 @@ func _test_tower_placement() -> void:
 
 	# Find a safe position away from path
 	var p := Vector2(400, 400)
-	var result := gs.apply_action({"type": "place_tower", "tower_type": "archer", "pos": p}, 0)
+	var result = gs.apply_action({"type": "place_tower", "tower_type": "archer", "pos": p}, 0)
 	_check(result["success"], "place_tower archer at safe position succeeds", "place_tower FAILED: %s" % result.get("reason", "unknown"))
 	_check(gs.towers.size() == 1, "Tower count = 1 after placement", "Tower count = %d (expected 1)" % gs.towers.size())
 	_check(gs.gold < 300, "Gold decreased after placement (cost deducted)", "Gold unchanged after placement: %d" % gs.gold)
 
 	# Try placing on same spot — should fail
-	var dup_result := gs.apply_action({"type": "place_tower", "tower_type": "archer", "pos": p}, 0)
+	var dup_result = gs.apply_action({"type": "place_tower", "tower_type": "archer", "pos": p}, 0)
 	_check(not dup_result["success"], "Duplicate placement on same position rejected", "Duplicate placement should have failed but succeeded")
 
 	# Try placing with insufficient gold
 	gs.gold = 0
-	var broke_result := gs.apply_action({"type": "place_tower", "tower_type": "cannon", "pos": Vector2(200, 200)}, 0)
+	var broke_result = gs.apply_action({"type": "place_tower", "tower_type": "cannon", "pos": Vector2(200, 200)}, 0)
 	_check(not broke_result["success"], "Placement rejected when gold = 0", "Placement should fail with 0 gold but succeeded")
 
 	gs.dispose()
@@ -165,7 +176,7 @@ func _test_tower_selling() -> void:
 	var tower_id: int = gs.towers[0].id
 	var gold_after_place: int = gs.gold
 
-	var sell_result := gs.apply_action({"type": "sell_tower", "tower_id": tower_id}, 0)
+	var sell_result = gs.apply_action({"type": "sell_tower", "tower_id": tower_id}, 0)
 	_check(sell_result["success"], "sell_tower succeeds", "sell_tower FAILED: %s" % sell_result.get("reason", "unknown"))
 	_check(gs.towers.size() == 0, "Tower removed after sell", "Tower still in array after sell: %d" % gs.towers.size())
 	_check(gs.gold > gold_after_place, "Gold increased after sell", "Gold did not increase after sell: %d" % gs.gold)
@@ -184,7 +195,7 @@ func _test_wave_mechanics() -> void:
 
 	# Apply via action
 	var gs2 = _make_gs()
-	var r := gs2.apply_action({"type": "start_wave"}, 0)
+	var r = gs2.apply_action({"type": "start_wave"}, 0)
 	_check(r["success"], "apply_action start_wave returns success", "apply_action start_wave FAILED")
 
 	gs.dispose()
@@ -215,13 +226,13 @@ func _test_tower_upgrades() -> void:
 
 	# Give enough gold for upgrade
 	gs.gold = 1000
-	var upg := gs.apply_action({"type": "upgrade_base", "tower_id": tower_id}, 0)
+	var upg = gs.apply_action({"type": "upgrade_base", "tower_id": tower_id}, 0)
 	_check(upg["success"], "upgrade_base succeeds with sufficient gold", "upgrade_base FAILED: %s" % upg.get("reason","unknown"))
 	_check(gs.towers[0].level > level_before, "Tower level increased after upgrade", "Tower level unchanged: %d" % gs.towers[0].level)
 	_check(gs.gold < 1000, "Gold decreased after upgrade", "Gold unchanged after upgrade: %d" % gs.gold)
 
 	# Try cycle target mode
-	var cycle := gs.apply_action({"type": "cycle_target_mode", "tower_id": tower_id}, 0)
+	var cycle = gs.apply_action({"type": "cycle_target_mode", "tower_id": tower_id}, 0)
 	_check(cycle["success"], "cycle_target_mode succeeds", "cycle_target_mode FAILED: %s" % cycle.get("reason","unknown"))
 
 	gs.dispose()
