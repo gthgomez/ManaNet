@@ -72,14 +72,14 @@ Source of truth for the pipeline is `gthgomez/gamedev` (AGES v2), already mounte
 
 ### Agent startup addition
 
-After `docs/agent/PROJECT_CONTEXT.md`, any agent that touches art must read:
+After `docs/PROJECT_CONTEXT.md` and the root `AGENTS.md`, any agent that touches art must read:
 
 1. `art/ART_DIRECTION.md`
 2. this file
 3. the relevant `assets/contracts/*.asset.yaml`
 4. `.agent-game/manifest.yaml` → `art_direction` + `governance`
 
-Then it may plan exports. It may not invent new tower *mechanics* (`docs/agent/AGENTS.md`). New weapons below are **roster proposals**, not code.
+Then it may plan exports. It may not invent new tower *mechanics* (root `AGENTS.md`). New weapons below are **roster proposals**, not code.
 
 ---
 
