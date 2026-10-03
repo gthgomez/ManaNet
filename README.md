@@ -10,4 +10,5 @@ Cyber-themed tower defense game — Godot 4.6 port of the Python/Kivy TowerDefen
 - **Package:** com.mananet.godottd
 - **Build:** Open in Godot 4.6 Editor
 - **Docs:** [docs/](docs/)
-- **Internal agent notes (not project docs):** [docs/agent/](docs/agent/) — `AGENTS.md`, `CLAUDE.md`, `PROJECT_CONTEXT.md`
+- **Agent instructions:** [AGENTS.md](AGENTS.md) (sole authority)
+- **Project context:** [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md)
