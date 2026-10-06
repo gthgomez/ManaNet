@@ -64,10 +64,10 @@ jobs:
           set -o pipefail
           godot --headless --path . -s res://tests/simulation/regression_checks.gd 2>&1 | tee regression.log
 
-      # NOTE: `res://scenes/SimTest.tscn` is intentionally excluded. It hits its
-      # internal 10-minute simulated-time cap ("Timed out — simulation did not
-      # finish within tick budget") in headless CI, so it needs a fix before it
-      # can be a gate. See the PR description.
+      - name: SimTest headless 15-wave run
+        run: |
+          set -o pipefail
+          godot --headless --path . res://scenes/SimTest.tscn 2>&1 | tee simtest.log
 
       - name: UI regression harness (advisory)
         # Not yet verified on Linux headless; report without blocking.

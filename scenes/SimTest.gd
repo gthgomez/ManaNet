@@ -55,6 +55,10 @@ func _process(_delta: float) -> void:
 	_now_ms += _dt_ms
 	_tick += 1
 
+	# Dismiss wave shop gate so the next wave can start
+	if _gs.wave_shop_pending:
+		_gs.apply_action({"type": "wave_shop_skip"}, _now_ms)
+
 	# Auto-start each new wave
 	if _gs.wave_ready and _gs.game_state == "playing":
 		_spend_gold_before_wave()
