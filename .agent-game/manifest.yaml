@@ -111,12 +111,17 @@ entrypoints:
   test_runner: "scripts/full_audit.gd"
 
 verification:
+  # Portable commands: the engine is resolved from GODOT_BIN or PATH by
+  # tools/verify_game.py (Godot 4.6.2 pinned); all paths are repository-relative,
+  # so no absolute workstation path is required.
   T0_fast:
     - name: "godot_headless_quit"
-      command: ["pwsh", "-File", "C:/Workspace/tools/Godot/godot.ps1", "--headless", "--path", "C:/Workspace/Project_Games/ManaNet", "--quit"]
+      command: ["python", "tools/verify_game.py", "--quit"]
   T1_logic:
     - name: "full_audit_script"
-      command: ["pwsh", "-File", "C:/Workspace/tools/Godot/godot.ps1", "--headless", "--path", "C:/Workspace/Project_Games/ManaNet", "-s", "scripts/full_audit.gd"]
+      command: ["python", "tools/verify_game.py"]
+    - name: "verifier_exit_contract"
+      command: ["python", "tests/verifier_exit/test_verifier_exit.py"]
   T2_scene:
     - name: "basic_tower_placement"
       scenario_id: "basic_tower_placement"
