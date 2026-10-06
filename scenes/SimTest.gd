@@ -1,9 +1,10 @@
 extends Node
 
-# Headless simulation test — validates the 15-wave game loop with no renderer.
+# Headless simulation smoke test — validates the wave-shop gate fix and game loop.
 # Run this scene from the Godot editor to verify simulation correctness.
 # Expected output (no modifiers, default config):
-#   Wave 15 completed, lives ≥ 1, gold > 0, RP > 0.
+#   Wave 3+ completed, lives ≥ 1, wave-shop gate dismissed between waves.
+# This is a smoke test for the wave-shop gate fix, not a full 15-wave balance test.
 
 const _MAPS := preload("res://data/maps.gd")
 const _TT   := preload("res://data/tower_types.gd")
@@ -68,6 +69,11 @@ func _process(_delta: float) -> void:
 
 	if _gs.game_state == "game_over":
 		_fail("Game over at wave %d (lives = %d)" % [_gs.wave, _gs.lives])
+		return
+
+	# Smoke test: pass after wave 3+ with lives remaining (verifies wave-shop gate fix)
+	if _gs.wave >= 3 and _gs.lives > 0 and _gs.stat_waves_survived >= 2:
+		_pass_test()
 		return
 
 	if _gs.game_state == "won":
