@@ -1,0 +1,77 @@
+{
+  "source_commit": "72746968259ad5f2f2de33f9b4a0d81b4a0af327",
+  "captured_at": "2026-10-30",
+  "kind": "real runtime rendered capture",
+  "files": [
+    {
+      "path": "docs/showcase/combat.png",
+      "bytes": 49702,
+      "sha256": "c322ffef46ed6721926f7e54139df8d0943110572cd6bf623ff55f0427d21d94"
+    },
+    {
+      "path": "docs/showcase/gameplay-preview.gif",
+      "bytes": 917655,
+      "sha256": "5739b782f163513e9ffd9da59d820486b2f53cb4ab6d2ea804eb35240ed892a5"
+    },
+    {
+      "path": "docs/showcase/gameplay.mp4",
+      "bytes": 672901,
+      "sha256": "3f40e7548225bbfeaeb2db5a25aceef9c595e456737bc0ccb4b7a08ee03a5ae1"
+    },
+    {
+      "path": "docs/showcase/maps.png",
+      "bytes": 38377,
+      "sha256": "5ff5c77f34738915e765ae8f9ff8fee7705ef778f2a74a097c3fac704e4e765c"
+    },
+    {
+      "path": "docs/showcase/menu.png",
+      "bytes": 89819,
+      "sha256": "bbacdcf0ec5e450d705af7d1c2d57070d888ee9f1e41d33c7f127df9c6a0cda9"
+    },
+    {
+      "path": "docs/showcase/placement.png",
+      "bytes": 43689,
+      "sha256": "fde1487a22fabd87fa2107484656239194b93a001c42b60e441457a99791789c"
+    }
+  ],
+  "engine": "Godot 4.6.2.stable.official.71f334935",
+  "viewport": [
+    900,
+    600
+  ],
+  "recording_fps": 30,
+  "movie_frames": 626,
+  "movie_duration_seconds": 20.866666666666667,
+  "audio": "omitted",
+  "scripted_actions": true,
+  "gameplay_settings": "normal costs and 1x speed; shipped wall-clock game loop",
+  "observed_result": {
+    "credits": 124,
+    "engine": "4.6.2-stable (official)",
+    "integrity": 8,
+    "kills": 3,
+    "map": "S-Curve",
+    "method": "Scripted shipped-scene actions at normal costs and speed",
+    "towers": 3,
+    "wave": 1
+  },
+  "verification": {
+    "full_audit": {
+      "pass": 81,
+      "warn": 0,
+      "fail": 0,
+      "exit": 0
+    },
+    "capture_wrapper_exit": 0
+  },
+  "capture_scripts": [
+    {
+      "path": "tools/showcase/capture.gd",
+      "sha256": "2e7c2e9ca3142166de26d3971a2bc1b6d0b90d1e607c5331ef96d4fe8b292ba2"
+    },
+    {
+      "path": "tools/showcase/capture.sh",
+      "sha256": "2b53506c1562dbf869f89ac2d1fde059e46b0417ef96a49e006bb069660b7bc2"
+    }
+  ]
+}

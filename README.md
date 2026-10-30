@@ -2,6 +2,36 @@
 
 Cyber-themed tower defense game — Godot 4.6 port of the Python/Kivy TowerDefenseKivy.
 
+## Watch a scripted gameplay demo
+
+[![Actual S-Curve combat preview](docs/showcase/gameplay-preview.gif)](docs/showcase/gameplay.mp4)
+
+[Watch/download the full ~21-second MP4](docs/showcase/gameplay.mp4) ·
+[Capture source, method, and limits](docs/showcase/README.md)
+
+Real Godot 4.6.2 rendering from the shipped scenes: menu → map selection →
+three normal-cost Plasma Repeaters → the first wave on S-Curve. AI-operated
+scripted actions run the actual simulation; the clip is silent and uses fixed
+30 FPS movie time. It is a local demo, not an online playable build.
+
+| Choose a route | Deploy and defend |
+| --- | --- |
+| ![S-Curve, Gauntlet, and Spiral map choices](docs/showcase/maps.png) | ![Live wave one combat with three Plasma Repeaters](docs/showcase/combat.png) |
+
+Place six types of energy-weapon towers, earn Credits through combat, and
+protect your Cyber-Deck across a 15-wave run. This capture shows the opening
+wave only; it does not claim a full-game clear or Android-device verification.
+
+### Try it locally
+
+Open `project.godot` in **Godot 4.6.2**, import its resources, and press **F5**
+to start the main menu. Or from the repo root:
+
+```sh
+godot --path . --editor --import
+godot --path .
+```
+
 > **Status: proprietary.** This repository is public for source visibility and
 > transparency. It is **not open source** — there is no license grant to reuse,
 > modify, or redistribute this code. See [LICENSE](LICENSE).
