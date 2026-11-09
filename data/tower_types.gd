@@ -12,7 +12,7 @@ const TOWER_TYPES: Dictionary = {
 		"color": Color(0.655, 0.545, 1.0), "name": "Flux Crucible"
 	},
 	"cannon": {
-		"cost": 180, "range": 95, "damage": 68, "cooldown": 1350,
+		"cost": 180, "range": 105, "damage": 78, "cooldown": 1350,
 		"color": Color(1.0, 0.545, 0.29), "name": "Nova Bombard"
 	},
 	"sniper": {

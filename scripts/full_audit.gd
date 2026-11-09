@@ -248,11 +248,15 @@ func _test_simulation_loop() -> void:
 
 	# Run 60 ticks (1 second at 60fps equivalent)
 	var now_ms := 0
+	var start_pos: Vector2 = gs.enemies[0].pos
 	for _i in range(60):
 		now_ms += 16  # ~60fps
 		gs.update_simulation(now_ms)
 
-	_check(true, "update_simulation ran 60 ticks without crash", "CRASH during update_simulation")
+	var enemy_moved: bool = not gs.enemies.is_empty() and gs.enemies[0].pos != start_pos
+	_check(gs.stat_enemies_killed > 0 or enemy_moved,
+		"update_simulation advances the simulation (enemy moved or was killed)",
+		"simulation did not advance: no enemy moved and no kills occurred")
 	_check(gs.game_state in ["playing", "game_over", "won"], "game_state is valid after sim ticks: '%s'" % gs.game_state, "game_state is invalid: '%s'" % gs.game_state)
 
 	gs.dispose()
@@ -260,10 +264,21 @@ func _test_simulation_loop() -> void:
 # ------------------------------------------------------------
 # 10. Settings Persistence
 # ------------------------------------------------------------
+const _SAVE_PATH := "user://td_progression.json"
+const _AUDIT_SAVE_PATH := "user://td_progression.audit.json"
+
 func _test_settings() -> void:
+	# Isolation, not restore-at-end: redirect this instance to a scratch save so
+	# the real player profile is never opened at all.
+	var had_save: bool = FileAccess.file_exists(_SAVE_PATH)
+	var original := PackedByteArray()
+	if had_save:
+		original = FileAccess.get_file_as_bytes(_SAVE_PATH)
+
 	var prog_node = load("res://autoloads/Progression.gd").new()
 	prog_node.name = "ProgressionTest"
 	root.add_child(prog_node)
+	prog_node.set_save_path(_AUDIT_SAVE_PATH)
 
 	var s = prog_node.get_settings()
 	_check(s is Dictionary, "get_settings() returns Dictionary", "get_settings() returned non-Dictionary: %s" % typeof(s))
@@ -279,6 +294,15 @@ func _test_settings() -> void:
 
 	var cfg = prog_node.get_run_config()
 	_check(cfg is Dictionary, "get_run_config() returns Dictionary", "get_run_config() returned: %s" % typeof(cfg))
+
+	# Clean up the scratch save and prove the real one is untouched.
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(_AUDIT_SAVE_PATH))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(_AUDIT_SAVE_PATH + ".tmp"))
+	var now := PackedByteArray()
+	if FileAccess.file_exists(_SAVE_PATH):
+		now = FileAccess.get_file_as_bytes(_SAVE_PATH)
+	_check(now == original, "settings test leaves the real save byte-identical",
+		"settings test modified the real save file")
 
 # ------------------------------------------------------------
 # 11. Scene File Integrity

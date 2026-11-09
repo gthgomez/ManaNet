@@ -22,13 +22,15 @@ var dy: float
 
 func _init(p_start: Vector2, p_target: Enemy, p_tower: Tower,
 		   p_damage: int, p_created_ms: int,
-		   p_shot_index: int = 0, speed_multiplier: float = 1.0) -> void:
+		   p_shot_index: int = 0, _speed_multiplier: float = 1.0) -> void:
 	pos = p_start
 	prev_pos = p_start
 	target = p_target
 	tower = p_tower
 	damage = p_damage
-	speed = 9.0 * maxf(0.25, speed_multiplier)
+	# Velocity is in legacy px/frame@60fps. GameState already scales the step
+	# by speed_multiplier, so multiplying here too made displacement ∝ speed².
+	speed = 9.0
 	radius = 6
 	created_ms = p_created_ms
 	shot_index = p_shot_index

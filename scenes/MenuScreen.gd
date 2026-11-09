@@ -435,7 +435,7 @@ func _update_play_context_label() -> void:
 	var profile: Dictionary = Progression.load_profile()
 	var history: Array      = profile.get("run_history", [])
 	if history.is_empty():
-		_play_context_lbl.text = "15 waves  ·  Normal difficulty"
+		_play_context_lbl.text = "3 maps  ·  Easy → Hard  ·  15 waves"
 		return
 	var last: Dictionary = history[-1]
 	# run_history stores map_id as a number (int in-memory, float after JSON
@@ -452,7 +452,7 @@ func _update_play_context_label() -> void:
 	elif last_wave > 0:
 		_play_context_lbl.text = "Last reached Wave %d" % last_wave
 	else:
-		_play_context_lbl.text = "15 waves  ·  Normal difficulty"
+		_play_context_lbl.text = "3 maps  ·  Easy → Hard  ·  15 waves"
 
 # ── Decor icon (mage ghost — positioned above BG so it's visible) ──────────────
 

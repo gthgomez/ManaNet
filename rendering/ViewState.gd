@@ -25,6 +25,7 @@ var pending_placement_valid: bool = false
 # Confirmation dialogs
 var confirm_sell: bool = false
 var confirm_restart: bool = false
+var confirm_quit: bool = false
 var promotion_pending: bool = false
 
 # Action toasts — auto-expire, used for upgrade feedback / errors
@@ -40,19 +41,32 @@ var show_onboarding: bool = false
 
 # Speed / pause button state (mirrors what GameState exposes, cached here for HUD)
 var displayed_speed: float = 1.0
+var reduce_motion: bool = false
 
 func configure_from_settings(settings: Dictionary) -> void:
 	placement_mode = str(settings.get("placement_mode", "drag"))
 	if placement_mode != "drop":
 		placement_mode = "drag"
 	confirm_placement_enabled = bool(settings.get("confirm_placement_enabled", false))
+	reduce_motion = bool(settings.get("reduce_motion", false))
 
 func start_screen_shake(now_ms: int, amplitude: float = 6.0, duration_ms: int = 380) -> void:
+	if reduce_motion:
+		return
+	# Never let a small splash shake overwrite a bigger, more important cue
+	# (a 4.0 cannon hit used to replace a 12.0 Integrity-loss shake).
+	var elapsed: int = now_ms - shake_started
+	if elapsed >= 0 and elapsed < shake_duration_ms:
+		var remaining: float = shake_amplitude * (1.0 - float(elapsed) / float(shake_duration_ms))
+		amplitude = maxf(amplitude, remaining)
+		duration_ms = maxi(duration_ms, shake_duration_ms - elapsed)
 	shake_started = now_ms
 	shake_amplitude = amplitude
 	shake_duration_ms = duration_ms
 
 func get_screen_shake_offset(now_ms: int) -> Vector2:
+	if reduce_motion:
+		return Vector2.ZERO
 	var elapsed: int = now_ms - shake_started
 	if elapsed > shake_duration_ms or shake_amplitude <= 0.0:
 		return Vector2.ZERO

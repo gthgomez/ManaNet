@@ -77,6 +77,35 @@ def run(godot, args, timeout=TIMEOUT_SECONDS):
         return None
 
 
+def run_parse_gate(godot):
+    """Import the project and fail on fatal parse/load errors.
+
+    A per-file GDScript loader cannot be used here: running with --script does
+    not register autoloads, so valid scripts that reference Progression/
+    FocusManager report false compilation failures. The editor import resolves
+    the real project context (this mirrors the CI import gate).
+    """
+    try:
+        proc = subprocess.run(
+            [godot, "--headless", "--path", REPO_ROOT, "--import"],
+            capture_output=True, text=True, timeout=TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 2, "import timed out or failed to start"
+    output = proc.stdout + proc.stderr
+    bad = []
+    for line in output.splitlines():
+        if "android/" in line:
+            continue  # nested Android plugin fixture project
+        if "Parse Error" in line or "Failed to load script" in line:
+            bad.append(line.strip())
+    if bad:
+        for line in bad[:20]:
+            print("verify_game: PARSE: %s" % line, file=sys.stderr)
+        return 1, "parse/load errors in import"
+    return 0, None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--quit", action="store_true",
@@ -105,6 +134,12 @@ def main():
             print("verify_game: WARNING %s" % msg, file=sys.stderr)
         else:
             return fail(msg)
+
+    # Local parse gate: the project must import with no fatal script errors.
+    code, msg = run_parse_gate(godot)
+    if code != 0:
+        return fail("script parse gate failed: %s" % msg, code)
+    print("verify_game: PASS script parse gate")
 
     if opts.raw is not None and opts.raw:
         code = run(godot, opts.raw)

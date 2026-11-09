@@ -62,4 +62,5 @@ static func shards_mult(mult: float, stacked: bool = false) -> String:
 	return "  %s ×%.1f" % [CURRENCY_META, mult]
 
 static func end_stat_shards(earned: int, total: int) -> String:
-	return "+%d  (total: %d)" % [earned, total]
+	## `total` is the spendable banked balance, not lifetime earnings.
+	return "+%d earned  ·  %d available" % [earned, total]

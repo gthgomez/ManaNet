@@ -76,6 +76,8 @@ func _build_modifier_strip() -> void:
 	_mod_strip.add_child(_mod_rp_lbl)
 
 	_refresh_mod_strip()
+	# Do not render an orphan "MODIFIERS:" heading when nothing is owned yet.
+	_mod_strip.visible = not _mod_btns.is_empty()
 
 func _on_mod_toggled(mod_id: String) -> void:
 	var active: Array = Progression.get_active_modifier_ids()
@@ -273,7 +275,7 @@ func _apply_layout() -> void:
 	_title.add_theme_font_size_override("font_size", 34 if viewport.x >= 1050.0 else 30)
 
 	var mod_strip_h: float = 0.0
-	if _mod_strip != null and _mod_strip.get_child_count() > 1:
+	if _mod_strip != null and not _mod_btns.is_empty():
 		_LAYOUT.apply_rect(_mod_strip, Rect2(Vector2(margin, top + 58.0), Vector2(maxf(0.0, viewport.x - margin * 2.0), 40.0)))
 		mod_strip_h = 46.0
 

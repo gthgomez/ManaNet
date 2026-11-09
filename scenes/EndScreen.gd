@@ -27,6 +27,14 @@ func _ready() -> void:
 	_map_btn.pressed.connect(_on_change_map)
 	_menu_btn.pressed.connect(_on_menu)
 
+	# One tap from the result to spending Shards: motivation peaks here.
+	var deck_btn := Button.new()
+	deck_btn.text = "Cyber-Deck"
+	deck_btn.custom_minimum_size = Vector2(150.0, _LAYOUT.TOUCH_HEIGHT)
+	_THEME.apply_button(deck_btn, "secondary")
+	deck_btn.pressed.connect(func(): _fade_to("res://scenes/CyberDeckScreen.tscn"))
+	$Panel/VBox/BtnRow.add_child(deck_btn)
+
 	# Dpad navigation: retry ↔ map_btn (horizontal), both → menu_btn (down)
 	FocusManager.setup_dpad_neighbors([_retry_btn, _map_btn], false)
 	FocusManager.set_neighbor(_retry_btn, "bottom", _menu_btn)
@@ -46,7 +54,7 @@ func _ready() -> void:
 	var gold: int          = stats.get("gold_earned", get_meta("gold_earned", 0))
 
 	var profile: Dictionary = Progression.load_profile()
-	var total_rp: int = profile.get("total_rp", 0)
+	var banked_rp: int = profile.get("banked_rp", 0)
 
 	if won:
 		_title_lbl.text = "VICTORY!"
@@ -67,7 +75,7 @@ func _ready() -> void:
 	_add_stat("%s Earned" % _BRAND.CURRENCY_RUN, str(gold),             Color(1.0, 0.82, 0.2))
 	_add_stat("%s Remaining" % _BRAND.CORE_RESOURCE, str(lives),        Color.WHITE)
 	_add_stat("Perfect Waves",     "%d / %d" % [perfect_waves, waves],  Color(0.2, 0.8, 1.0))
-	_add_stat(_BRAND.CURRENCY_META, _BRAND.end_stat_shards(rp_earned, total_rp), Color(0.47, 0.9, 1.0))
+	_add_stat(_BRAND.CURRENCY_META, _BRAND.end_stat_shards(rp_earned, banked_rp), Color(0.47, 0.9, 1.0))
 
 	var newly_unlocked: Array = stats.get("newly_unlocked_variants", [])
 	var milestone_deltas: Array = stats.get("milestone_deltas", [])

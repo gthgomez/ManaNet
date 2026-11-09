@@ -221,11 +221,12 @@ static func _on_button_pressed(btn: Button) -> void:
 		if tweener:
 			tweener.from(-1.0)
 
-	# Spawn juice burst + button press SFX at button center
+	# Button press SFX. The old particle burst was parented to the default canvas
+	# (layer 0) and therefore rendered behind the HUD on the gameplay screen while
+	# still allocating 9 nodes per tap; the press-scale tween above is the feedback.
 	var juice = btn.get_node_or_null("/root/JuiceManager")
 	if juice:
 		juice.play(juice.SFX.BTN_PRESS)
-		juice.spawn_burst(btn.global_position + btn.size * 0.5, CYAN)
 
 static func apply_label(label: Label, kind: String = "body") -> void:
 	if label == null:

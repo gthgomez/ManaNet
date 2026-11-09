@@ -24,9 +24,9 @@ const STARTING_TOWER_CHAIN: Array = [
 const MAP_MODIFIERS: Array = [
 	# [id, cost, label, desc]
 	["mod_iron_economy",  60, "Iron Economy",
-	 "Start with -50 gold, cannot sell towers, but earn +15% per kill"],
+	 "Start with -50 Credits, cannot sell towers, but earn +15% per kill"],
 	["mod_glass_cannon",  80, "Glass Cannon",
-	 "Start with 5 lives; Archer and Sniper gain +18% damage; waves give +30% gold bonus"],
+	 "Start with 5 Integrity; Archer and Sniper gain +18% damage; waves give +30% Credit bonus"],
 	["mod_blitz",        100, "Blitz Mode",
 	 "Frost towers disabled; Lightning damage +35%; enemies move 25% faster; kill rewards +20%"],
 	["mod_hardened",     120, "Hardened",
@@ -46,14 +46,17 @@ const MODIFIER_RP_MULT: Dictionary = {
 # Pairs that CANNOT be stacked together (order-independent)
 const MODIFIER_INCOMPATIBLE: Array = [
 	["mod_blitz", "mod_hardened"],
+	# Both override starting lives; stacking voided Glass Cannon's 5-life cost
+	# while keeping its damage/gold bonus and a 3.5x RP multiplier.
+	["mod_sudden_death", "mod_glass_cannon"],
 ]
 
 const CONVENIENCE_UPGRADES: Array = [
 	# [id, cost, label, desc]
-	["bonus_gold_10",  30, "+10 Starting Gold",  "Each run begins with 10 extra gold"],
-	["bonus_gold_25",  80, "+25 Starting Gold",  "Each run begins with 25 extra gold (replaces +10)"],
-	["bonus_life_1",   50, "+1 Starting Life",   "Each run begins with 11 lives"],
-	["bonus_life_2",  110, "+2 Starting Lives",  "Each run begins with 12 lives (replaces +1)"],
+	["bonus_gold_10",  30, "+10 Starting Credits",  "Each run begins with 10 extra Credits"],
+	["bonus_gold_25",  80, "+25 Starting Credits",  "Each run begins with 25 extra Credits (replaces +10)"],
+	["bonus_life_1",   50, "+1 Starting Integrity",   "Each run begins with 11 Integrity"],
+	["bonus_life_2",  110, "+2 Starting Integrity",  "Each run begins with 12 Integrity (replaces +1)"],
 	["unlock_geomancer", 250, "Terrestrial Resonance", "Unlock the 4th Element: Earth. Grants access to the Geomancer variant."],
 ]
 
@@ -73,7 +76,7 @@ const TOWER_VARIANTS: Array = [
 		"variant_key":    "frost_permafrost",
 		"tower_type":     "frost",
 		"label":          "Permafrost Tower",
-		"desc":           "Deeper cold. Chill duration +20%, +8% damage. Costs 10 more gold.",
+		"desc":           "Deeper cold. Chill duration +20%, +8% damage. Costs 10 more Credits.",
 		"use_threshold":  12,
 		"kill_threshold": 150,
 		"stat_delta":     {"damage": 0.08, "range": 0.0, "cooldown": 0.0, "cost": 10},
@@ -85,7 +88,7 @@ const TOWER_VARIANTS: Array = [
 		"variant_key":    "mage_runic",
 		"tower_type":     "mage",
 		"label":          "Runic Mage",
-		"desc":           "Ancient runes amplify spells. +12% damage, chain jumps +1. Costs 15 more.",
+		"desc":           "Ancient runes amplify spells. +12% damage, chain jumps +1. Costs 15 more Credits.",
 		"use_threshold":  10,
 		"kill_threshold": 180,
 		"stat_delta":     {"damage": 0.12, "range": 0.0, "cooldown": 0.0, "cost": 15},
@@ -97,7 +100,7 @@ const TOWER_VARIANTS: Array = [
 		"variant_key":    "cannon_siege_mk2",
 		"tower_type":     "cannon",
 		"label":          "Siege Mk.II",
-		"desc":           "Upgraded barrel. +15% splash radius, +8% damage. Costs 20 more.",
+		"desc":           "Upgraded barrel. +15% splash radius, +8% damage. Costs 20 more Credits.",
 		"use_threshold":  10,
 		"kill_threshold": 160,
 		"stat_delta":     {"damage": 0.08, "range": 0.0, "cooldown": 0.0, "cost": 20},
@@ -109,7 +112,7 @@ const TOWER_VARIANTS: Array = [
 		"variant_key":    "sniper_longshot",
 		"tower_type":     "sniper",
 		"label":          "Longshot Sniper",
-		"desc":           "Extended barrel. +20% range, +5% damage. Costs 15 more.",
+		"desc":           "Extended barrel. +20% range, +5% damage. Costs 15 more Credits.",
 		"use_threshold":  10,
 		"kill_threshold": 140,
 		"stat_delta":     {"damage": 0.05, "range": 0.20, "cooldown": 0.0, "cost": 15},
@@ -120,7 +123,7 @@ const TOWER_VARIANTS: Array = [
 		"variant_key":    "lightning_overclocked",
 		"tower_type":     "lightning",
 		"label":          "Overclocked Tesla",
-		"desc":           "Souped-up coils. -10% cooldown, +8% damage. Costs 15 more.",
+		"desc":           "Souped-up coils. -10% cooldown, +8% damage. Costs 15 more Credits.",
 		"use_threshold":  10,
 		"kill_threshold": 160,
 		"stat_delta":     {"damage": 0.08, "range": 0.0, "cooldown": -0.10, "cost": 15},
@@ -146,8 +149,14 @@ const TOWER_VARIANTS: Array = [
 # ---------------------------------------------------------------------------
 
 var _profile: Dictionary = {}
-const _SAVE_PATH: String = "user://td_progression.json"
-const _TMP_PATH:  String = "user://td_progression.tmp"
+var _save_path: String = "user://td_progression.json"
+var _tmp_path: String = "user://td_progression.tmp"
+
+## Redirect persistence for tests/tooling. A verification run must never open,
+## let alone overwrite, the player's real profile.
+func set_save_path(path: String) -> void:
+	_save_path = path
+	_tmp_path = path + ".tmp"
 # Legacy desktop save from the Kivy predecessor (TowerDefenseKivy writes
 # td_progression.json at its repo root as the desktop fallback). res://../
 # is not portable, so resolve the sibling project path absolutely; on Android
@@ -187,6 +196,9 @@ func _default_settings() -> Dictionary:
 		"pause_on_tower_info":       true,
 		"audio_muted":               false,
 		"sfx_enabled":               true,
+		"sfx_volume_db":             0.0,
+		"haptics_enabled":           true,
+		"reduce_motion":             false,
 	}
 
 func _default_profile() -> Dictionary:
@@ -220,7 +232,7 @@ func _default_profile() -> Dictionary:
 # ---------------------------------------------------------------------------
 
 func load_profile() -> Dictionary:
-	var loaded := _read_profile_file(_SAVE_PATH)
+	var loaded := _read_profile_file(_save_path)
 	if not loaded.is_empty():
 		_profile = loaded
 		return _profile
@@ -245,6 +257,15 @@ func _read_profile_file(path: String) -> Dictionary:
 	f.close()
 	var parsed = JSON.parse_string(text)
 	if not parsed is Dictionary:
+		# Never silently overwrite a corrupt profile later; quarantine it so a
+		# later save cannot destroy whatever the player had.
+		var stamp: int = int(Time.get_unix_time_from_system())
+		var quarantine: String = "%s.corrupt-%d" % [path, stamp]
+		DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(path),
+			ProjectSettings.globalize_path(quarantine)
+		)
+		push_warning("Corrupt progression save quarantined as %s" % quarantine)
 		return {}
 	var default := _default_profile()
 	_deep_merge(default, parsed)
@@ -252,25 +273,12 @@ func _read_profile_file(path: String) -> Dictionary:
 	default["engine"] = "godot"
 	return default
 
-func save_profile() -> void:
-	if _profile.is_empty():
-		return
-	var text := JSON.stringify(_profile, "\t")
-	var f := FileAccess.open(_TMP_PATH, FileAccess.WRITE)
-	if f:
-		f.store_string(text)
-		f.close()
-		DirAccess.rename_absolute(
-			ProjectSettings.globalize_path(_TMP_PATH),
-			ProjectSettings.globalize_path(_SAVE_PATH)
-		)
-
-func _deep_merge(base: Dictionary, override: Dictionary) -> void:
-	for key in override:
-		if key in base and base[key] is Dictionary and override[key] is Dictionary:
-			_deep_merge(base[key], override[key])
-		else:
-			base[key] = override[key]
+func _as_int(value, fallback: int = 0) -> int:
+	if value is int:
+		return value
+	if value is float:
+		return int(value)
+	return fallback
 
 func _normalize_profile(profile: Dictionary) -> void:
 	if profile.get("active_starting_tower") == null:
@@ -280,12 +288,60 @@ func _normalize_profile(profile: Dictionary) -> void:
 	if profile.get("active_modifier_2") == null:
 		profile["active_modifier_2"] = ""
 
-	if not profile.get("active_variants", {}) is Dictionary:
-		profile["active_variants"] = _default_profile()["active_variants"]
+	# Type-validate persisted collections. A parseable save with wrong-typed
+	# keys used to crash record_run() at the end of a run.
+	for key in ["unlocked", "unlocked_variants"]:
+		if not profile.get(key) is Array:
+			profile[key] = []
+	for key in ["tower_use_counts", "tower_kill_counts", "active_variants", "settings"]:
+		if not profile.get(key) is Dictionary:
+			profile[key] = _default_profile()[key]
+	for key in ["total_rp", "banked_rp"]:
+		profile[key] = _as_int(profile.get(key), 0)
+
 	var default_variants: Dictionary = _default_profile()["active_variants"]
 	for ttype in default_variants:
 		if not ttype in profile["active_variants"] or profile["active_variants"][ttype] == null:
 			profile["active_variants"][ttype] = ""
+		else:
+			profile["active_variants"][ttype] = str(profile["active_variants"][ttype])
+	for key in ["tower_use_counts", "tower_kill_counts"]:
+		for ttype in default_variants:
+			profile[key][ttype] = _as_int(profile[key].get(ttype), 0)
+
+	if not profile.get("run_history") is Array:
+		profile["run_history"] = []
+	var clean_history: Array = []
+	for entry in profile["run_history"]:
+		if entry is Dictionary:
+			clean_history.append(entry)
+	profile["run_history"] = clean_history
+
+func save_profile() -> void:
+	# Never serialize an uninitialized profile. Tests and tooling can construct
+	# Progression without _ready()/load_profile(); writing then would replace a
+	# real save with a stub (observed: a 282-byte profile became 45 bytes).
+	if _profile.is_empty() or not _profile.has("version"):
+		push_error("Refusing to save an uninitialized progression profile")
+		return
+	var text := JSON.stringify(_profile, "\t")
+	var f := FileAccess.open(_tmp_path, FileAccess.WRITE)
+	if f:
+		f.store_string(text)
+		f.close()
+		var err: int = DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(_tmp_path),
+			ProjectSettings.globalize_path(_save_path)
+		)
+		if err != OK:
+			push_error("Failed to commit progression save (error %d); previous save left intact" % err)
+
+func _deep_merge(base: Dictionary, override: Dictionary) -> void:
+	for key in override:
+		if key in base and base[key] is Dictionary and override[key] is Dictionary:
+			_deep_merge(base[key], override[key])
+		else:
+			base[key] = override[key]
 
 # ---------------------------------------------------------------------------
 # RP calculation  (mirrors compute_rp in progression.py)
@@ -297,14 +353,14 @@ func compute_rp(waves_survived: int, perfect_waves: int, lives_remaining: int,
 	var rp: int = (waves_survived * 8) + (perfect_waves * 7) + (lives_remaining * 5)
 	if gold_efficiency_enabled and gold_earned > 0:
 		var bonus: int = int(float(gold_spent) / float(gold_earned) * 20.0)
-		rp += clampi(bonus, 0, 40)
+		rp += clampi(bonus, 0, 20)
 	return rp
 
 # ---------------------------------------------------------------------------
 # End-of-run record  (mirrors record_run in progression.py)
 # ---------------------------------------------------------------------------
 
-func record_run(gs: Object, map_id: int) -> Dictionary:
+func record_run(gs: Object, map_id: int, abandoned: bool = false) -> Dictionary:
 	var settings: Dictionary = get_settings()
 	var gold_eff_on: bool = settings.get("gold_efficiency_enabled", true)
 	var gold_spent: int = maxi(0, gs.stat_gold_earned - gs.gold)
@@ -317,7 +373,7 @@ func record_run(gs: Object, map_id: int) -> Dictionary:
 		gold_spent,
 		gold_eff_on
 	)
-	rp = int(round(float(rp) * gs._rp_mult))
+	rp = int(round(float(rp) * gs._rp_mult)) if gs.game_state == "won" else rp
 
 	_profile["total_rp"]  += rp
 	_profile["banked_rp"] += rp
@@ -346,6 +402,7 @@ func record_run(gs: Object, map_id: int) -> Dictionary:
 		"gold_spent":  gold_spent,
 		"rp_earned":   rp,
 		"won":         gs.game_state == "won",
+		"abandoned":   abandoned,
 	}
 	_profile["run_history"].append(entry)
 	if _profile["run_history"].size() > 50:

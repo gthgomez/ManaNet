@@ -1,10 +1,10 @@
 extends Node
 
-# Headless simulation smoke test — validates the wave-shop gate fix and game loop.
+# Headless simulation smoke test — validates the wave-shop gate fix and early game loop.
 # Run this scene from the Godot editor to verify simulation correctness.
 # Expected output (no modifiers, default config):
-#   Wave 3+ completed, lives ≥ 1, wave-shop gate dismissed between waves.
-# This is a smoke test for the wave-shop gate fix, not a full 15-wave balance test.
+#   Wave 3+ completed, lives >= 7, wave-shop gate dismissed between waves.
+# This is deliberately an early-run smoke test, not a full 15-wave balance test.
 
 const _MAPS := preload("res://data/maps.gd")
 const _TT   := preload("res://data/tower_types.gd")
@@ -16,7 +16,10 @@ var _tick: int = 0
 var _MAX_TICKS: int = 60 * 60 * 10   # 10 minutes of simulated time as safety cap
 
 func _ready() -> void:
-	print("=== SimTest: starting headless 15-wave run ===")
+	# Deterministic smoke test: unseeded spawn/crit RNG made the life buffer
+	# vary by several points run to run, which made the gate flaky.
+	seed(12345)
+	print("=== SimTest: starting headless early-run smoke test ===")
 	var map_data: Dictionary = _MAPS.MAPS[0]
 	_gs = GameState.new(map_data["path"], {}, 0)
 
@@ -71,8 +74,9 @@ func _process(_delta: float) -> void:
 		_fail("Game over at wave %d (lives = %d)" % [_gs.wave, _gs.lives])
 		return
 
-	# Smoke test: pass after wave 3+ with lives remaining (verifies wave-shop gate fix)
-	if _gs.wave >= 3 and _gs.lives > 0 and _gs.stat_waves_survived >= 2:
+	# Smoke test: pass after wave 3+ with a healthy life buffer (verifies the
+	# wave-shop gate fix and that the opening is survivable).
+	if _gs.wave >= 3 and _gs.lives >= 7 and _gs.stat_waves_survived >= 2:
 		_pass_test()
 		return
 

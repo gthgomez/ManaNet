@@ -16,6 +16,7 @@ permissions:
 
 env:
   GODOT_VERSION: "4.6.2"
+  GODOT_BIN: godot
 
 jobs:
   test:
@@ -64,24 +65,37 @@ jobs:
           set -o pipefail
           godot --headless --path . -s res://tests/simulation/regression_checks.gd 2>&1 | tee regression.log
 
-      - name: SimTest headless 15-wave run
+      - name: Early-run smoke test
         run: |
           set -o pipefail
           godot --headless --path . res://scenes/SimTest.tscn 2>&1 | tee simtest.log
 
-      - name: UI regression harness (advisory)
-        # Not yet verified on Linux headless; report without blocking.
-        continue-on-error: true
+      - name: UI regression harness
         run: |
           set -o pipefail
           godot --headless --path . res://tests/ui/UIRegressionTest.tscn 2>&1 | tee uiregression.log
 
-      - name: Full audit (gates on FAIL count)
-        # `full_audit.gd` always exits 0, so gate on its summary line.
+      - name: Benchmark liveness and percentiles
         run: |
           set -o pipefail
-          godot --headless --path . -s res://scripts/full_audit.gd 2>&1 | tee audit.log
-          grep -q "FAIL  : 0" audit.log
+          godot --headless --path . -s res://scripts/benchmark.gd 2>&1 | tee benchmark.log
+
+      - name: Full audit (parse gate + exit-code contract)
+        run: |
+          set -o pipefail
+          python3 tools/verify_game.py 2>&1 | tee verify.log
+
+      - name: Verifier exit-status contract tests
+        run: |
+          set -o pipefail
+          python3 tests/verifier_exit/test_verifier_exit.py 2>&1 | tee verifier_exit.log
+
+      - name: Fail on runtime script errors
+        run: |
+          if grep -n "SCRIPT ERROR" regression.log simtest.log uiregression.log benchmark.log verify.log 2>/dev/null; then
+            echo "::error::A headless run reported SCRIPT ERROR; see logs."
+            exit 1
+          fi
 
       - name: Upload logs
         if: always()

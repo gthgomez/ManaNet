@@ -3,6 +3,8 @@ extends SceneTree
 const GameStateScript := preload("res://simulation/core/GameState.gd")
 const EnemyScript := preload("res://simulation/entities/Enemy.gd")
 const TowerScript := preload("res://simulation/entities/Tower.gd")
+const ProjectileScript := preload("res://simulation/entities/Projectile.gd")
+const ProgressionScript := preload("res://autoloads/Progression.gd")
 const _MAPS := preload("res://data/maps.gd")
 
 var _pass_count: int = 0
@@ -21,6 +23,19 @@ func _init() -> void:
 	_test_movement_scales_with_sim_delta()
 	_test_large_time_gaps_are_clamped()
 	_test_flame_burst_density_is_tick_phase_independent()
+	_test_burn_dps_is_tick_independent()
+	_test_boss_regen_works_at_sixty_fps()
+	_test_mage_vulnerability_applies_to_hit()
+	_test_projectile_swept_hit_at_high_speed()
+	_test_wave_shop_actions_require_pending()
+	_test_discount_sell_has_no_profit_loop()
+	_test_dead_enemy_does_not_leak()
+	_test_spawn_pacing_scales_with_speed()
+	_test_projectile_lifetime_is_bounded()
+	_test_opening_waves_have_no_stealth_or_flying()
+	_test_stealth_vision_paths()
+	_test_cannon_can_target_flying()
+	_test_incompatible_modifiers_rejected()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass_count)
 	print("FAIL: %d" % _fail_count)
@@ -90,8 +105,8 @@ func _test_boss_wave_trash_density() -> void:
 	var state: GameState = _make_state()
 	state.wave = 5
 	state.wave_enemy_total = 20
-	# 1 boss + round(20 * 0.6) trash = 13
-	_check(state.get_wave_spawn_total() == 13, "boss wave spawn total is 1 + 60%% of base (13 for base 20)")
+	# 1 boss + full 20 trash = 21
+	_check(state.get_wave_spawn_total() == 21, "boss wave spawn total is 1 + full base (21 for base 20)")
 	state.wave = 4
 	_check(state.get_wave_spawn_total() == 20, "non-boss wave uses full wave_enemy_total")
 	state.wave = 5
@@ -105,7 +120,7 @@ func _test_boss_wave_trash_density() -> void:
 		"boss spawn adds post-boss trash delay")
 	while state.enemies_spawned < state.get_wave_spawn_total():
 		state.spawn_enemy(state.next_spawn_ms)
-	_check(state.enemies_spawned == 13, "boss wave stops at density cap (not full base 20)")
+	_check(state.enemies_spawned == 21, "boss wave stops at the full wave cap (not a reduced one)")
 	_check(state.wave_enemy_total == 20, "base wave_enemy_total progression value unchanged")
 	state.dispose()
 
@@ -270,3 +285,220 @@ func _test_flame_burst_density_is_tick_phase_independent() -> void:
 			% [results[0].size(), results[1].size()])
 	_check(results[0] == results[1],
 		"flame burst cadence identical across phases %s vs %s" % [str(results[0]), str(results[1])])
+
+# --- Damage-over-time / regen integration ------------------------------------
+
+func _burn_damage_over_one_second(dt_ms: int) -> int:
+	var state := _make_straight_state()
+	state.wave_ready = false
+	state.next_spawn_ms = 999999999
+	var enemy := _inject_enemy(state)
+	enemy.health = 1000000
+	enemy.burn_dps = 30
+	enemy.burn_until = 999999999
+	state.update_simulation(100000)
+	for i in range(1, int(1000.0 / float(dt_ms)) + 1):
+		state.update_simulation(100000 + i * dt_ms)
+	var lost: int = 1000000 - enemy.health
+	state.dispose()
+	return lost
+
+func _test_burn_dps_is_tick_independent() -> void:
+	# A 30 dps burn must deal ~30 damage per second at any tick size. The old
+	# maxi(1, int(dps*dt/1000)) floor made this 22-126 dps depending on ticks.
+	var a := _burn_damage_over_one_second(8)
+	var b := _burn_damage_over_one_second(16)
+	var c := _burn_damage_over_one_second(32)
+	_check(absf(float(a) - 30.0) <= 2.0, "30 dps burn deals ~30 dmg/s at 8ms ticks (got %d)" % a)
+	_check(absf(float(b) - 30.0) <= 2.0, "30 dps burn deals ~30 dmg/s at 16ms ticks (got %d)" % b)
+	_check(absf(float(c) - 30.0) <= 2.0, "30 dps burn deals ~30 dmg/s at 32ms ticks (got %d)" % c)
+	_check(absi(a - b) <= 1 and absi(b - c) <= 1,
+		"burn damage is tick-size independent (%d/%d/%d)" % [a, b, c])
+
+func _test_boss_regen_works_at_sixty_fps() -> void:
+	var state := _make_straight_state()
+	state.wave_ready = false
+	state.next_spawn_ms = 999999999
+	var boss := EnemyScript.BossRegenerator.new(state.path)
+	boss.health = 100
+	boss.max_health = 600
+	state.enemies.append(boss)
+	state.update_simulation(100000)
+	for i in range(1, 63):  # 1 second at 16ms
+		state.update_simulation(100000 + i * 16)
+	var gained: int = boss.health - 100
+	_check(gained >= 43 and gained <= 47,
+		"BossRegenerator heals ~45 HP/s at 60fps (got %d)" % gained)
+	state.dispose()
+
+func _test_mage_vulnerability_applies_to_hit() -> void:
+	var state := _make_state()
+	var mage := TowerScript.new(Vector2(100, 100), "mage", 1)
+	mage.tracker.path_levels["Bottom"] = 5
+	var target := EnemyScript.new(state.path)
+	target.health = 100000
+	target.max_health = 100000
+	state.enemies.append(target)
+	state.apply_hit(mage, target, 100, 1000)
+	var lost: int = 100000 - target.health
+	_check(lost == 130, "mage Bottom L5 Vulnerability Exploit applies +30%% to the hit (got %d)" % lost)
+	# Any other tower also benefits while the debuff is active.
+	var archer := TowerScript.new(Vector2(100, 100), "archer", 2)
+	state.apply_hit(archer, target, 100, 1100)
+	var second_lost: int = 100000 - lost - target.health
+	_check(second_lost == 130, "vulnerability applies to other towers too (got %d)" % second_lost)
+	state.dispose()
+
+func _test_projectile_swept_hit_at_high_speed() -> void:
+	var state := _make_straight_state()
+	state.wave_ready = false
+	state.next_spawn_ms = 999999999
+	state.speed_multiplier = 3.0
+	var target := EnemyScript.new(state.path)
+	target.pos = Vector2(300, 300)
+	target.health = 100000
+	target.max_health = 100000
+	target.frozen_until = 1 << 40   # stationary target
+	state.enemies.append(target)
+	var tower := TowerScript.new(Vector2(100, 300), "archer", 1)
+	tower.game_state = state
+	var projectile := ProjectileScript.new(Vector2(100, 300), target, tower, 10, 100000, 0, 3.0)
+	state.projectiles.append(projectile)
+	# A 3x-speed step moves ~81px; the swept segment must register the hit even
+	# though the end point can leap past the target's hit radius.
+	for i in range(1, 6):
+		state.update_simulation(100000 + i * 50)
+	_check(target.health < 100000, "swept collision registers a high-speed projectile hit")
+	_check(state.projectiles.is_empty(), "high-speed projectile is consumed instead of orbiting")
+	state.dispose()
+
+func _test_wave_shop_actions_require_pending() -> void:
+	var state := _make_state()
+	state.wave_ready = false
+	var gold_before: int = state.gold
+	var pick: Dictionary = state.apply_action({"type": "wave_shop_pick", "card_id": "war_chest"}, 1000)
+	var skip: Dictionary = state.apply_action({"type": "wave_shop_skip"}, 1000)
+	_check(not pick.get("success", true), "wave_shop_pick is rejected when no shop is pending")
+	_check(not skip.get("success", true), "wave_shop_skip is rejected when no shop is pending")
+	_check(state.gold == gold_before and not state.wave_ready,
+		"rejected wave-shop actions do not grant cards or start the wave")
+	state.dispose()
+
+func _test_discount_sell_has_no_profit_loop() -> void:
+	var state := _make_state()
+	state.wave = 2
+	state.gold = 1000
+	state._ws_cost_discount = 0.75
+	var placed: Dictionary = state.apply_action(
+		{"type": "place_tower", "tower_type": "archer", "pos": Vector2(300, 200)}, 1000)
+	_check(placed.get("success", false), "discounted tower placement succeeds")
+	var sold: Dictionary = state.apply_action(
+		{"type": "sell_tower", "tower_id": placed.get("tower_id", -1)}, 1000)
+	_check(sold.get("success", false), "discounted tower can be sold")
+	_check(state.gold < 1000, "discount buy + sell does not create gold (got %d)" % state.gold)
+	state.dispose()
+
+func _test_dead_enemy_does_not_leak() -> void:
+	var state := GameStateScript.new([Vector2(0, 300), Vector2(200, 300)], {}, 0)
+	state.wave_ready = false
+	state.next_spawn_ms = 999999999
+	var enemy := EnemyScript.new(state.path)
+	enemy.pos = Vector2(199, 300)
+	enemy.health = 1
+	enemy.burn_dps = 200
+	enemy.burn_until = 999999999
+	state.enemies.append(enemy)
+	var lives_before: int = state.lives
+	state.update_simulation(100000)
+	state.update_simulation(100016)
+	_check(state.lives == lives_before,
+		"an enemy killed by burn does not also leak a life (lives %d -> %d)" % [lives_before, state.lives])
+	state.dispose()
+
+func _test_spawn_pacing_scales_with_speed() -> void:
+	var slow := _make_state()
+	slow.spawn_interval_ms = 600
+	slow.wave_enemy_total = 100
+	slow.speed_multiplier = 1.0
+	slow.spawn_enemy(1000)
+	var slow_gap: int = slow.next_spawn_ms - 1000
+	var fast := _make_state()
+	fast.spawn_interval_ms = 600
+	fast.wave_enemy_total = 100
+	fast.speed_multiplier = 3.0
+	fast.spawn_enemy(1000)
+	var fast_gap: int = fast.next_spawn_ms - 1000
+	_check(absi(fast_gap - int(slow_gap / 3)) <= 1,
+		"3x speed scales spawn pacing to ~1/3 wall time (%d vs %d)" % [fast_gap, slow_gap])
+	slow.dispose()
+	fast.dispose()
+
+func _test_projectile_lifetime_is_bounded() -> void:
+	var state := _make_straight_state()
+	state.wave_ready = false
+	state.next_spawn_ms = 999999999
+	var target := EnemyScript.new(state.path)
+	target.pos = Vector2(300, 300)
+	target.health = 100000
+	target.max_health = 100000
+	target.frozen_until = 1 << 40
+	state.enemies.append(target)
+	var tower := TowerScript.new(Vector2(100, 300), "archer", 1)
+	tower.game_state = state
+	var projectile := ProjectileScript.new(Vector2(100, 300), target, tower, 10, -5000, 0, 1.0)
+	state.projectiles.append(projectile)
+	state.update_simulation(0)
+	state.update_simulation(16)
+	_check(state.projectiles.is_empty(),
+		"projectiles older than PROJECTILE_MAX_FLIGHT_MS are despawned")
+	_check(target.health == 100000, "expired projectile deals no damage")
+	state.dispose()
+
+func _test_opening_waves_have_no_stealth_or_flying() -> void:
+	for wave_num in [1, 2]:
+		var state := _make_state()
+		state.wave = wave_num
+		state.enemies_spawned = 0
+		state.wave_enemy_total = 1000
+		state.enemies.clear()
+		for i in range(200):
+			state.spawn_enemy(1000 + i)
+		var bad: int = 0
+		for enemy in state.enemies:
+			if enemy.stealthed or enemy.flying:
+				bad += 1
+		_check(bad == 0, "wave %d opening spawns no stealth/flying enemies (got %d)" % [wave_num, bad])
+		state.dispose()
+
+func _test_stealth_vision_paths() -> void:
+	var archer := TowerScript.new(Vector2(100, 100), "archer", 1)
+	_check(not archer.can_see_stealth(), "archer at Bottom 0 cannot see stealth")
+	archer.tracker.path_levels["Bottom"] = 1
+	_check(archer.can_see_stealth(), "archer Bottom L1 can see stealth")
+	var frost := TowerScript.new(Vector2(100, 100), "frost", 2)
+	_check(frost.can_see_stealth(), "frost can see stealth")
+	var mage := TowerScript.new(Vector2(100, 100), "mage", 3)
+	_check(not mage.can_see_stealth(), "mage remains stealth-blind")
+	var cannon := TowerScript.new(Vector2(100, 100), "cannon", 4)
+	_check(not cannon.can_see_stealth(), "cannon remains stealth-blind")
+
+func _test_cannon_can_target_flying() -> void:
+	var state := _make_state()
+	var cannon := TowerScript.new(Vector2(100, 100), "cannon", 1)
+	var drone := EnemyScript.FlyingDrone.new(state.path)
+	drone.pos = Vector2(120, 100)
+	drone.stealthed = false   # isolate the flying rule
+	state.enemies.append(drone)
+	var target = cannon.select_target(state.enemies, 1000)
+	_check(target == drone, "cannon can target non-stealth flying enemies")
+	state.dispose()
+
+func _test_incompatible_modifiers_rejected() -> void:
+	var prog = ProgressionScript.new()
+	_check(not prog._modifiers_compatible("mod_sudden_death", "mod_glass_cannon"),
+		"Sudden Death + Glass Cannon stack is rejected")
+	_check(not prog._modifiers_compatible("mod_blitz", "mod_hardened"),
+		"Blitz + Hardened stack is rejected")
+	_check(prog._modifiers_compatible("mod_blitz", "mod_iron_economy"),
+		"compatible modifier pair is allowed")
+	prog.free()

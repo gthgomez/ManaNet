@@ -202,10 +202,10 @@ func armor_ignore() -> float:
 	return ignore
 
 func can_see_stealth() -> bool:
-	if ttype == "sniper" or ttype == "lightning":
-		return true # Implicit tech detection
-	if ttype == "archer" and tracker.path_levels["Bottom"] >= 2:
-		return true # Focus detection
+	if ttype == "sniper" or ttype == "lightning" or ttype == "frost":
+		return true # Tech detection / cryo sensors
+	if ttype == "archer" and tracker.path_levels["Bottom"] >= 1:
+		return true # Focus detection at the first tier
 	return false
 
 func freeze_duration_ms() -> int:
@@ -277,8 +277,6 @@ func select_target(enemies: Array, now_ms: int) -> Enemy:
 	var sees_stealth: bool = can_see_stealth()
 	
 	for enemy in enemies:
-		if ttype == "cannon" and enemy.flying:
-			continue
 		if enemy.stealthed and not sees_stealth and enemy.revealed_until < now_ms:
 			continue
 		if pos.distance_to(enemy.pos) <= er:

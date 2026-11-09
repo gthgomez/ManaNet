@@ -176,6 +176,20 @@ func _test_menu_with_seeded_history() -> void:
 func _test_restart_with_clean_meta() -> void:
 	Progression.pending_map_id = 0
 	var gs: Node = await _mount("res://scenes/GameScreen.tscn")
+	await get_tree().process_frame   # let the deferred layout pass run
+	var vp: Vector2 = gs.get_viewport_rect().size
+	# P0 geometry regressions: the instruction banner must never cover the field,
+	# and the tower panel must fit above the shop strip.
+	_check(gs._instruction_banner.size.y <= 60.0,
+		"instruction banner height is bounded (got %.1f)" % gs._instruction_banner.size.y)
+	_check(gs._instruction_banner.size.x <= vp.x,
+		"instruction banner width fits viewport (got %.1f / %.1f)" % [gs._instruction_banner.size.x, vp.x])
+	gs._layout_tower_panel(null)
+	_check(gs._tower_panel.size.y <= 230.0,
+		"tower panel stays within its reserved slot (got %.1f)" % gs._tower_panel.size.y)
+	var panel_bottom: float = gs._tower_panel.position.y + gs._tower_panel.size.y
+	_check(panel_bottom <= gs._shop_scroll.position.y + 1.0,
+		"tower panel does not overlap the shop strip (%.1f <= %.1f)" % [panel_bottom, gs._shop_scroll.position.y])
 	var old_state: GameState = gs.game_state
 	old_state.gold = 9999
 	old_state.lives = 3

@@ -10,8 +10,6 @@ const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 const _SETTING_ROWS := [
 	["gold_efficiency_enabled",  "Credits Efficiency Shards Bonus",
 	 "Adds Shards for spending credits efficiently over the run.",            true],
-	["show_upgrade_tutorial",    "Show Upgrade Tutorial",
-	 "Shows the path-promotion explainer on first branch.",            true],
 	["fast_promotion_enabled",   "Fast Promotion",
 	 "Double-tap a new branch to commit promotion without a modal.",   false],
 	["confirm_restart",          "Confirm Restart",
@@ -26,6 +24,10 @@ const _SETTING_ROWS := [
 	 "Automatically pauses the game while the '!' upgrade info panel is open.", true],
 	["sfx_enabled",               "Sound Effects",
 	 "Play UI and gameplay sound effects (master mute still applies).", true],
+	["haptics_enabled",           "Haptics",
+	 "Vibrate on Integrity loss and major impacts (Android).",         true],
+	["reduce_motion",             "Reduce Motion",
+	 "Disable screen shake and camera movement for motion sensitivity.", false],
 ]
 
 const _OPTION_ROWS := [
@@ -33,6 +35,7 @@ const _OPTION_ROWS := [
 	["default_target_mode", "Default Target Mode", "Initial targeting mode for newly built towers.", ["First", "Strong", "Close"], ["first", "strong", "close"]],
 	["placement_mode",      "Placement Style",     "How towers are moved onto the map.", ["Drag & Release", "Tap to Drop"], ["drag", "drop"]],
 	["cursor_sensitivity",  "Cursor Sensitivity",  "Base movement speed for the virtual tactical cursor.", ["Low", "Normal", "High", "Ultra"], [0.6, 1.0, 1.6, 2.5]],
+	["sfx_volume_db",       "Sound Volume",        "Volume of UI and gameplay effects.", ["-24 dB", "-12 dB", "-6 dB", "Full"], [-24.0, -12.0, -6.0, 0.0]],
 ]
 
 @onready var _rows_box: VBoxContainer = $Scroll/Content/RowsBox
@@ -199,7 +202,7 @@ func _build() -> void:
 	_THEME.apply_label(data_lbl, "body")
 	data_col.add_child(data_lbl)
 	var data_desc := Label.new()
-	data_desc.text = "Reset tutorials or all local gameplay settings."
+	data_desc.text = "Reset all local gameplay settings to their defaults."
 	_THEME.apply_label(data_desc, "muted")
 	data_desc.add_theme_font_size_override("font_size", 12)
 	data_col.add_child(data_desc)
@@ -209,13 +212,6 @@ func _build() -> void:
 	btn_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	btn_vbox.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	btn_vbox.add_theme_constant_override("separation", 8)
-	
-	var res_tut_btn := Button.new()
-	res_tut_btn.text = "Reset Tutorials"
-	_THEME.apply_button(res_tut_btn, "shop")
-	res_tut_btn.custom_minimum_size = Vector2(160, 42)
-	res_tut_btn.pressed.connect(_on_reset_tutorials)
-	btn_vbox.add_child(res_tut_btn)
 	
 	var res_set_btn := Button.new()
 	res_set_btn.text = "Reset Settings"
@@ -283,13 +279,15 @@ func _build() -> void:
 
 func _on_toggle(key: String, current: bool) -> void:
 	Progression.set_setting(key, not current)
-	if key == "sfx_enabled":
+	if key in ["sfx_enabled", "haptics_enabled", "audio_muted"]:
 		JuiceManager.configure_from_progression()
 	_build()
 
 func _on_cycle_option(key: String, values: Array, current_idx: int) -> void:
 	var next_idx: int = (current_idx + 1) % values.size()
 	Progression.set_setting(key, values[next_idx])
+	if key == "sfx_volume_db":
+		JuiceManager.configure_from_progression()
 	_build()
 
 func _on_reset_tutorials() -> void:

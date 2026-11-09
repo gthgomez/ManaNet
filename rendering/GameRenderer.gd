@@ -277,6 +277,8 @@ func _update_multimeshes(now_ms: int) -> void:
 	_update_projectile_meshes()
 
 func _update_enemy_meshes(now_ms: int) -> void:
+	# Compute shake once per pass, not once per instance.
+	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 	# Bucket enemies by type index
 	var buckets: Array = []
 	for _i in ENEMY_TYPE_ORDER.size():
@@ -294,9 +296,9 @@ func _update_enemy_meshes(now_ms: int) -> void:
 		mmi.multimesh.visible_instance_count = count
 		for j in range(count):
 			var enemy: Enemy = bucket[j]
-			var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 			var draw_pos: Vector2 = enemy.pos + shake
-			var sz: float = float(enemy.radius) * 2.35
+			# Bosses must read as a distinct threat at world scale.
+			var sz: float = float(enemy.radius) * (3.2 if enemy.type_name.begins_with("Boss") else 2.35)
 			var scale_x: float = sz if enemy.facing_right else -sz
 			var xform := Transform2D(0.0, Vector2(scale_x, sz), 0.0, draw_pos)
 			mmi.multimesh.set_instance_transform_2d(j, xform)
@@ -323,9 +325,19 @@ func _enemy_base_color(enemy: Enemy, now_ms: int) -> Color:
 	if enemy is Enemy.BossRegenerator and enemy.health > 0 and enemy.health < enemy.max_health:
 		var pulse: float = 0.35 + 0.25 * (0.5 + 0.5 * sin(float(now_ms) * 0.008))
 		return base.lerp(Color(0.35, 1.0, 0.55), pulse)
+	# Damage-over-time / debuff readability.
+	if now_ms < enemy.burn_until:
+		base = base.lerp(Color(1.0, 0.45, 0.15), 0.30)
+	if now_ms < enemy.marked_until:
+		base = base.lerp(Color(0.90, 0.50, 1.0), 0.30)
+	if now_ms < enemy.transmute_until:
+		base = base.lerp(Color(1.0, 0.85, 0.25), 0.25)
+	if now_ms < enemy.rooted_until:
+		base = base.lerp(Color(0.40, 0.90, 0.40), 0.30)
 	return base
 
 func _update_tower_meshes(now_ms: int) -> void:
+	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 	# Bucket towers by type
 	var buckets: Array = []
 	for _i in TOWER_TYPE_ORDER.size():
@@ -342,7 +354,6 @@ func _update_tower_meshes(now_ms: int) -> void:
 		mmi.multimesh.visible_instance_count = count
 		for j in range(count):
 			var tower: Tower = bucket[j]
-			var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 			var draw_pos: Vector2 = tower.pos + shake
 			var sz: float = float(tower.radius) * 2.2
 			var xform := Transform2D(0.0, Vector2(sz, sz), 0.0, draw_pos)
@@ -787,6 +798,10 @@ func _enemy_has_visible_status(enemy: Enemy, now_ms: int) -> bool:
 		return true
 	if _boss_hit_shield_hp(enemy) > 0:
 		return true
+	if now_ms < enemy.burn_until or now_ms < enemy.marked_until:
+		return true
+	if now_ms < enemy.transmute_until or now_ms < enemy.disrupt_until or now_ms < enemy.rooted_until:
+		return true
 	return now_ms < enemy.chilled_until or now_ms < enemy.frozen_until or now_ms < enemy.revealed_until
 
 func _draw_enemy_status_pips(canvas: CanvasItem, enemy: Enemy, now_ms: int, start_pos: Vector2) -> void:
@@ -801,6 +816,17 @@ func _draw_enemy_status_pips(canvas: CanvasItem, enemy: Enemy, now_ms: int, star
 		colors.append(Color(0.55, 0.65, 0.85, 0.95))  # stealth
 	if enemy is Enemy.BossRegenerator and enemy.health < enemy.max_health:
 		colors.append(Color(0.35, 1.0, 0.55, 1.0))  # regen
+	# Previously-invisible statuses: burn, mark, transmute, disrupt, root.
+	if now_ms < enemy.burn_until:
+		colors.append(Color(1.0, 0.45, 0.15, 1.0))
+	if now_ms < enemy.marked_until:
+		colors.append(Color(0.90, 0.50, 1.0, 1.0))
+	if now_ms < enemy.transmute_until:
+		colors.append(Color(1.0, 0.85, 0.25, 1.0))
+	if now_ms < enemy.disrupt_until:
+		colors.append(Color(0.47, 1.0, 1.0, 1.0))
+	if now_ms < enemy.rooted_until:
+		colors.append(Color(0.40, 0.90, 0.40, 1.0))
 	for i in range(colors.size()):
 		var p: Vector2 = start_pos + Vector2(float(i) * 7.0, 0.0)
 		canvas.draw_circle(p, 3.5, Color(0.0, 0.0, 0.0, 0.72))
@@ -963,9 +989,9 @@ class _BakedPathDraw extends Node2D:
 			return
 		# Holo-Rail Style (Navy / Steel / Cyan)
 		var c_shadow := Color(0, 0, 0, 0.4)
-		var c_border := Color(0.12, 0.15, 0.22)
-		var c_rail   := Color(0.08, 0.10, 0.16)
-		var c_energy := Color(0.18, 0.69, 1.0, 0.12)
+		var c_border := Color(0.30, 0.38, 0.50)
+		var c_rail   := Color(0.13, 0.16, 0.23)
+		var c_energy := Color(0.18, 0.69, 1.0, 0.18)
 
 		# Shadow
 		for i in range(map_path.size() - 1):
@@ -981,4 +1007,4 @@ class _BakedPathDraw extends Node2D:
 			draw_line(map_path[i], map_path[i+1], c_energy, 12.0)
 		# Center Laser Line
 		for i in range(map_path.size() - 1):
-			draw_line(map_path[i], map_path[i+1], Color(0.18, 0.69, 1.0, 0.25), 2.0)
+			draw_line(map_path[i], map_path[i+1], Color(0.18, 0.69, 1.0, 0.45), 2.0)

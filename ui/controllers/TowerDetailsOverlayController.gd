@@ -114,7 +114,7 @@ func open(tower: Tower, game_state: GameState) -> void:
 
 	var close_btn := Button.new()
 	close_btn.text = "✕"
-	close_btn.custom_minimum_size = Vector2(32.0, 32.0)
+	close_btn.custom_minimum_size = Vector2(44.0, 44.0)
 	_THEME.apply_button(close_btn, "secondary")
 	close_btn.pressed.connect(_close_via_resolver)
 	header.add_child(close_btn)
@@ -189,8 +189,9 @@ func open(tower: Tower, game_state: GameState) -> void:
 		p_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cvbox.add_child(p_desc)
 
-		var next_lvl := mini(4, cur)
-		var power := int((p_data["tiers"][next_lvl] - 1.0) * 100.0)
+		var cur_mult: float = float(p_data["tiers"][cur - 1]) if cur > 0 else 1.0
+		var next_mult: float = float(p_data["tiers"][cur]) if cur < 5 else cur_mult
+		var power: int = int(round((next_mult - cur_mult) * 100.0))
 		var p_stats := Label.new()
 		p_stats.text = "Next upgrade: +%d%% power" % power if cur < 5 else "MAX LEVEL"
 		p_stats.add_theme_font_size_override("font_size", 11)

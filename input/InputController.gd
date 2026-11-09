@@ -81,9 +81,8 @@ func handle_press(pos: Vector2, now_ms: int) -> Dictionary:
 		view_state.confirm_restart = false
 		return {"type": "restart_game"}
 
-	if view_state.confirm_sell and view_state.selected_tower_id >= 0:
-		view_state.confirm_sell = false
-		return {"type": "sell_tower", "tower_id": view_state.selected_tower_id}
+	# Sell confirmation is owned by the Sell button. It must not hijack the next
+	# arbitrary map tap (that sold a tower when the player tapped elsewhere).
 
 	if view_state.promotion_pending and view_state.selected_tower_id >= 0:
 		return {}
@@ -124,6 +123,7 @@ func handle_press(pos: Vector2, now_ms: int) -> Dictionary:
 	# --- Game world: select tower ---
 	var clicked_tower: Tower = _tower_at(pos)
 	if clicked_tower != null:
+		view_state.confirm_sell = false
 		view_state.selected_tower_id = clicked_tower.id
 		return {"type": "select_tower", "tower_id": clicked_tower.id}
 

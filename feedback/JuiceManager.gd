@@ -16,6 +16,9 @@ enum SFX {
 	WAVE_SHOP_OPEN,
 	GAME_OVER,
 	WIN,
+	INTEGRITY_LOST,
+	ERROR,
+	PURCHASE,
 }
 
 const _SFX_PATHS: Dictionary = {
@@ -31,12 +34,19 @@ const _SFX_PATHS: Dictionary = {
 	SFX.WAVE_SHOP_OPEN:  "res://assets/sfx/wave_shop.ogg",
 	SFX.GAME_OVER:       "res://assets/sfx/game_over.ogg",
 	SFX.WIN:             "res://assets/sfx/win.ogg",
+	# Reuse existing cues until designed assets land; the important part is that
+	# these events are no longer silent.
+	SFX.INTEGRITY_LOST:  "res://assets/sfx/enemy_death.ogg",
+	SFX.ERROR:           "res://assets/sfx/btn_press.ogg",
+	SFX.PURCHASE:        "res://assets/sfx/tower_upgrade.ogg",
 }
 
 const _POOL_SIZE: int = 8
 
 var _pool: Array[AudioStreamPlayer] = []
+var _pool_started_ms: Array[int] = []
 var _sfx_enabled: bool = true
+var _haptics_enabled: bool = true
 var _loaded_streams: Dictionary = {}   # SFX -> AudioStream cache
 
 func _ready() -> void:
@@ -46,6 +56,7 @@ func _ready() -> void:
 		p.bus = "SFX"
 		add_child(p)
 		_pool.append(p)
+		_pool_started_ms.append(0)
 	_preload_streams()
 	configure_from_progression()
 
@@ -58,10 +69,22 @@ func _ensure_sfx_bus() -> void:
 	AudioServer.set_bus_send(idx, "Master")
 
 func configure_from_progression() -> void:
+	# Autoloads are absent during headless --script tooling; never crash there.
+	if Progression == null:
+		return
 	var settings: Dictionary = Progression.get_settings()
 	var sfx_on: bool = settings.get("sfx_enabled", true)
 	var master_muted: bool = settings.get("audio_muted", false)
+	_haptics_enabled = bool(settings.get("haptics_enabled", true))
 	configure(sfx_on and not master_muted)
+	# Reconcile the Master bus here as well: previously only the menu button
+	# changed it, so "Reset Settings" left playback enabled but the bus muted.
+	var master_idx: int = AudioServer.get_bus_index("Master")
+	if master_idx >= 0:
+		AudioServer.set_bus_mute(master_idx, master_muted)
+	var sfx_idx: int = AudioServer.get_bus_index("SFX")
+	if sfx_idx >= 0:
+		AudioServer.set_bus_volume_db(sfx_idx, float(settings.get("sfx_volume_db", 0.0)))
 
 func _preload_streams() -> void:
 	for sfx_id in _SFX_PATHS:
@@ -81,9 +104,10 @@ func play(sfx: SFX, volume_db: float = 0.0) -> void:
 	player.stream = _loaded_streams[sfx]
 	player.volume_db = volume_db
 	player.play()
+	_pool_started_ms[_pool.find(player)] = Time.get_ticks_msec()
 
 func vibrate(duration_ms: int = 50) -> void:
-	if OS.get_name() == "Android":
+	if _haptics_enabled and OS.get_name() == "Android":
 		Input.vibrate_handheld(duration_ms)
 
 func play_and_vibrate(sfx: SFX, vibrate_ms: int = 40) -> void:
@@ -94,8 +118,12 @@ func _get_free_player() -> AudioStreamPlayer:
 	for p in _pool:
 		if not p.playing:
 			return p
-	# All busy — steal the oldest (index 0 is the longest-playing)
-	return _pool[0]
+	# All busy — steal the one that started longest ago (true LRU).
+	var oldest_idx: int = 0
+	for i in range(1, _pool.size()):
+		if _pool_started_ms[i] < _pool_started_ms[oldest_idx]:
+			oldest_idx = i
+	return _pool[oldest_idx]
 
 # ---------------------------------------------------------------------------
 # Visual particle burst helpers (retained from original stub)

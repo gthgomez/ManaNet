@@ -89,6 +89,9 @@ var _wave_progress_bar: ProgressBar = null
 var _wave_shop_modal: PanelContainer = null
 var _wave_shop = null   # WaveShopModalController
 var _restart_confirm_start_ms: int = 0
+var _sell_confirm_start_ms: int = 0
+var _quit_confirm_start_ms: int = 0
+var _run_recorded: bool = false
 var _restart_confirm_bar: ProgressBar = null
 var _world_rect: Rect2 = Rect2(Vector2.ZERO, _LAYOUT.BASE_SIZE)
 
@@ -110,7 +113,7 @@ const _PANEL_MUTED: Color = Color(0.66, 0.70, 0.78, 1.0)
 const _PANEL_DISABLED: Color = Color(0.50, 0.53, 0.60, 1.0)
 const _SHOP_COST_AFFORD: Color = Color(1.0, 0.82, 0.2)
 const _SHOP_COST_DENY: Color = Color(1.0, 0.35, 0.35)
-const _Z_TOWER_PANEL: int = 30
+const _Z_TOWER_PANEL: int = 52   # above the shop strip: a residual overlap must not steal taps
 const _Z_WAVE_BUTTON: int = 45
 const _Z_SHOP_BAR: int = 50
 const _Z_INSTRUCTION: int = 55
@@ -183,6 +186,10 @@ func _ready() -> void:
 	JuiceManager.configure_from_progression()
 	_build_hud()
 	_apply_responsive_layout()
+	# Second pass after the tree has measured its content. Without it, a
+	# PanelContainer whose label was measured at ~0 width keeps an enormous
+	# minimum height and overflows the screen.
+	call_deferred("_apply_responsive_layout")
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
 	_register_hud_rects()
 	FocusManager.register_initial_focus(_wave_btn if _wave_btn.visible else _shop_btns.values()[0])
@@ -249,6 +256,9 @@ func _build_hud() -> void:
 	_wave_btn = Button.new()
 	_wave_btn.text = _BRAND.START_WAVE
 	_wave_btn.icon = _ui_icon("patch")
+	# The 64px icon inflated the button's real minimum height to 80px while the
+	# layout reserved 56px, so it overlapped the shop strip.
+	_wave_btn.add_theme_constant_override("icon_max_width", 28)
 	_wave_btn.custom_minimum_size = Vector2(210.0, _LAYOUT.min_touch_height(true))
 	_wave_btn.z_index = _Z_WAVE_BUTTON
 	_THEME.apply_button(_wave_btn, "primary")
@@ -272,7 +282,17 @@ func _build_hud() -> void:
 
 	var panel_vbox := VBoxContainer.new()
 	panel_vbox.add_theme_constant_override("separation", 8)
-	panel_margin.add_child(panel_vbox)
+	# Scroll the panel content inside its reserved 220px slot. Growing the panel
+	# to its 294px content minimum pushed the bottom off-screen and under the
+	# shop strip, so upgrade/sell/target became unreachable.
+	var panel_scroll := ScrollContainer.new()
+	panel_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	panel_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	panel_margin.add_child(panel_scroll)
+	panel_scroll.add_child(panel_vbox)
 
 	_tower_name_label = Label.new()
 	_tower_name_label.text = "Tower"
@@ -286,7 +306,8 @@ func _build_hud() -> void:
 	_info_btn = Button.new()
 	_info_btn.text = "i"
 	_info_btn.icon = _ui_icon("cyber_deck")
-	_info_btn.custom_minimum_size = Vector2(32.0, 32.0)
+	_info_btn.add_theme_constant_override("icon_max_width", 20)
+	_info_btn.custom_minimum_size = Vector2(44.0, 44.0)
 	_THEME.apply_button(_info_btn, "tab")
 	_info_btn.pressed.connect(_on_info_pressed)
 	name_hbox.add_child(_info_btn)
@@ -430,7 +451,8 @@ func _build_hud() -> void:
 
 	# ---- Instruction Banner ----
 	_instruction_banner = PanelContainer.new()
-	_instruction_banner.custom_minimum_size = Vector2(400, 50)
+	_instruction_banner.custom_minimum_size = Vector2.ZERO
+	_instruction_banner.clip_contents = true
 	_instruction_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_instruction_banner.z_index = _Z_INSTRUCTION
 	_THEME.apply_panel(_instruction_banner, "default")
@@ -441,7 +463,11 @@ func _build_hud() -> void:
 	_instruction_label.text = _BRAND.INSTRUCTION_PICK_TOWER
 	_instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_instruction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# A PanelContainer sorts children while its own width is still 0. Without a
+	# width floor the autowrapped label reports a ~916px minimum height. The
+	# floor (not autowrap-off/clipping) fixes the panel while preserving wrapping.
 	_instruction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_instruction_label.custom_minimum_size = Vector2(400, 0)
 	_THEME.apply_label(_instruction_label, "heading")
 	_instruction_label.add_theme_font_size_override("font_size", 20)
 	_instruction_banner.add_child(_instruction_label)
@@ -523,7 +549,16 @@ func _build_pause_modal() -> void:
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
-	_pause_modal.add_child(vbox)
+	# Scroll the pause body inside the modal's capped rect; the content minimum was
+	# 560px, which can exceed a short landscape viewport as more rows are added.
+	var pause_scroll := ScrollContainer.new()
+	pause_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	pause_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	pause_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pause_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pause_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	_pause_modal.add_child(pause_scroll)
+	pause_scroll.add_child(vbox)
 
 	_pause_title = Label.new()
 	_pause_title.text = "Paused"
@@ -695,11 +730,12 @@ func _dpad_return_focus() -> void:
 func _show_wave_shop(now_ms: int) -> void:
 	if _wave_shop == null or _wave_shop.modal == null:
 		return
-	_wave_shop.show_shop(game_state.wave, _active_modifier_id, now_ms, self)
+	_wave_shop.show_shop(game_state.wave, Progression.get_active_modifier_ids(), now_ms, self)
 	_layout_modal(_wave_shop.modal, _wave_shop.desired_size)
 	_wave_shop.modal.visible = true
 	_raise_visible_modal_controls()
-	JuiceManager.play(JuiceManager.SFX.WAVE_SHOP_OPEN)
+	# WAVE_CLEAR fires on the same rising edge; playing WAVE_SHOP_OPEN too made
+	# both 60ms cues overlap into one muddy click.
 	_wave_shop.finish_open()
 
 func _on_wave_shop_pick(card_id: String, now_ms: int) -> void:
@@ -827,6 +863,8 @@ func _apply_responsive_layout() -> void:
 		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport) else 52.0
 		var banner_font: int = int(clampf(viewport.y * 0.032, 14.0, 20.0))
 		_instruction_label.add_theme_font_size_override("font_size", banner_font)
+		_instruction_label.custom_minimum_size = Vector2(maxf(0.0, banner_w - 28.0), 0)
+		_instruction_banner.custom_minimum_size = Vector2.ZERO
 		_LAYOUT.apply_rect(_instruction_banner, Rect2(Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
 
 	_layout_tower_panel(null)
@@ -871,9 +909,14 @@ func _layout_modal(panel: PanelContainer, desired_size: Vector2) -> void:
 	if panel == null:
 		return
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
+	# Honor the content's real minimum size; a deferred second pass is also run
+	# after the tree measures itself, so panels cannot render larger than their
+	# laid-out rect (the pause modal previously overflowed the bottom edge).
+	var min_size: Vector2 = panel.get_combined_minimum_size()
+	var want: Vector2 = Vector2(maxf(desired_size.x, min_size.x), maxf(desired_size.y, min_size.y))
 	# Center over the playfield when present so letterbox gutters don't pull modals off-map.
 	var center_on: Rect2 = _world_rect if _world_rect.size.x > 1.0 and _world_rect.size.y > 1.0 else Rect2()
-	var rect: Rect2 = _LAYOUT.modal_rect(viewport, desired_size, self, center_on)
+	var rect: Rect2 = _LAYOUT.modal_rect(viewport, want, self, center_on)
 	_LAYOUT.apply_modal(panel, rect)
 
 func _screen_to_world(pos: Vector2) -> Vector2:
@@ -897,7 +940,11 @@ func _layout_tower_panel(selected: Tower) -> void:
 	if _LAYOUT.is_short_height(viewport) or _LAYOUT.is_phone_ultrawide(viewport):
 		panel_h = 168.0
 	var size: Vector2 = Vector2(minf(460.0, maxf(300.0, viewport.x - margin_l - margin_r)), panel_h)
-	var shop_y: float = viewport.y - bottom - 92.0
+	# Anchor to the real shop strip, not a hardcoded 92px guess (which was the
+	# wrong height and let upgrade/sell controls slide behind the shop cards).
+	var shop_y: float = viewport.y - bottom - 104.0
+	if _shop_scroll != null and _shop_scroll.size.y > 0.0:
+		shop_y = _shop_scroll.position.y
 	var low_y: float = maxf(top + 102.0, shop_y - size.y - 12.0)
 	var high_y: float = top + 102.0
 	var x: float = margin_l
@@ -965,6 +1012,13 @@ func _process(_delta: float) -> void:
 
 	var now_ms: int = Time.get_ticks_msec()
 
+	# Confirmation windows expire so an armed destructive action cannot fire
+	# seconds later on an unrelated tap.
+	if view_state.confirm_sell and now_ms - _sell_confirm_start_ms > 3000:
+		view_state.confirm_sell = false
+	if view_state.confirm_quit and now_ms - _quit_confirm_start_ms > 4000:
+		view_state.confirm_quit = false
+
 	# Detect life loss for screen-space feedback.
 	if game_state.lives < _prev_lives:
 		var lost: int = _prev_lives - game_state.lives
@@ -974,6 +1028,7 @@ func _process(_delta: float) -> void:
 			now_ms,
 			1200
 		)
+		JuiceManager.play_and_vibrate(JuiceManager.SFX.INTEGRITY_LOST, 60)
 	_prev_lives = game_state.lives
 
 	view_state.tick(now_ms)
@@ -1030,10 +1085,12 @@ func _update_hud(now_ms: int) -> void:
 	var sel: Tower = game_state.get_tower_by_id(view_state.selected_tower_id) if view_state.selected_tower_id >= 0 else null
 	var fast_promotion: bool = Progression.get_settings().get("fast_promotion_enabled", false)
 	var promo_visible: bool = view_state.promotion_pending and sel != null and not fast_promotion
-	var pause_visible: bool = game_state.paused and game_state.game_state == "playing"
+	var details_visible: bool = _details.is_open()
+	# The tower-details overlay auto-pauses; it must not summon a pause modal on
+	# top of itself (the two were rendering simultaneously).
+	var pause_visible: bool = game_state.paused and game_state.game_state == "playing" and not details_visible
 	var has_pending: bool = view_state.has_pending_placement()
 	var wave_shop_visible: bool = game_state.wave_shop_pending
-	var details_visible: bool = _details.is_open()
 	var blocking_menu_visible: bool = wave_shop_visible or promo_visible or pause_visible or has_pending or details_visible
 	
 	# Instruction banner: persistent instructions have priority over contextual hints
@@ -1095,7 +1152,7 @@ func _update_hud(now_ms: int) -> void:
 			var cur_dmg := sel.get_effective_damage(now_ms)
 			var next_dmg := int(float(sel.base_damage) * pow(1.15, float(sel.level)))
 			var d_dmg := next_dmg - int(float(sel.base_damage) * pow(1.15, float(sel.level-1)))
-			_base_upg_btn.text = "UPGRADE (%dg) [ ⚔️ +%d ]" % [base_cost, d_dmg]
+			_base_upg_btn.text = "UPGRADE (%s) [ ⚔️ +%d ]" % [_BRAND.credits_amount_suffix(base_cost), d_dmg]
 			_base_upg_btn.disabled = game_state.gold < base_cost
 		else:
 			_base_upg_btn.text = "MAX LEVEL"
@@ -1112,8 +1169,8 @@ func _update_hud(now_ms: int) -> void:
 				var next_mult: float = p_data["tiers"][lvl]
 				var cur_mult: float = p_data["tiers"][lvl-1] if lvl > 0 else 1.0
 				var d_pct := int((next_mult - cur_mult) * 100.0)
-				var icon := "⚔️" if "dmg" in p_data["name"].to_lower() else ("⚡" if "speed" in p_data["name"].to_lower() else "🎯")
-				_path_upg_btns[i].text = "%s [ %s +%d%% ] %dg" % [p_data["name"].left(6), icon, d_pct, pcost]
+				_path_upg_btns[i].text = "%s +%d%% · %s" % [
+					p_data["name"].left(7), d_pct, _BRAND.credits_amount_suffix(pcost)]
 				_path_upg_btns[i].disabled = game_state.gold < pcost
 			else:
 				_path_upg_btns[i].text = p_data["name"] + " (LOCKED)" if lvl == 0 else "MAX"
@@ -1121,7 +1178,7 @@ func _update_hud(now_ms: int) -> void:
 				
 		_target_btn.text = "Target: %s" % sel.target_mode.capitalize()
 		var sell_val: int = sel.sell_value(game_state.wave)
-		_sell_btn.text = "Sell +%dg" % sell_val if not view_state.confirm_sell else "Confirm?"
+		_sell_btn.text = ("Sell +%s" % _BRAND.credits_amount_suffix(sell_val)) if not view_state.confirm_sell else "Confirm Sell?"
 		_sell_btn.disabled = game_state.sell_disabled
 
 	if _promotion_modal:
@@ -1194,7 +1251,7 @@ func _update_hud(now_ms: int) -> void:
 			_THEME.set_button_glow(_shop_btns[ttype], true)
 		if ttype in _shop_cost_labels:
 			var cost_lbl: Label = _shop_cost_labels[ttype]
-			cost_lbl.text = "%dg" % cost
+			cost_lbl.text = _BRAND.credits_amount_suffix(cost)
 			cost_lbl.add_theme_color_override(
 				"font_color",
 				_SHOP_COST_AFFORD if can_afford and not hard_disabled else _SHOP_COST_DENY
@@ -1313,10 +1370,46 @@ func _on_cancel_placement() -> void:
 # Input
 # ---------------------------------------------------------------------------
 
+func _notification(what: int) -> void:
+	# Android system Back: with quit_on_go_back disabled, route it through the
+	# same layered dismissal as ui_cancel instead of exiting the app mid-run.
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		_handle_back(Time.get_ticks_msec())
+		get_viewport().set_input_as_handled()
+
+func _handle_back(now_ms: int) -> void:
+	# Layered dismiss, innermost surface first.
+	if _details.is_open():
+		_details.close(game_state)
+		return
+	if _wave_shop_modal != null and _wave_shop_modal.visible:
+		_on_wave_shop_skip(now_ms)
+	elif _promotion_modal != null and _promotion_modal.visible:
+		_on_promotion_cancel_pressed()
+	elif _pause_modal != null and _pause_modal.visible:
+		_on_resume_pressed()
+	elif _placement_confirm_modal != null and _placement_confirm_modal.visible:
+		_on_cancel_placement_pressed()
+	elif _placement_confirm_bar != null and _placement_confirm_bar.visible:
+		_on_cancel_placement()
+	elif view_state.placement_active:
+		view_state.exit_placement()
+		_dpad_return_focus()
+	elif view_state.selected_tower_id >= 0:
+		view_state.deselect_tower()
+		_dpad_return_focus()
+	elif game_state.game_state == "playing" and not game_state.paused:
+		_on_pause_pressed()
+
 func _input(event: InputEvent) -> void:
 	var now_ms: int = Time.get_ticks_msec()
 	var pos: Vector2 = Vector2.ZERO
 	var handled: bool = false
+
+	# Godot mirrors touch as an emulated mouse event. Handling both made every
+	# world tap execute twice on Android; the real touch event still arrives.
+	if event is InputEventMouse and event.device == InputEvent.DEVICE_ID_EMULATION:
+		return
 
 	# Dpad / keyboard accept — Godot fires Button.pressed automatically on focused buttons,
 	# but we need ui_accept to also confirm placement when the bar is visible.
@@ -1328,28 +1421,7 @@ func _input(event: InputEvent) -> void:
 
 	# Dpad / keyboard cancel — layered dismiss (innermost modal first)
 	if event.is_action_pressed("ui_cancel"):
-		if _details.is_open():
-			_details.close(game_state)
-			get_viewport().set_input_as_handled()
-			return
-		if _wave_shop_modal != null and _wave_shop_modal.visible:
-			_on_wave_shop_skip(now_ms)
-		elif _promotion_modal != null and _promotion_modal.visible:
-			_on_promotion_cancel_pressed()
-		elif _pause_modal != null and _pause_modal.visible:
-			_on_resume_pressed()
-		elif _placement_confirm_modal != null and _placement_confirm_modal.visible:
-			_on_cancel_placement_pressed()
-		elif _placement_confirm_bar != null and _placement_confirm_bar.visible:
-			_on_cancel_placement()
-		elif view_state.placement_active:
-			view_state.exit_placement()
-			_dpad_return_focus()
-		elif view_state.selected_tower_id >= 0:
-			view_state.deselect_tower()
-			_dpad_return_focus()
-		elif game_state.game_state == "playing" and not game_state.paused:
-			_on_pause_pressed()
+		_handle_back(now_ms)
 		get_viewport().set_input_as_handled()
 		return
 
@@ -1431,6 +1503,7 @@ func _handle_action_result(result: Dictionary, action: Dictionary, now_ms: int) 
 	if not result.get("success", false):
 		if result.get("reason", "") != "":
 			view_state.show_toast(_PLACEMENT_HINTS.format_ui_reason(str(result["reason"])), now_ms, 1000)
+			JuiceManager.play(JuiceManager.SFX.ERROR, -6.0)
 		return
 
 	var atype: String = action.get("type", "")
@@ -1486,6 +1559,13 @@ func _on_wave_btn_pressed() -> void:
 	_dispatch({"type": "start_wave"}, Time.get_ticks_msec())
 
 func _on_pause_pressed() -> void:
+	# Details already represent a paused, modal surface; and the wave shop must
+	# finish before the run can be paused underneath it.
+	if _details.is_open():
+		_details.close(game_state)
+		return
+	if game_state.wave_shop_pending:
+		return
 	_dispatch({"type": "toggle_pause"}, Time.get_ticks_msec())
 
 func _on_resume_pressed() -> void:
@@ -1502,6 +1582,21 @@ func _on_restart_pressed() -> void:
 	_restart_current_run()
 
 func _on_quit_pressed() -> void:
+	var now_ms: int = Time.get_ticks_msec()
+	if not view_state.confirm_quit:
+		view_state.confirm_quit = true
+		_quit_confirm_start_ms = now_ms
+		view_state.show_toast("Tap Quit again to abandon the run. Progress is banked.", now_ms, 1600)
+		return
+	view_state.confirm_quit = false
+	# Bank a partial run once, and only if at least one wave was survived —
+	# otherwise a start-and-quit tap pair would farm RP. The end screen records
+	# a completed run separately; never double-record the same run.
+	if not _run_recorded and game_state.stat_waves_survived > 0:
+		Progression.record_run(game_state, game_state.map_id, true)
+		_run_recorded = true
+	# A stale result must not leak into a later EndScreen after an abandon.
+	Progression.pending_end_stats = {}
 	game_state.paused = false
 	_fade_to_scene("res://scenes/MenuScreen.tscn")
 
@@ -1518,6 +1613,8 @@ func _on_placement_confirm_toggle() -> void:
 	view_state.show_toast("Placement confirmation %s" % state, Time.get_ticks_msec(), 900)
 
 func _on_speed_pressed(mult: float) -> void:
+	if game_state.wave_shop_pending or (_details != null and _details.is_open()):
+		return
 	_dispatch({"type": "set_speed", "multiplier": mult}, Time.get_ticks_msec())
 
 func _on_base_upgrade_pressed() -> void:
@@ -1553,16 +1650,27 @@ func _on_sell_pressed() -> void:
 		view_state.confirm_sell = false
 	else:
 		view_state.confirm_sell = true
+		_sell_confirm_start_ms = Time.get_ticks_msec()
+		_THEME.apply_button(_sell_btn, "danger")
+		view_state.show_toast("Tap Sell again to confirm.", _sell_confirm_start_ms, 1200)
 
-func _on_target_pressed() -> void:
-	if view_state.selected_tower_id >= 0:
-		_dispatch({"type": "cycle_target_mode", "tower_id": view_state.selected_tower_id},
-				  Time.get_ticks_msec())
+func _shop_cost(ttype: String) -> int:
+	return game_state._tower_purchase_cost(ttype)
+
+func _shop_affordable(ttype: String) -> bool:
+	var cost: int = _shop_cost(ttype)
+	if game_state.gold >= cost:
+		return true
+	view_state.show_toast("Need %d more %s" % [cost - game_state.gold, _BRAND.CURRENCY_RUN],
+		Time.get_ticks_msec(), 1200)
+	return false
 
 func _on_shop_btn_down(ttype: String) -> void:
 	# Activate placement immediately on button-down so the ghost tracks drag gestures.
 	# button_down fires on press; if the user simply clicks without dragging, pressed
 	# fires on release and _on_shop_pressed re-enters placement (harmless) and shows the hint.
+	if not _shop_affordable(ttype):
+		return
 	view_state.enter_placement(ttype)
 	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
 	view_state.placement_ghost_valid = false
@@ -1570,11 +1678,18 @@ func _on_shop_btn_down(ttype: String) -> void:
 func _on_shop_pressed(ttype: String) -> void:
 	# Fires only on a clean click (no drag). Placement already active from button_down;
 	# just re-confirm the type and show the placement hint.
+	if not _shop_affordable(ttype):
+		return
 	view_state.enter_placement(ttype)
 	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
 	view_state.placement_ghost_valid = false
 	var mode_text: String = "Tap the map to place." if view_state.placement_mode == "drop" else "Drag or tap the map to place."
 	view_state.show_toast(mode_text, Time.get_ticks_msec(), 1000)
+
+func _on_target_pressed() -> void:
+	if view_state.selected_tower_id >= 0:
+		_dispatch({"type": "cycle_target_mode", "tower_id": view_state.selected_tower_id},
+				  Time.get_ticks_msec())
 
 func _on_confirm_placement_pressed() -> void:
 	if not view_state.has_pending_placement() or not view_state.pending_placement_valid:
@@ -1620,6 +1735,9 @@ func _restart_current_run() -> void:
 	view_state.configure_from_settings(Progression.get_settings())
 	input_ctrl.view_state = view_state
 
+	# Break the old simulation graph's circular references before replacing it.
+	if game_state != null:
+		game_state.dispose()
 	game_state = GameState.new(map_data["path"], run_config, map_id)
 	_RUN_SETUP.apply_variant_stats(game_state)
 	_RUN_SETUP.place_starting_tower(game_state, run_config)
@@ -1689,6 +1807,7 @@ func _on_run_ended() -> void:
 	else:
 		JuiceManager.play(JuiceManager.SFX.GAME_OVER)
 	var run_result = Progression.record_run(game_state, game_state.map_id)
+	_run_recorded = true
 	var rp: int = run_result.get("rp", 0) if run_result is Dictionary else int(run_result)
 	Progression.pending_end_stats = {
 		"rp_earned":               rp,

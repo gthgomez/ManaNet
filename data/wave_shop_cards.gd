@@ -7,14 +7,14 @@ const CARDS: Array = [
 	{
 		"id":    "windfall",
 		"label": "Windfall",
-		"desc":  "Gold scaled to wave: +30g (waves 1–5), +50g (6–10), +70g (11–15).",
+		"desc":  "Credits scaled to wave: +45c (waves 1–5), +70c (6–10), +95c (11–15).",
 		"tag":   "economy",
 		"icon":  "💰",
 	},
 	{
 		"id":    "life_recover",
-		"label": "+1 Life",
-		"desc":  "Recover one lost life.",
+		"label": "+1 Integrity",
+		"desc":  "Recover one lost Integrity.",
 		"tag":   "survival",
 		"icon":  "❤",
 	},
@@ -49,7 +49,7 @@ const CARDS: Array = [
 	{
 		"id":    "gold_wave",
 		"label": "Prospector",
-		"desc":  "+8 gold per kill this wave.",
+		"desc":  "+3 Credits per kill this wave.",
 		"tag":   "economy",
 		"icon":  "⛏",
 	},
@@ -81,14 +81,14 @@ const MILESTONE_CARDS: Array = [
 	{
 		"id":    "war_chest",
 		"label": "War Chest",
-		"desc":  "+80 gold immediately.",
+		"desc":  "+80 Credits immediately.",
 		"tag":   "economy",
 		"icon":  "💰",
 	},
 	{
 		"id":    "emergency_protocol",
 		"label": "Emergency Protocol",
-		"desc":  "Recover 2 lives immediately.",
+		"desc":  "Recover 2 Integrity immediately.",
 		"tag":   "survival",
 		"icon":  "❤",
 	},
@@ -102,20 +102,27 @@ const MILESTONE_CARDS: Array = [
 	{
 		"id":    "bounty_contract",
 		"label": "Bounty Contract",
-		"desc":  "+2 gold per kill permanently. Stacks each milestone.",
+		"desc":  "+2 Credits per kill permanently. Stacks each milestone.",
 		"tag":   "permanent",
 		"icon":  "⛏",
 	},
 ]
 
-# Filter out cards that conflict with the active modifier.
-static func filtered_pool(active_modifier: String) -> Array:
+# Filter out cards that conflict with any active modifier (primary + stack).
+static func filtered_pool(active_modifiers) -> Array:
+	var mods: Array = []
+	if active_modifiers is String:
+		if active_modifiers != "":
+			mods.append(active_modifiers)
+	elif active_modifiers is Array:
+		mods = active_modifiers
 	var pool: Array = CARDS.duplicate()
-	match active_modifier:
-		"mod_blitz":
-			pool = pool.filter(func(c): return c["id"] != "frost_vanguard" and c["id"] != "slow_wave")
-		"mod_sudden_death":
-			pool = pool.filter(func(c): return c["id"] != "life_recover")
+	for m in mods:
+		match m:
+			"mod_blitz":
+				pool = pool.filter(func(c): return c["id"] != "frost_vanguard" and c["id"] != "slow_wave")
+			"mod_sudden_death":
+				pool = pool.filter(func(c): return c["id"] != "life_recover")
 	return pool
 
 # Draw `count` cards. At milestone waves (5/10/15) always uses the milestone pool.

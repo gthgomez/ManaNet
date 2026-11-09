@@ -7,8 +7,8 @@ const MAPS: Array = [
 	{
 		"id": 0,
 		"name": "S-Curve",
-		"desc": "Classic winding path.  Balanced tower choices.",
-		"difficulty": 1,
+		"desc": "Classic winding path. Tight coverage and the least room for error.",
+		"difficulty": 3,
 		"path": [
 			Vector2(-40, 300), Vector2(250, 300), Vector2(250, 100), Vector2(450, 100),
 			Vector2(450, 450), Vector2(650, 450), Vector2(650, 200), Vector2(940, 200),
@@ -28,8 +28,8 @@ const MAPS: Array = [
 	{
 		"id": 2,
 		"name": "Spiral",
-		"desc": "Tight coil.  Frost and Lightning shine here.",
-		"difficulty": 3,
+		"desc": "Long coil. Extra travel time makes it the most forgiving route.",
+		"difficulty": 1,
 		"path": [
 			Vector2(-40, 300), Vector2(200, 300), Vector2(200, 100), Vector2(750, 100),
 			Vector2(750, 500), Vector2(300, 500), Vector2(300, 180), Vector2(600, 180),

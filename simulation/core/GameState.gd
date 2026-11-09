@@ -53,6 +53,7 @@ var _variant_deltas: Dictionary
 var _default_target_mode: String
 
 const _SPATIAL_CELL_SIZE: float = 120.0
+const PROJECTILE_MAX_FLIGHT_MS: int = 2000
 
 # Legacy entity speeds are px-per-frame at 60 fps (Kivy port units).
 const SIM_REFERENCE_FRAME_MS: float = 1000.0 / 60.0
@@ -382,6 +383,9 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		tower_id_counter += 1
 		towers.append(tower)
 		gold -= cost
+		# Sell value must be based on what was actually paid, not list price,
+		# otherwise a discount card enables a buy/sell profit loop.
+		tower.spent_gold = cost
 		stat_towers_placed += 1
 		if tower_type in stat_tower_use_by_type:
 			stat_tower_use_by_type[tower_type] += 1
@@ -485,6 +489,8 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		return {"success": true, "message": "Speed x%d" % int(speed_multiplier)}
 
 	if action_type == "wave_shop_pick":
+		if not wave_shop_pending:
+			return {"success": false, "reason": "no_wave_shop_pending"}
 		var card_id: String = action.get("card_id", "")
 		if not _is_valid_wave_shop_card(card_id):
 			return {"success": false, "reason": "invalid_wave_shop_card", "card_id": card_id}
@@ -494,6 +500,8 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		return {"success": true, "card_id": card_id, "message": "Bonus applied!"}
 
 	if action_type == "wave_shop_skip":
+		if not wave_shop_pending:
+			return {"success": false, "reason": "no_wave_shop_pending"}
 		wave_shop_pending = false
 		wave_ready = true
 		return {"success": true, "message": ""}
@@ -514,7 +522,7 @@ func _apply_wave_shop_card(card_id: String, now_ms: int) -> void:
 	match card_id:
 		# ── Standard wave cards ──────────────────────────────────────────────
 		"windfall":
-			var amount: int = 30 if wave <= 5 else (50 if wave <= 10 else 70)
+			var amount: int = 45 if wave <= 5 else (70 if wave <= 10 else 95)
 			gold += amount
 			stat_gold_earned += amount
 			add_effect("banner", mid, now_ms, 900, -1, 26, Color(1.0, 0.843, 0.0), "+%d GOLD" % amount)
@@ -534,8 +542,8 @@ func _apply_wave_shop_card(card_id: String, now_ms: int) -> void:
 			_ws_frost_vanguard_remaining = 10
 			add_effect("banner", mid, now_ms, 900, -1, 26, Color(0.4, 0.8, 1.0), "FROST VANGUARD")
 		"gold_wave":
-			_ws_kill_reward_bonus = 8
-			add_effect("banner", mid, now_ms, 900, -1, 26, Color(1.0, 0.843, 0.0), "PROSPECTOR +8G/KILL")
+			_ws_kill_reward_bonus = 3
+			add_effect("banner", mid, now_ms, 900, -1, 26, Color(1.0, 0.843, 0.0), "PROSPECTOR +3C/KILL")
 		"expose":
 			_ws_expose_active = true
 			add_effect("banner", mid, now_ms, 900, -1, 26, Color(1.0, 0.6, 0.2), "EXPOSE!")
@@ -571,9 +579,9 @@ func _apply_wave_shop_card(card_id: String, now_ms: int) -> void:
 func _is_boss_wave() -> bool:
 	return wave in [5, 10, 15]
 
-## Boss waves: 1 boss + ~60% of the usual non-boss wave count as trash (plan #8).
-## Keeps `wave_enemy_total` progression intact; only the spawn cap is reduced.
-const BOSS_TRASH_DENSITY: float = 0.6
+## Boss waves: 1 boss + the usual non-boss wave count as trash.
+## Boss waves must be peaks, not the easiest waves in the run.
+const BOSS_TRASH_DENSITY: float = 1.0
 ## Extra pause after the boss enters before trash spawns (readability).
 const BOSS_POST_SPAWN_EXTRA_MS: int = 600
 
@@ -596,7 +604,13 @@ func spawn_enemy(now_ms: int) -> void:
 		spawned_boss = true
 	else:
 		var weights: Array
-		if wave >= 8:
+		if wave <= 2:
+			# No stealthed/flying enemies in the opening: 4 of 6 towers could not
+			# answer them, so no 300-credit opening was viable.
+			weights = [0.52, 0.00, 0.16, 0.00, 0.26, 0.06]
+		elif wave <= 7:
+			weights = [0.40, 0.10, 0.18, 0.08, 0.16, 0.08]
+		elif wave >= 8:
 			weights = [0.24, 0.18, 0.18, 0.14, 0.14, 0.12]
 		else:
 			weights = [0.38, 0.16, 0.14, 0.12, 0.12, 0.08]
@@ -638,9 +652,13 @@ func spawn_enemy(now_ms: int) -> void:
 	# Clear per-spawn speed mult once all enemies for this wave are queued
 	if enemies_spawned >= get_wave_spawn_total():
 		_ws_next_spawn_speed_mult = 1.0
-	var interval: int = int(float(spawn_interval_ms) * _ws_spawn_interval_mult)
+	# Spawn pacing must scale with the speed multiplier. Movement and fire rate
+	# already do; leaving spawns on wall-clock made 3x materially easier (fewer
+	# concurrent enemies per unit of fast-forwarded distance).
+	var speed_scale: float = maxf(0.25, speed_multiplier)
+	var interval: int = int(float(spawn_interval_ms) * _ws_spawn_interval_mult / speed_scale)
 	if spawned_boss:
-		interval += BOSS_POST_SPAWN_EXTRA_MS
+		interval += int(float(BOSS_POST_SPAWN_EXTRA_MS) / speed_scale)
 	next_spawn_ms = now_ms + interval
 	wave_started = true
 
@@ -685,6 +703,16 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 	# Wave-shop damage boost
 	if _ws_damage_boost != 1.0:
 		damage = int(float(damage) * _ws_damage_boost)
+
+	# Mage Vulnerability Exploit — debuff the target so ALL towers (including
+	# this mage's own hit) deal the advertised bonus while it is active.
+	if tower.ttype == "mage":
+		var leak: float = tower.mana_leak_bonus()
+		if leak > 1.0:
+			target.vulnerable_until = maxi(target.vulnerable_until, now_ms + 2500)
+			target.vulnerable_mult = maxf(target.vulnerable_mult, leak)
+	if target.vulnerable_until > now_ms:
+		damage = int(round(float(damage) * target.vulnerable_mult))
 
 	# 1. Fragile Check (Nearby Frost Towers)
 	var frag_mult: float = 1.0
@@ -737,7 +765,6 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 
 	# Mage Alchemy & Arcanist Leak
 	if tower.ttype == "mage":
-		damage = int(round(float(damage) * tower.mana_leak_bonus()))
 		var t_bonus: int = tower.transmute_bonus()
 		if t_bonus > 0:
 			target.transmute_until = maxi(target.transmute_until, now_ms + 2500)
@@ -748,7 +775,8 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 			# Runic Mage — Resonance: reset burn timer on already-burning enemies
 			var is_resonance: bool = tower.variant_key == "mage_runic"
 			if is_resonance and target.burn_until > now_ms:
-				target.burn_until = now_ms + tower.burn_duration_ms()
+				# Never shorten an existing burn left by another mage.
+				target.burn_until = maxi(target.burn_until, now_ms + tower.burn_duration_ms())
 				add_effect("banner", target.pos, now_ms, 420, -1, 20, Color(1.0, 0.45, 0.0), "RESONANCE!")
 			else:
 				target.burn_until = maxi(target.burn_until, now_ms + tower.burn_duration_ms())
@@ -897,21 +925,33 @@ func update_simulation(now_ms: int) -> void:
 	# Step 2: move enemies, detect leaks
 	var leaked_enemies: Array = []
 	for enemy in enemies:
-		# Apply DOT effects
+		# Apply DOT effects. Carry the fractional remainder on the enemy so the
+		# damage rate is identical at any tick size (no per-tick int() flooring).
 		if now_ms < enemy.burn_until:
-			var dot: int = maxi(1, int(float(enemy.burn_dps) * sim_dt_ms / 1000.0))
-			enemy.health -= dot
+			enemy.burn_accum += float(enemy.burn_dps) * sim_dt_ms / 1000.0
+			var dot: int = int(floor(enemy.burn_accum))
+			if dot > 0:
+				enemy.burn_accum -= float(dot)
+				enemy.health -= dot
 			# Timer-gated (not now_ms % 250): burst density no longer depends
 			# on wall-clock phase or frame quantization.
 			if now_ms - enemy.last_flame_burst_ms >= 250:
 				enemy.last_flame_burst_ms = now_ms
 				_add_particle_burst(enemy.pos, "flame", Color(1.0, 0.4, 0.2), 3, now_ms)
+		else:
+			enemy.burn_accum = 0.0
 
-		# BossRegenerator — regen 8 HP/s (same clamped dt as all other motion)
+		# BossRegenerator — same fractional integration so regen is real at 60fps.
 		if enemy is Enemy.BossRegenerator and enemy.health > 0 and enemy.health < enemy.max_health:
-			var regen_amount: int = int(enemy.regen_dps * sim_dt_ms / 1000.0)
+			enemy.regen_accum += enemy.regen_dps * sim_dt_ms / 1000.0
+			var regen_amount: int = int(floor(enemy.regen_accum))
 			if regen_amount > 0:
+				enemy.regen_accum -= float(regen_amount)
 				enemy.health = mini(enemy.max_health, enemy.health + regen_amount)
+
+		# A DoT/splash kill must not also walk the last step and count as a leak.
+		if enemy.health <= 0:
+			continue
 
 		var leaked: bool = enemy.move(now_ms, sim_dt_ms)
 		if leaked:
@@ -927,24 +967,36 @@ func update_simulation(now_ms: int) -> void:
 			game_state = "game_over"
 			last_message = "Base destroyed."
 
-	# Step 3: tower shooting (Throttled Spatial Grid rebuild)
+	# Step 3: tower shooting (spatial grid rebuilt once per tick)
 	_sim_tick_count += 1
 	_spatial_grid_cache = _build_enemy_spatial_grid()
 	var enemy_grid := _spatial_grid_cache
-	
+
 	for tower in towers:
+		# Query only when the tower can actually fire; most towers are on
+		# cooldown on any given frame (measured ~14% of total sim CPU).
+		if not tower.can_shoot(now_ms, speed_multiplier):
+			continue
 		var nearby_enemies: Array = _query_enemy_spatial_grid(enemy_grid, tower.pos, tower.effective_range() + 4.0)
 		tower.shoot(now_ms, nearby_enemies, projectiles, speed_multiplier)
 
-	# Step 4: projectile movement + hit detection
+	# Step 4: projectile movement + swept hit detection
 	var dead_projectiles: Array = []
 	for projectile in projectiles:
 		if projectile.target == null or projectile.target.health <= 0:
 			dead_projectiles.append(projectile)
 			continue
+		# Bound lifetime so no projectile can orbit or drift forever.
+		if now_ms - projectile.created_ms > PROJECTILE_MAX_FLIGHT_MS:
+			dead_projectiles.append(projectile)
+			continue
 		projectile.move(sim_dt_ms)
 		var hit_dist: float = float(projectile.target.radius + projectile.radius)
-		if projectile.pos.distance_to(projectile.target.pos) <= hit_dist:
+		# Test the swept segment, not just the end point: at 2x/3x speed a
+		# fast projectile can straddle the target and enter a stable orbit.
+		var swept_dist: float = _point_to_segment_distance(
+			projectile.target.pos, projectile.prev_pos, projectile.pos)
+		if swept_dist <= hit_dist:
 			apply_projectile_hit(projectile, now_ms)
 			dead_projectiles.append(projectile)
 		elif projectile.out_of_bounds():
@@ -1034,7 +1086,7 @@ func update_simulation(now_ms: int) -> void:
 		var jump = 2 if wave <= 3 else 4
 		wave_enemy_total += jump
 		spawn_interval_ms = _current_spawn_interval_ms()
-		next_spawn_ms = now_ms + 1200
+		next_spawn_ms = now_ms + int(1200.0 / maxf(0.25, speed_multiplier))
 		wave_started = false
 		wave_perfect = true
 		# Clear per-wave shop bonuses before offering next wave shop
@@ -1054,6 +1106,13 @@ func update_simulation(now_ms: int) -> void:
 # ---------------------------------------------------------------------------
 
 func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, now_ms: int) -> void:
+	# Hard cap: boss waves with full trash density can otherwise push 800+ live
+	# particles, which becomes both the sim and the mobile fill-rate spike.
+	const MAX_PARTICLES: int = 300
+	var remaining: int = MAX_PARTICLES - particles.size()
+	if remaining <= 0:
+		return
+	count = mini(count, remaining)
 	for _i in range(count):
 		var angle: float = randf() * TAU
 		var spd: float

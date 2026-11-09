@@ -31,6 +31,10 @@ var disrupt_until: int = 0
 var rewind_count: int = 0
 var facing_right: bool = true
 var marked_until: int = 0   # Longshot Sniper variant — all towers deal +15% to marked targets
+var vulnerable_until: int = 0  # Mage Vulnerability Exploit — bonus damage from all towers
+var vulnerable_mult: float = 1.0
+var burn_accum: float = 0.0    # fractional DoT carry so damage is frame-rate independent
+var regen_accum: float = 0.0   # fractional regen carry (boss regenerator)
 
 # String tag used for death-rattle particle dispatch
 var type_name: String = "Enemy"
@@ -211,8 +215,8 @@ class BossShieldBrute extends Enemy:
 	func _init(p_path: Array) -> void:
 		super._init(p_path)
 		speed   = 1.0
-		health  = 750
-		max_health = 750
+		health  = 900
+		max_health = 900
 		reward  = 120
 		armor   = 0.22
 		radius  = 23
@@ -225,8 +229,8 @@ class BossSwarmCarrier extends Enemy:
 	func _init(p_path: Array) -> void:
 		super._init(p_path)
 		speed   = 2.4
-		health  = 400
-		max_health = 400
+		health  = 700
+		max_health = 700
 		reward  = 100
 		flying  = true
 		radius  = 20
@@ -235,13 +239,13 @@ class BossSwarmCarrier extends Enemy:
 
 class BossRegenerator extends Enemy:
 	# Regenerates regen_dps HP per second (applied in GameState movement step).
-	var regen_dps: float = 8.0
+	var regen_dps: float = 45.0
 
 	func _init(p_path: Array) -> void:
 		super._init(p_path)
 		speed   = 1.5
-		health  = 600
-		max_health = 600
+		health  = 1000
+		max_health = 1000
 		reward  = 110
 		armor   = 0.15
 		radius  = 21

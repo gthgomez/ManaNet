@@ -20,6 +20,7 @@ var _active_tab: String = "shop"
 var _tab_btns: Dictionary = {}   # tab_id -> Button
 var _card_btns: Array = []
 var _navigating: bool = false
+var _status_lbl: Label = null
 
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,11 @@ func _ready() -> void:
 
 	_apply_visuals()
 	_build_tab_bar()
+	_status_lbl = Label.new()
+	_status_lbl.visible = false
+	_status_lbl.add_theme_color_override("font_color", _THEME.ORANGE)
+	_status_lbl.add_theme_font_size_override("font_size", 12)
+	_top_bar.add_child(_status_lbl)
 	_scroll.scroll_deadzone = 12
 	_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
 	_content.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -60,6 +66,25 @@ func _apply_visuals() -> void:
 
 func _refresh_rp() -> void:
 	_rp_lbl.text = "Shards: %d" % Progression.get_banked_rp()
+
+func _flash_status(text: String) -> void:
+	if _status_lbl == null:
+		return
+	_status_lbl.text = text
+	_status_lbl.visible = true
+	get_tree().create_timer(2.5).timeout.connect(func(): _status_lbl.visible = false)
+
+func _flash_purchase_failure(result: Dictionary, cost: int) -> void:
+	var reason: String = str(result.get("reason", "unknown"))
+	match reason:
+		"not_enough_rp":
+			_flash_status("Need %d more Shards" % maxi(0, cost - Progression.get_banked_rp()))
+		"already_owned":
+			_flash_status("Already owned")
+		"prerequisite_missing":
+			_flash_status("Buy the previous upgrade first")
+		_:
+			_flash_status("Purchase failed: %s" % reason)
 
 func _on_resize() -> void:
 	_apply_layout()
@@ -176,8 +201,11 @@ func _build_shop() -> void:
 		var buy_cb := func():
 			var result := Progression.purchase_upgrade(uid)
 			if result["success"]:
+				JuiceManager.play(JuiceManager.SFX.PURCHASE)
 				_refresh_rp()
 				_show_tab("shop")
+			else:
+				_flash_purchase_failure(result, cost)
 
 		var activate_cb := func():
 			var new_active := uid if not active else ""
@@ -213,11 +241,35 @@ func _build_shop() -> void:
 		var buy_cb := func():
 			var result := Progression.purchase_upgrade(uid)
 			if result["success"]:
+				JuiceManager.play(JuiceManager.SFX.PURCHASE)
 				_refresh_rp()
 				_show_tab("shop")
+			else:
+				_flash_purchase_failure(result, cost)
 
 		var card := _make_simple_card(lbl, desc, cost, owned, prereq_ok, superseded, buy_cb)
 		_content.add_child(card)
+
+	_add_spacer(12.0)
+	_add_section_header("Challenge Modifiers",
+		"Optional run modifiers purchased with Shards. Activate them before starting a run on Map Select.")
+
+	for entry in Progression.MAP_MODIFIERS:
+		var mid: String  = entry[0]
+		var mcost: int   = entry[1]
+		var mlbl: String = entry[2]
+		var mdesc: String = entry[3]
+		var mowned: bool = mid in unlocked
+		var mbuy_cb := func():
+			var result := Progression.purchase_upgrade(mid)
+			if result["success"]:
+				JuiceManager.play(JuiceManager.SFX.PURCHASE)
+				_refresh_rp()
+				_show_tab("shop")
+			else:
+				_flash_purchase_failure(result, mcost)
+		var mcard := _make_simple_card(mlbl, mdesc, mcost, mowned, true, false, mbuy_cb)
+		_content.add_child(mcard)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Variants tab

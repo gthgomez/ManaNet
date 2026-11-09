@@ -18,8 +18,10 @@ Parallel polish with SimLife (Ship B). Prefer open polish items in `IMPROVEMENT_
 
 ```
 ├── scenes/         ← All .tscn files (Main, GameScreen, MenuScreen, MapSelectScreen,
-│                     RoboBaseScreen, SettingsScreen, EndScreen, SimTest)
-├── simulation/     ← Core game logic (GDScript classes, no UI)
+│                     CyberDeckScreen, SettingsScreen, EndScreen, SimTest)
+├── simulation/     ← Core game logic (GDScript classes, no UI):
+│                     core/GameState.gd, entities/{Tower,Enemy,Projectile}.gd,
+│                     effects/{Effect,Particle}.gd, upgrades/UpgradePathTracker.gd
 ├── scripts/        ← Non-simulation scripts (SimulationBot.gd, benchmark.gd)
 ├── autoloads/      ← Godot autoload singletons
 ├── ui/             ← Reusable UI components
@@ -34,17 +36,17 @@ Parallel polish with SimLife (Ship B). Prefer open polish items in `IMPROVEMENT_
 
 | File | Role |
 |------|------|
-| `simulation/GameState.gd` | Authoritative game state (lives, gold, wave, score) |
-| `simulation/Tower.gd` | Tower base class — stats, targeting, attack logic |
-| `simulation/Enemy.gd` | Enemy base class — path following, health, rewards |
-| `simulation/Projectile.gd` | Projectile physics and hit logic |
-| `simulation/Effect.gd` | Status effects (slow, burn, etc.) |
-| `simulation/UpgradePathTracker.gd` | Tracks tower upgrade paths and variant unlocks |
-| `simulation/Particle.gd` | Visual-only particle effects |
+| `simulation/core/GameState.gd` | Authoritative game state (lives, gold, wave, score) |
+| `simulation/entities/Tower.gd` | Tower base class — stats, targeting, attack logic |
+| `simulation/entities/Enemy.gd` | Enemy base class — path following, health, rewards |
+| `simulation/entities/Projectile.gd` | Projectile physics and hit logic |
+| `simulation/effects/Effect.gd` | Status effects (slow, burn, etc.) |
+| `simulation/upgrades/UpgradePathTracker.gd` | Tracks tower upgrade paths and variant unlocks |
+| `simulation/effects/Particle.gd` | Visual-only particle effects |
 | `scenes/GameScreen.tscn` | Main gameplay scene |
-| `scenes/RoboBaseScreen.tscn` | Robo-Base shop screen |
+| `scenes/CyberDeckScreen.tscn` | Meta-progression shop |
 | `scripts/SimulationBot.gd` | Headless sim runner for balance testing |
-| `scripts/benchmark.gd` | Performance benchmark harness |
+| `scripts/benchmark.gd` | Live-wave performance benchmark (percentiles + liveness) |
 
 ## Stack
 
@@ -64,10 +66,13 @@ Parallel polish with SimLife (Ship B). Prefer open polish items in `IMPROVEMENT_
 
 Run from the repository root.
 
+- Full verification (parse gate + 82-check audit, exits nonzero on failure): `python3 tools/verify_game.py`
 - Headless simulation: `godot --headless -s scripts/SimulationBot.gd`
-- Benchmark: `godot --headless -s scripts/benchmark.gd`
+- Benchmark (live wave, p50/p95/p99 + liveness assertion): `godot --headless -s scripts/benchmark.gd`
 - Simulation regression checks: `godot --headless -s tests/simulation/regression_checks.gd`
 - UI regression harness (hermetic — backs up/restores the user save): `godot --headless tests/ui/UIRegressionTest.tscn`
+- Early-run smoke test (exits after wave 3; not a 15-wave balance test): `godot --headless scenes/SimTest.tscn`
+- Verifier exit-status contract: `python3 tests/verifier_exit/test_verifier_exit.py`
 - Run locally: Godot 4.6 editor playback
 
 If the `godot` executable is not on `PATH`, report verification as blocked and include the command you would run.
