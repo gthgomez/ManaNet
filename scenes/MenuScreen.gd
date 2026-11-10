@@ -53,9 +53,9 @@ func _ready() -> void:
 	add_child(backdrop)
 	move_child(backdrop, 0)
 
-	# Decor mage — rendered above BG so it's actually visible
-	if ResourceLoader.exists("res://assets/sprites/towers/mage.svg", "Texture2D"):
-		_add_decor_icon(load("res://assets/sprites/towers/mage.svg"))
+	# The 96px mage SVG carries an opaque plate and reads as a dark rectangle when
+	# scaled up. The tower showcase below is the cyber-arcana decoration instead.
+	# The SVG asset itself stays on disk; it is just not composed into the menu.
 
 	# Background elements (low z in tree) — must be added before overlays
 	_add_particles()        # Gap 1
@@ -71,10 +71,15 @@ func _ready() -> void:
 	_add_rp_pill()
 	_add_mute_toggle()      # Gap 4
 	_add_version_label()    # Gap 3 (dynamic)
+	_add_pending_save_button()
 
-	self.modulate.a = 0.0
-	var fade_tween := create_tween()
-	fade_tween.tween_property(self, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
+	var reduce_motion: bool = bool(Progression.get_settings().get("reduce_motion", false))
+	if reduce_motion:
+		self.modulate.a = 1.0
+	else:
+		self.modulate.a = 0.0
+		var fade_tween := create_tween()
+		fade_tween.tween_property(self, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
 
 	_play_btn.pressed.connect(_on_play)
 	_base_btn.pressed.connect(_on_cyberdeck)
@@ -101,6 +106,8 @@ func _ready() -> void:
 	FocusManager.back_pressed.connect(_on_back_pressed)
 
 func _process(delta: float) -> void:
+	if bool(Progression.get_settings().get("reduce_motion", false)):
+		return
 	_time += delta
 	for i in _tower_showcase.size():
 		if i < _tower_base_y.size() and _tower_base_y[i] > 0.0:
@@ -119,16 +126,18 @@ func _apply_visuals() -> void:
 
 	_THEME.apply_label(_subtitle, "muted")
 	_subtitle.text = _BRAND.FANTASY_SUBTITLE
-	# The shipped logo asset still reads "Tactical Tower Defense" and is locked.
-	# Show the real product wordmark above it so the first impression is ManaNet.
+	# The shipped title texture still reads "Tactical Tower Defense". It stays
+	# in the project, but it is not part of the menu composition.
+	_title.visible = false
+	_title.custom_minimum_size = Vector2.ZERO
 	if _product_name != null:
 		_product_name.text = _BRAND.PRODUCT_NAME
 		_THEME.apply_label(_product_name, "heading")
-		_product_name.add_theme_font_size_override("font_size", 24 if viewport_is_compact() else 40)
-		_product_name.add_theme_color_override("font_color", _THEME.CYAN)
+		_product_name.add_theme_font_size_override("font_size", 28 if viewport_is_compact() else 56)
+		_product_name.add_theme_color_override("font_color", Color(0.72, 0.96, 1.0))
 		_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_product_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_product_name.custom_minimum_size = Vector2(0.0, 34.0 if viewport_is_compact() else 46.0)
+		_product_name.custom_minimum_size = Vector2(0.0, 34.0 if viewport_is_compact() else 64.0)
 	if _product_tagline != null:
 		_product_tagline.text = _BRAND.PRODUCT_TAGLINE
 		_THEME.apply_label(_product_tagline, "muted")
@@ -151,22 +160,19 @@ func _apply_visuals() -> void:
 	_base_btn.focus_mode     = Control.FOCUS_ALL
 	_settings_btn.focus_mode = Control.FOCUS_ALL
 
-	# Title tilt loop
-	_title.pivot_offset = _title.size * 0.5
-	var tt := create_tween().set_loops()
-	tt.tween_property(_title, "rotation", deg_to_rad(1.0),  4.0).set_trans(Tween.TRANS_SINE)
-	tt.tween_property(_title, "rotation", deg_to_rad(-1.0), 4.0).set_trans(Tween.TRANS_SINE)
-
-	# Play glint loop
-	var pt := create_tween().set_loops()
-	pt.tween_callback(func(): _THEME.trigger_glint(_play_btn)).set_delay(3.5)
+	var reduce_motion: bool = bool(Progression.get_settings().get("reduce_motion", false))
+	if not reduce_motion:
+		# Play glint loop
+		var pt := create_tween().set_loops()
+		pt.tween_callback(func(): _THEME.trigger_glint(_play_btn)).set_delay(3.5)
 
 	# Cyber-Deck glows when unspent Shards are available (not just on just_won)
 	var profile: Dictionary = Progression.load_profile()
 	if Progression.just_won() or profile.get("banked_rp", 0) > 0:
 		_THEME.set_button_glow(_base_btn, true)
-		var t := create_tween().set_loops()
-		t.tween_callback(func(): _THEME.trigger_glint(_base_btn)).set_delay(2.0)
+		if not reduce_motion:
+			var t := create_tween().set_loops()
+			t.tween_callback(func(): _THEME.trigger_glint(_base_btn)).set_delay(2.0)
 
 	_refresh_mute_btn()
 
@@ -190,7 +196,8 @@ func _apply_layout() -> void:
 	# an 84px title + 32px separations + 64px play button (measured bottom 348 in
 	# a 320px viewport), so the whole column must shrink, not just its box.
 	var compact: bool = viewport_is_compact()
-	var title_h: float = (32.0 if compact else (110.0 if viewport.x >= 1200.0 else 84.0))
+	# The legacy logo is hidden, so the column no longer reserves a title plate.
+	var title_h: float = 0.0
 	var sep: int = 6 if compact else 32
 	var play_h: float = 46.0 if compact else 64.0
 	var row2_h: float = 34.0 if compact else _LAYOUT.TOUCH_HEIGHT
@@ -198,7 +205,7 @@ func _apply_layout() -> void:
 	# Height must also respect the viewport and the real content minimum. The
 	# minimum must include the wordmark + tagline rows that now sit above the
 	# logo; omitting them let the column overflow and overlap the showcase.
-	var wordmark_h: float = 30.0 if compact else 46.0
+	var wordmark_h: float = 34.0 if compact else 64.0
 	var tagline_h: float = 12.0 if compact else 18.0
 	var content_min: float = wordmark_h + tagline_h + title_h + 24.0 + float(sep * 4) + play_h + row2_h
 	var avail_h: float = viewport.y - _LAYOUT.top_margin(viewport) - _LAYOUT.bottom_margin(viewport) - 12.0
@@ -389,6 +396,28 @@ func _on_mute_toggle() -> void:
 # ── Product wordmark ──────────────────────────────────────────────────────────
 # The shipped title_logo.png still reads "Tactical Tower Defense" and is
 # asset-locked, so the menu presents the real product name as text above it.
+func _add_pending_save_button() -> void:
+	if not Progression.has_pending_run():
+		return
+	var btn := Button.new()
+	btn.name = "RetrySaveBtn"
+	btn.text = _BRAND.SAVE_RETRY
+	btn.tooltip_text = _BRAND.UNSAVED_MENU
+	btn.custom_minimum_size = Vector2(0.0, 44.0)
+	btn.focus_mode = Control.FOCUS_ALL
+	_THEME.apply_button(btn, "primary")
+	btn.pressed.connect(func() -> void:
+		var result: Dictionary = Progression.retry_pending_run()
+		if result.get("save_failed", true):
+			btn.text = "Retry Save — still not saved"
+			return
+		btn.text = _BRAND.SAVE_OK
+		btn.disabled = true
+		_refresh_rp()
+	)
+	_vbox.add_child(btn)
+	_vbox.move_child(btn, _play_btn.get_parent().get_index())
+
 func _add_product_wordmark() -> void:
 	_product_name = Label.new()
 	_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

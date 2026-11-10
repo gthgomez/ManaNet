@@ -156,10 +156,45 @@ const TOWER_VARIANTS: Array = [
 ## files are migrated forward by _normalize_profile().
 const SAVE_VERSION: int = 1
 
+## Persistence gate. Writes are allowed only from a profile this build actually
+## understood. Future, unreadable, and failed-quarantine files stay byte-for-byte
+## until an explicit recover_blocked_profile() call.
+enum PersistState {
+	UNINITIALIZED,
+	READY,
+	MIGRATED,
+	UNSUPPORTED_FUTURE,
+	CORRUPT,
+	FAILED_QUARANTINE,
+	UNREADABLE,
+	FAILED_WRITE,
+	UNSAVED_CHANGES,
+}
+
+const PERSIST_STATE_NAMES: Dictionary = {
+	PersistState.UNINITIALIZED: "uninitialized",
+	PersistState.READY: "ready",
+	PersistState.MIGRATED: "migrated",
+	PersistState.UNSUPPORTED_FUTURE: "unsupported_future",
+	PersistState.CORRUPT: "corrupt",
+	PersistState.FAILED_QUARANTINE: "failed_quarantine",
+	PersistState.UNREADABLE: "unreadable",
+	PersistState.FAILED_WRITE: "failed_write",
+	PersistState.UNSAVED_CHANGES: "unsaved_changes",
+}
+
 var _profile: Dictionary = {}
 var _save_path: String = "user://td_progression.json"
 var _tmp_path: String = "user://td_progression.tmp"
 var _initialized: bool = false
+var _persist_state: int = PersistState.UNINITIALIZED
+var _loaded_player_data: bool = false
+var _load_origin: String = "uninitialized"
+var _last_save_error: String = ""
+## Run result that was computed but not committed. Retry applies this once.
+var _pending_run: Dictionary = {}
+var _committed_fingerprint: String = ""
+var _last_commit_result: Dictionary = {}
 
 func _init() -> void:
 	# Resolve isolation before anything can load or save. Tests and tooling set
@@ -169,25 +204,59 @@ func _init() -> void:
 		_save_path = override
 		_tmp_path = override + ".tmp"
 
-## Redirect persistence for tests/tooling. A verification run must never open,
-## let alone overwrite, the player's real profile.
+## Redirect persistence. Changing the destination drops the in-memory profile
+## without flushing it, so profile A can never be written into profile B.
 func set_save_path(path: String) -> void:
+	if path == "":
+		return
+	if path == _save_path:
+		return
 	_save_path = path
 	_tmp_path = path + ".tmp"
+	if _initialized:
+		_discard_memory_for_path_switch()
 
-## Explicit profile initialization. Safe to call before the node enters the
-## tree; _ready() becomes a no-op once this has run. Never relies on _ready()
-## timing, which is what left test-created instances uninitialized.
+func _discard_memory_for_path_switch() -> void:
+	_initialized = false
+	_profile = {}
+	_persist_state = PersistState.UNINITIALIZED
+	_loaded_player_data = false
+	_load_origin = "uninitialized"
+	_last_save_error = ""
+	_pending_run = {}
+	_committed_fingerprint = ""
+	_last_commit_result = {}
+
+## Explicit profile initialization. Calling it again with a different path
+## reloads that path. It never copies the previous profile onto the new file.
 func initialize(path: String = "") -> void:
 	if path != "":
 		set_save_path(path)
-	if _initialized:
+	if _initialized and _persist_state != PersistState.UNINITIALIZED:
 		return
 	load_profile()
-	_initialized = true
 
 func is_initialized() -> bool:
 	return _initialized
+
+func writes_blocked() -> bool:
+	return _persist_state == PersistState.UNINITIALIZED \
+		or _persist_state == PersistState.UNSUPPORTED_FUTURE \
+		or _persist_state == PersistState.FAILED_QUARANTINE \
+		or _persist_state == PersistState.UNREADABLE
+
+func persistence_status() -> Dictionary:
+	return {
+		"state": str(PERSIST_STATE_NAMES.get(_persist_state, "unknown")),
+		"writes_blocked": writes_blocked(),
+		"loaded_player_data": _loaded_player_data,
+		"origin": _load_origin,
+		"last_save_error": _last_save_error,
+		"pending_run": not _pending_run.is_empty(),
+	}
+
+func has_pending_run() -> bool:
+	return not _pending_run.is_empty()
 # Legacy desktop save from the Kivy predecessor (TowerDefenseKivy writes
 # td_progression.json at its repo root as the desktop fallback). res://../
 # is not portable, so resolve the sibling project path absolutely; on Android
@@ -264,49 +333,96 @@ func _default_profile() -> Dictionary:
 
 func load_profile() -> Dictionary:
 	_initialized = true
-	var loaded := _read_profile_file(_save_path)
-	if not loaded.is_empty():
-		_profile = loaded
+	# A crash between parking the old file and committing the temp file leaves
+	# the previous profile at .bak and no live file. Put it back. An orphan
+	# .tmp is never adopted.
+	_restore_parked_backup_if_needed()
+	var outcome := _inspect_save_file(_save_path)
+	var kind: String = str(outcome.get("kind", "missing"))
+	if kind == "supported":
+		_profile = outcome["profile"]
+		_loaded_player_data = true
+		var migrated: bool = bool(outcome.get("migrated", false))
+		_load_origin = "migrated" if migrated else "current"
+		_persist_state = PersistState.MIGRATED if migrated else PersistState.READY
+		_last_save_error = ""
+		return _profile
+	if kind == "future":
+		push_warning("Progression save version is newer than supported %d; leaving it untouched" % SAVE_VERSION)
+		_adopt_blocked_defaults("unsupported_future", PersistState.UNSUPPORTED_FUTURE)
+		return _profile
+	if kind == "unreadable":
+		push_error("Progression save could not be read; refusing to replace it")
+		_adopt_blocked_defaults("unreadable", PersistState.UNREADABLE)
+		return _profile
+	if kind == "corrupt":
+		if _quarantine(_save_path, "corrupt"):
+			_profile = _default_profile()
+			_loaded_player_data = false
+			_load_origin = "quarantined_corrupt"
+			_persist_state = PersistState.CORRUPT
+			_last_save_error = ""
+			return _profile
+		push_error("Progression save is corrupt and could not be quarantined; refusing to replace it")
+		_adopt_blocked_defaults("failed_quarantine", PersistState.FAILED_QUARANTINE)
 		return _profile
 
-	var migrated := _read_profile_file(_legacy_desktop_save_path())
-	if not migrated.is_empty():
-		_profile = migrated
+	# Nothing at the live path. A legacy desktop file may be adopted, but only
+	# when this build understands it — and it is written to the Godot path,
+	# never back over an unreadable sibling file.
+	var legacy := _inspect_save_file(_legacy_desktop_save_path())
+	if str(legacy.get("kind", "")) == "supported":
+		_profile = legacy["profile"]
 		_profile["engine"] = "godot"
+		_loaded_player_data = true
+		_load_origin = "legacy_desktop"
+		_persist_state = PersistState.MIGRATED
+		_last_save_error = ""
 		save_profile()
 		return _profile
 
 	_profile = _default_profile()
+	_loaded_player_data = false
+	_load_origin = "defaults_fresh"
+	_persist_state = PersistState.READY
+	_last_save_error = ""
 	return _profile
 
-func _read_profile_file(path: String) -> Dictionary:
-	if not FileAccess.file_exists(path):
-		return {}
+func _adopt_blocked_defaults(origin: String, state: int) -> void:
+	_profile = _default_profile()
+	_loaded_player_data = false
+	_load_origin = origin
+	_persist_state = state
+
+## Classify a file without mutating it. "missing" is the only kind that means
+## "there is no player data here". Every other kind is a real file that must
+## not be confused with a fresh profile.
+func _inspect_save_file(path: String) -> Dictionary:
+	if path == "" or not FileAccess.file_exists(path):
+		return {"kind": "missing"}
 	var f := FileAccess.open(path, FileAccess.READ)
-	if not f:
-		return {}
+	if f == null:
+		return {"kind": "unreadable"}
 	var text := f.get_as_text()
 	f.close()
+	if text.strip_edges() == "":
+		return {"kind": "corrupt"}
 	var parsed = JSON.parse_string(text)
 	if not parsed is Dictionary:
-		# Never silently overwrite a corrupt profile later; quarantine it so a
-		# later save cannot destroy whatever the player had.
-		_quarantine(path, "corrupt")
-		return {}
-	# Unsupported *future* schema: the file is not corrupt, but this build
-	# cannot reason about it. Preserve it untouched and fall back to defaults
-	# rather than rewriting it with a lower version.
-	var file_version: int = _as_int(parsed.get("version"), 0)
-	if file_version > SAVE_VERSION:
-		push_warning("Progression save version %d is newer than supported %d; leaving it untouched"
-			% [file_version, SAVE_VERSION])
-		return {}
+		return {"kind": "corrupt"}
+	if parsed.has("version"):
+		var file_version: int = _as_int(parsed.get("version"), -1)
+		if file_version < 0:
+			return {"kind": "corrupt"}
+		if file_version > SAVE_VERSION:
+			return {"kind": "future"}
 	var default := _default_profile()
 	_deep_merge(default, parsed)
 	_normalize_profile(default)
 	default["engine"] = "godot"
 	default["version"] = SAVE_VERSION
-	return default
+	var migrated: bool = (not parsed.has("version")) or _as_int(parsed.get("version"), 0) < SAVE_VERSION
+	return {"kind": "supported", "profile": default, "migrated": migrated}
 
 ## Move a damaged save aside with a checked rename. Returns true only when the
 ## file really moved; a failed quarantine is reported, never treated as success.
@@ -431,44 +547,183 @@ func _variant_exists(variant_key: String) -> bool:
 func save_profile() -> bool:
 	# Root-cause fix for the old "Refusing to save an uninitialized profile"
 	# error: initialize on demand instead of dropping the write. Callers that
-	# update a setting always get that setting persisted.
+	# update a setting always get that setting persisted — unless the file on
+	# disk is one this build is not allowed to replace.
 	if not _initialized or _profile.is_empty() or not _profile.has("version"):
 		initialize()
+	if writes_blocked():
+		_last_save_error = "writes_blocked:%s" % str(PERSIST_STATE_NAMES.get(_persist_state, "unknown"))
+		push_error("Refusing to overwrite progression (%s)" % _last_save_error)
+		return false
 	if _profile.is_empty() or not _profile.has("version"):
+		_last_save_error = "uninitialized"
 		push_error("Cannot save progression: profile failed to initialize")
 		return false
 
 	_profile["version"] = SAVE_VERSION
-	var text := JSON.stringify(_profile, "\t")
+	_profile["engine"] = "godot"
+	if not _profile_schema_ok(_profile):
+		_last_save_error = "schema_invalid"
+		_persist_state = PersistState.FAILED_WRITE
+		push_error("Cannot save progression: in-memory profile failed schema checks")
+		return false
 
+	var text := JSON.stringify(_profile, "\t")
 	var f := FileAccess.open(_tmp_path, FileAccess.WRITE)
 	if f == null:
+		_last_save_error = "temp_open_failed"
+		_persist_state = PersistState.FAILED_WRITE
 		push_error("Cannot open progression temp file %s (error %d); save aborted"
 			% [_tmp_path, FileAccess.get_open_error()])
 		return false
 	f.store_string(text)
+	f.flush()
 	var write_err: int = f.get_error()
 	f.close()
 	if write_err != OK:
+		_last_save_error = "temp_write_failed"
+		_persist_state = PersistState.FAILED_WRITE
 		push_error("Failed writing progression temp file (error %d); save aborted" % write_err)
 		_remove_if_exists(_tmp_path)
 		return false
 
-	# Verify the temp file really holds parseable JSON before swapping it in.
-	if JSON.parse_string(_read_text(_tmp_path)) == null:
-		push_error("Progression temp file failed verification; previous save left intact")
+	# The temp file must round-trip as this schema, not merely as some JSON value.
+	var reread := _read_text(_tmp_path)
+	var parsed = JSON.parse_string(reread)
+	if reread != text or not _profile_schema_ok(parsed) or not _parsed_matches_profile(parsed):
+		_last_save_error = "temp_verify_failed"
+		_persist_state = PersistState.FAILED_WRITE
+		push_error("Progression temp file failed schema verification; previous save left intact")
 		_remove_if_exists(_tmp_path)
 		return false
 
-	var err: int = DirAccess.rename_absolute(
-		ProjectSettings.globalize_path(_tmp_path),
-		ProjectSettings.globalize_path(_save_path)
-	)
+	var err: int = _commit_temp_file()
 	if err != OK:
+		_last_save_error = "commit_failed:%d" % err
+		_persist_state = PersistState.FAILED_WRITE
 		push_error("Failed to commit progression save (error %d); previous save left intact" % err)
 		_remove_if_exists(_tmp_path)
 		return false
+	_last_save_error = ""
+	if _pending_run.is_empty():
+		_persist_state = PersistState.READY
+	else:
+		_persist_state = PersistState.UNSAVED_CHANGES
 	return true
+
+## Replace the live file only after the temp file has been verified.
+## If the platform refuses to replace an existing file, move that file aside
+## and put it back when the commit itself fails.
+func _commit_temp_file() -> int:
+	var src := ProjectSettings.globalize_path(_tmp_path)
+	var dst := ProjectSettings.globalize_path(_save_path)
+	var err: int = DirAccess.rename_absolute(src, dst)
+	if err == OK:
+		return OK
+	if not FileAccess.file_exists(_save_path):
+		return err
+	var bak := _save_path + ".bak"
+	var bak_global := ProjectSettings.globalize_path(bak)
+	var parked: int = DirAccess.rename_absolute(dst, bak_global)
+	if parked != OK:
+		return err
+	err = DirAccess.rename_absolute(src, dst)
+	if err != OK:
+		DirAccess.rename_absolute(bak_global, dst)
+		return err
+	_remove_if_exists(bak)
+	return OK
+
+func _is_number(value) -> bool:
+	return value is int or value is float
+
+func _profile_schema_ok(parsed) -> bool:
+	if not parsed is Dictionary:
+		return false
+	if _as_int(parsed.get("version"), -1) != SAVE_VERSION:
+		return false
+	if str(parsed.get("engine", "")) == "":
+		return false
+	if not parsed.get("unlocked") is Array:
+		return false
+	if not parsed.get("unlocked_variants") is Array:
+		return false
+	if not parsed.get("tower_use_counts") is Dictionary:
+		return false
+	if not parsed.get("tower_kill_counts") is Dictionary:
+		return false
+	if not parsed.get("active_variants") is Dictionary:
+		return false
+	if not parsed.get("settings") is Dictionary:
+		return false
+	if not parsed.get("run_history") is Array:
+		return false
+	if not _is_number(parsed.get("total_rp")) or not _is_number(parsed.get("banked_rp")):
+		return false
+	var defaults := _default_settings()
+	for key in defaults.keys():
+		if not parsed["settings"].has(key):
+			return false
+	for key in ["active_starting_tower", "active_modifier", "active_modifier_2"]:
+		if not parsed.get(key) is String:
+			return false
+	return true
+
+func _parsed_matches_profile(parsed: Dictionary) -> bool:
+	if not is_equal_approx(float(parsed.get("banked_rp", -1)), float(_profile.get("banked_rp", -2))):
+		return false
+	if not is_equal_approx(float(parsed.get("total_rp", -1)), float(_profile.get("total_rp", -2))):
+		return false
+	var unlocked = parsed.get("unlocked", [])
+	if not unlocked is Array or unlocked.size() != _profile.get("unlocked", []).size():
+		return false
+	var history = parsed.get("run_history", [])
+	if not history is Array or history.size() != _profile.get("run_history", []).size():
+		return false
+	return true
+
+## Deliberate recovery. Copies the blocked file to a verified backup, then
+## writes a fresh profile. Refuses if the original bytes cannot be preserved.
+func recover_blocked_profile() -> Dictionary:
+	if not writes_blocked() or _persist_state == PersistState.UNINITIALIZED:
+		return {
+			"success": false,
+			"reason": "recovery_not_required",
+			"state": persistence_status()["state"],
+		}
+	var backup_path := ""
+	if FileAccess.file_exists(_save_path):
+		var probe := FileAccess.open(_save_path, FileAccess.READ)
+		if probe == null:
+			return {"success": false, "reason": "cannot_preserve_original", "backup": ""}
+		var original: PackedByteArray = probe.get_buffer(probe.get_length())
+		probe.close()
+		var stamp: int = int(Time.get_unix_time_from_system())
+		backup_path = "%s.recovery-%d" % [_save_path, stamp]
+		var out := FileAccess.open(backup_path, FileAccess.WRITE)
+		if out == null:
+			return {"success": false, "reason": "backup_failed", "backup": ""}
+		out.store_buffer(original)
+		out.flush()
+		out.close()
+		var check_f := FileAccess.open(backup_path, FileAccess.READ)
+		if check_f == null:
+			_remove_if_exists(backup_path)
+			return {"success": false, "reason": "backup_unreadable", "backup": ""}
+		var check: PackedByteArray = check_f.get_buffer(check_f.get_length())
+		check_f.close()
+		if check != original:
+			_remove_if_exists(backup_path)
+			return {"success": false, "reason": "backup_mismatch", "backup": ""}
+	_profile = _default_profile()
+	_loaded_player_data = false
+	_load_origin = "recovered_defaults"
+	_persist_state = PersistState.READY
+	_initialized = true
+	_last_save_error = ""
+	if not save_profile():
+		return {"success": false, "reason": "save_failed", "backup": backup_path}
+	return {"success": true, "reason": "", "backup": backup_path, "state": "ready"}
 
 func _read_text(path: String) -> String:
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -481,6 +736,17 @@ func _read_text(path: String) -> String:
 func _remove_if_exists(path: String) -> void:
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+func _restore_parked_backup_if_needed() -> void:
+	if FileAccess.file_exists(_save_path):
+		return
+	var bak := _save_path + ".bak"
+	if not FileAccess.file_exists(bak):
+		return
+	DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(bak),
+		ProjectSettings.globalize_path(_save_path)
+	)
 
 func _deep_merge(base: Dictionary, override: Dictionary) -> void:
 	for key in override:
@@ -506,7 +772,40 @@ func compute_rp(waves_survived: int, perfect_waves: int, lives_remaining: int,
 # End-of-run record  (mirrors record_run in progression.py)
 # ---------------------------------------------------------------------------
 
+func _run_fingerprint(gs: Object, map_id: int, abandoned: bool) -> String:
+	return "%d|%d|%d|%d|%d|%s" % [
+		map_id,
+		int(gs.stat_waves_survived),
+		int(gs.stat_enemies_killed),
+		int(gs.stat_gold_earned),
+		int(gs.lives),
+		"1" if abandoned else "0",
+	]
+
 func record_run(gs: Object, map_id: int, abandoned: bool = false) -> Dictionary:
+	if _profile.is_empty() or not _initialized:
+		initialize()
+	var fingerprint := _run_fingerprint(gs, map_id, abandoned)
+	if fingerprint == _committed_fingerprint and not _last_commit_result.is_empty():
+		var dup: Dictionary = _last_commit_result.duplicate(true)
+		dup["duplicate"] = true
+		dup["persisted"] = true
+		dup["save_failed"] = false
+		return dup
+	if not _pending_run.is_empty():
+		if str(_pending_run.get("fingerprint", "")) == fingerprint:
+			var again: Dictionary = (_pending_run["result"] as Dictionary).duplicate(true)
+			again["duplicate"] = true
+			return again
+		return {
+			"rp": 0,
+			"newly_unlocked_variants": [],
+			"milestone_deltas": [],
+			"save_failed": true,
+			"persisted": false,
+			"duplicate": false,
+			"reason": "unsaved_run_pending",
+		}
 	var settings: Dictionary = get_settings()
 	var gold_eff_on: bool = settings.get("gold_efficiency_enabled", true)
 	var gold_spent: int = maxi(0, gs.stat_gold_earned - gs.gold)
@@ -562,7 +861,7 @@ func record_run(gs: Object, map_id: int, abandoned: bool = false) -> Dictionary:
 	if not saved:
 		# Report the truth: this run's progress is not durable. Roll the
 		# in-memory counters back so a later successful save cannot bank a run
-		# whose record already failed.
+		# whose record already failed. The snapshot stays available for retry.
 		_profile["total_rp"]  = prev_total_rp
 		_profile["banked_rp"] = prev_banked_rp
 		_profile["run_history"] = prev_history
@@ -570,12 +869,26 @@ func record_run(gs: Object, map_id: int, abandoned: bool = false) -> Dictionary:
 		for ttype in pre_use:
 			_profile["tower_use_counts"][ttype] = pre_use[ttype]
 			_profile["tower_kill_counts"][ttype] = pre_kill[ttype]
-		return {
-			"rp":                     0,
+		var failed := {
+			"rp":                     rp,
 			"newly_unlocked_variants": [],
 			"milestone_deltas":       [],
 			"save_failed":            true,
+			"persisted":              false,
+			"duplicate":              false,
+			"reason":                 _last_save_error,
 		}
+		_pending_run = {
+			"fingerprint": fingerprint,
+			"rp": rp,
+			"entry": entry.duplicate(true),
+			"use_adds": gs.stat_tower_use_by_type.duplicate(),
+			"kill_adds": gs.stat_tower_kills_by_type.duplicate(),
+			"result": failed.duplicate(true),
+		}
+		if not writes_blocked():
+			_persist_state = PersistState.UNSAVED_CHANGES
+		return failed
 
 	# Build milestone delta info for the end screen
 	var newly_unlocked: Array = []
@@ -606,11 +919,83 @@ func record_run(gs: Object, map_id: int, abandoned: bool = false) -> Dictionary:
 					"run_kills":  run_kills,
 				})
 
-	return {
+	var committed := {
 		"rp":                     rp,
 		"newly_unlocked_variants": newly_unlocked,
 		"milestone_deltas":       milestone_deltas,
+		"save_failed":            false,
+		"persisted":              true,
+		"duplicate":              false,
 	}
+	_committed_fingerprint = fingerprint
+	_last_commit_result = committed.duplicate(true)
+	_pending_run = {}
+	return committed
+
+## Re-apply the one unsaved run and commit it. A second call after success
+## does not award the run again.
+func retry_pending_run() -> Dictionary:
+	if _pending_run.is_empty():
+		if not _last_commit_result.is_empty():
+			var already: Dictionary = _last_commit_result.duplicate(true)
+			already["duplicate"] = true
+			already["persisted"] = true
+			already["save_failed"] = false
+			return already
+		return {
+			"success": false,
+			"reason": "nothing_pending",
+			"save_failed": false,
+			"persisted": false,
+			"duplicate": false,
+			"rp": 0,
+		}
+	if writes_blocked():
+		var blocked: Dictionary = (_pending_run["result"] as Dictionary).duplicate(true)
+		blocked["save_failed"] = true
+		blocked["persisted"] = false
+		return blocked
+	var snap: Dictionary = _pending_run
+	var prev_total: int = int(_profile.get("total_rp", 0))
+	var prev_banked: int = int(_profile.get("banked_rp", 0))
+	var prev_history: Array = _profile.get("run_history", []).duplicate(true)
+	var prev_unlocked: Array = _profile.get("unlocked_variants", []).duplicate()
+	var prev_use: Dictionary = _profile.get("tower_use_counts", {}).duplicate()
+	var prev_kill: Dictionary = _profile.get("tower_kill_counts", {}).duplicate()
+	_profile["total_rp"] = prev_total + int(snap.get("rp", 0))
+	_profile["banked_rp"] = prev_banked + int(snap.get("rp", 0))
+	for ttype in snap.get("use_adds", {}):
+		_profile["tower_use_counts"][ttype] = int(_profile["tower_use_counts"].get(ttype, 0)) + int(snap["use_adds"][ttype])
+	for ttype in snap.get("kill_adds", {}):
+		_profile["tower_kill_counts"][ttype] = int(_profile["tower_kill_counts"].get(ttype, 0)) + int(snap["kill_adds"][ttype])
+	_profile["run_history"].append((snap["entry"] as Dictionary).duplicate(true))
+	if _profile["run_history"].size() > 50:
+		_profile["run_history"] = _profile["run_history"].slice(-50)
+	_check_milestone_unlocks()
+	if not save_profile():
+		_profile["total_rp"] = prev_total
+		_profile["banked_rp"] = prev_banked
+		_profile["run_history"] = prev_history
+		_profile["unlocked_variants"] = prev_unlocked
+		_profile["tower_use_counts"] = prev_use
+		_profile["tower_kill_counts"] = prev_kill
+		var failed: Dictionary = (snap["result"] as Dictionary).duplicate(true)
+		failed["save_failed"] = true
+		failed["persisted"] = false
+		failed["reason"] = _last_save_error
+		_pending_run["result"] = failed
+		_persist_state = PersistState.UNSAVED_CHANGES
+		return failed
+	var ok: Dictionary = (snap["result"] as Dictionary).duplicate(true)
+	ok["save_failed"] = false
+	ok["persisted"] = true
+	ok["duplicate"] = false
+	ok["reason"] = ""
+	_committed_fingerprint = str(snap.get("fingerprint", ""))
+	_last_commit_result = ok.duplicate(true)
+	_pending_run = {}
+	_persist_state = PersistState.READY
+	return ok
 
 func _check_milestone_unlocks() -> void:
 	for variant in TOWER_VARIANTS:

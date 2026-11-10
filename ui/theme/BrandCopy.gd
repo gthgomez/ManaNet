@@ -70,3 +70,8 @@ static func shards_mult(mult: float, stacked: bool = false) -> String:
 static func end_stat_shards(earned: int, total: int) -> String:
 	## `total` is the spendable banked balance, not lifetime earnings.
 	return "+%d earned  ·  %d available" % [earned, total]
+
+const SAVE_FAILED_BODY := "This run finished, but rewards were not saved. Your earlier profile is unchanged."
+const SAVE_RETRY := "Retry Save"
+const SAVE_OK := "Run saved."
+const UNSAVED_MENU := "Unsaved run rewards"

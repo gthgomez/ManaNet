@@ -42,6 +42,7 @@ var input_ctrl: Object         = null
 var _wave_btn: Button   = null
 var _pause_btn: Button  = null
 var _speed_btns: Array  = []   # [Button x3]
+var _speed_group: ButtonGroup = null
 var _sell_btn: Button   = null
 var _target_btn: Button = null
 var _msg_label: Label   = null
@@ -49,6 +50,9 @@ var _gold_label: Label  = null
 var _lives_label: Label = null
 var _wave_label: Label  = null
 var _tower_panel: PanelContainer = null
+## True while a short viewport docks the tower panel over the shop so upgrade,
+## target, and sell stay reachable. The shop returns when the tower is cleared.
+var _compact_tower_panel: bool = false
 var _tower_name_label: Label = null
 var _base_upg_btn: Button = null
 var _path_upg_btns: Array = []   # [Button x3]
@@ -91,7 +95,9 @@ var _wave_shop = null   # WaveShopModalController
 var _restart_confirm_start_ms: int = 0
 var _sell_confirm_start_ms: int = 0
 var _quit_confirm_start_ms: int = 0
+var _quit_leave_unsaved: bool = false
 var _run_recorded: bool = false
+var _shop_repeat_click: bool = false
 var _restart_confirm_bar: ProgressBar = null
 var _world_rect: Rect2 = Rect2(Vector2.ZERO, _LAYOUT.BASE_SIZE)
 
@@ -243,14 +249,20 @@ func _build_hud() -> void:
 	_speed_bar.add_theme_constant_override("separation", 4)
 	hud_layer.add_child(_speed_bar)
 
+	var speed_group := ButtonGroup.new()
+	speed_group.allow_unpress = false
+	_speed_group = speed_group
 	for mult in [1.0, 2.0, 3.0]:
 		var btn := Button.new()
 		btn.text = "x%d" % int(mult)
+		btn.toggle_mode = true
+		btn.button_group = speed_group
 		btn.custom_minimum_size = Vector2(48.0, _LAYOUT.min_touch_height(false))
 		_THEME.apply_button(btn, "tab")
 		btn.pressed.connect(_on_speed_pressed.bind(mult))
 		_speed_bar.add_child(btn)
 		_speed_btns.append(btn)
+	_speed_btns[0].button_pressed = true
 
 	# ---- Wave button ----
 	_wave_btn = Button.new()
@@ -936,6 +948,36 @@ func _screen_to_world(pos: Vector2) -> Vector2:
 func _world_to_screen(pos: Vector2) -> Vector2:
 	return _world_rect.position + pos * _world_scale
 
+func _configure_tower_panel_density(compact: bool) -> void:
+	if _tower_panel == null or _tower_panel.get_child_count() == 0:
+		return
+	var margin := _tower_panel.get_child(0) as MarginContainer
+	if margin == null:
+		return
+	var pad := 4 if compact else 12
+	margin.add_theme_constant_override("margin_left", pad)
+	margin.add_theme_constant_override("margin_right", pad)
+	margin.add_theme_constant_override("margin_top", pad)
+	margin.add_theme_constant_override("margin_bottom", pad)
+	if margin.get_child_count() == 0:
+		return
+	var scroll := margin.get_child(0)
+	if scroll.get_child_count() == 0:
+		return
+	var vbox := scroll.get_child(0) as VBoxContainer
+	if vbox == null:
+		return
+	vbox.add_theme_constant_override("separation", 2 if compact else 8)
+	if _tower_stats_label != null:
+		_tower_stats_label.visible = not compact
+	var button_h: float = 40.0 if compact else _LAYOUT.min_touch_height(false)
+	for btn in [_base_upg_btn, _sell_btn, _target_btn]:
+		if btn is Button:
+			btn.custom_minimum_size.y = button_h
+	for btn in _path_upg_btns:
+		if btn is Button:
+			btn.custom_minimum_size.y = button_h
+
 func _layout_tower_panel(selected: Tower) -> void:
 	if _tower_panel == null:
 		return
@@ -955,13 +997,37 @@ func _layout_tower_panel(selected: Tower) -> void:
 	# strip. A fixed 168px panel overlapped the shop strip on 320-360px-tall
 	# phone landscapes (measured panel bottom 292 vs shop top 204).
 	var hard_room: float = shop_y - top_limit - 12.0
-	if hard_room < 96.0:
-		# Not enough vertical room for a usable panel: hide it rather than
-		# drawing controls on top of the shop. Selection still works; the player
-		# can use the shop strip and the upgrade affordances there.
-		_tower_panel.visible = false
+	# Full tower-panel content is about 180px. Below that the sell row falls
+	# out of the viewport even when the panel itself clears the shop.
+	if hard_room < 180.0:
+		# A hidden panel made upgrade/sell unreachable: the shop strip does not
+		# carry those actions. On short landscapes, dock a scrollable panel in
+		# the lower band and let the shop yield until the tower is deselected.
+		if selected == null:
+			_compact_tower_panel = false
+			_configure_tower_panel_density(false)
+			_tower_panel.visible = false
+			# PanelContainer snaps back to its content minimum, so park that
+			# rect fully above the shop instead of claiming a zero size.
+			var parked: Vector2 = _tower_panel.get_combined_minimum_size()
+			_tower_panel.position = Vector2(margin_l, shop_y - parked.y)
+			_tower_panel.size = parked
+			return
+		_compact_tower_panel = true
+		_configure_tower_panel_density(true)
+		_tower_panel.visible = true
+		var compact_w: float = minf(520.0, maxf(240.0, viewport.x - margin_l - margin_r))
+		var compact_h: float = maxf(140.0, viewport.y - bottom - top_limit - 4.0)
+		var compact_size := Vector2(compact_w, compact_h)
+		_LAYOUT.apply_modal(_tower_panel, Rect2(Vector2(margin_l, top_limit), compact_size))
+		_THEME.apply_glass_panel(_tower_panel)
+		if _tower_panel.material is ShaderMaterial:
+			_tower_panel.material.set_shader_parameter("panel_size", compact_size)
 		return
+	_compact_tower_panel = false
+	_configure_tower_panel_density(false)
 	_tower_panel.visible = true
+	_tower_panel.custom_minimum_size = Vector2(300.0, 120.0)
 	var panel_h: float = 220.0
 	if _LAYOUT.is_short_height(viewport) or _LAYOUT.is_phone_ultrawide(viewport):
 		panel_h = 168.0
@@ -1045,6 +1111,7 @@ func _process(_delta: float) -> void:
 		view_state.confirm_sell = false
 	if view_state.confirm_quit and now_ms - _quit_confirm_start_ms > 4000:
 		view_state.confirm_quit = false
+		_quit_leave_unsaved = false
 
 	# Detect life loss for screen-space feedback.
 	if game_state.lives < _prev_lives:
@@ -1146,7 +1213,7 @@ func _update_hud(now_ms: int) -> void:
 	_msg_label.text = toast if toast != "" else game_state.last_message
 
 	if _shop_scroll != null:
-		_shop_scroll.visible = not blocking_menu_visible
+		_shop_scroll.visible = not blocking_menu_visible and not _compact_tower_panel
 	elif _shop_bar != null:
 		_shop_bar.visible = not blocking_menu_visible
 
@@ -1165,18 +1232,20 @@ func _update_hud(now_ms: int) -> void:
 	# Tower panel
 	var was_panel_hidden: bool = not _tower_panel.visible
 	_tower_panel.visible = sel != null
+	if sel == null:
+		_compact_tower_panel = false
 	if sel != null:
 		if was_panel_hidden:
 			_base_upg_btn.grab_focus()
 		_layout_tower_panel(sel)
 		var pnames := ["Top","Middle","Bottom"]
 		_tower_name_label.text = "%s  Lv.%d" % [sel.tower_name, sel.level]
-		_tower_stats_label.text = "⚔ %d  ◎ %d  ⏱ %dms" % [sel.get_effective_damage(now_ms), int(sel.effective_range()), sel.effective_cooldown()]
+		_tower_stats_label.text = "⚔ %d  ◎ %d  ⏱ %dms" % [sel.get_effective_damage(game_state.sim_now()), int(sel.effective_range()), sel.effective_cooldown()]
 
 		# Base Upgrade Delta
 		if sel.level < 5:
 			var base_cost: int = sel.base_upgrade_cost()
-			var cur_dmg := sel.get_effective_damage(now_ms)
+			var cur_dmg := sel.get_effective_damage(game_state.sim_now())
 			var next_dmg := int(float(sel.base_damage) * pow(1.15, float(sel.level)))
 			var d_dmg := next_dmg - int(float(sel.base_damage) * pow(1.15, float(sel.level-1)))
 			_base_upg_btn.text = "UPGRADE (%s) [ ⚔️ +%d ]" % [_BRAND.credits_amount_suffix(base_cost), d_dmg]
@@ -1610,20 +1679,38 @@ func _on_restart_pressed() -> void:
 
 func _on_quit_pressed() -> void:
 	var now_ms: int = Time.get_ticks_msec()
+	if view_state.confirm_quit and now_ms - _quit_confirm_start_ms > 4000:
+		view_state.confirm_quit = false
+		_quit_leave_unsaved = false
 	if not view_state.confirm_quit:
 		view_state.confirm_quit = true
+		_quit_leave_unsaved = false
 		_quit_confirm_start_ms = now_ms
-		view_state.show_toast("Tap Quit again to abandon the run. Progress is banked.", now_ms, 1600)
+		view_state.show_toast("Tap Quit again to leave this run.", now_ms, 1600)
 		return
-	view_state.confirm_quit = false
+	if _quit_leave_unsaved:
+		_leave_run_to_menu()
+		return
 	# Bank a partial run once, and only if at least one wave was survived —
 	# otherwise a start-and-quit tap pair would farm RP. The end screen records
 	# a completed run separately; never double-record the same run.
 	if not _run_recorded and game_state.stat_waves_survived > 0:
-		Progression.record_run(game_state, game_state.map_id, true)
+		var abandon_result: Dictionary = Progression.record_run(game_state, game_state.map_id, true)
+		if abandon_result.get("save_failed", false):
+			_quit_leave_unsaved = true
+			_quit_confirm_start_ms = now_ms
+			view_state.show_toast("Rewards were not saved. Tap Quit again to leave anyway.", now_ms, 2200)
+			return
 		_run_recorded = true
+	_leave_run_to_menu()
+
+func _leave_run_to_menu() -> void:
+	view_state.confirm_quit = false
+	_quit_leave_unsaved = false
 	# A stale result must not leak into a later EndScreen after an abandon.
-	Progression.pending_end_stats = {}
+	# A failed save keeps its pending retry on Progression; it is not a result card.
+	if not Progression.has_pending_run():
+		Progression.pending_end_stats = {}
 	game_state.paused = false
 	_fade_to_scene("res://scenes/MenuScreen.tscn")
 
@@ -1693,23 +1780,36 @@ func _shop_affordable(ttype: String) -> bool:
 	return false
 
 func _on_shop_btn_down(ttype: String) -> void:
-	# Activate placement immediately on button-down so the ghost tracks drag gestures.
-	# button_down fires on press; if the user simply clicks without dragging, pressed
-	# fires on release and _on_shop_pressed re-enters placement (harmless) and shows the hint.
+	# Arm on press so a drag can track the ghost. enter_placement() toggles off
+	# when the same type is already armed, and a click also emits pressed, so
+	# calling it from both signals cancelled every shop click. A repeat press
+	# is remembered and cancelled by pressed instead.
 	if not _shop_affordable(ttype):
+		_shop_repeat_click = false
 		return
+	if view_state.placement_active and view_state.placement_tower_type == ttype:
+		_shop_repeat_click = true
+		return
+	_shop_repeat_click = false
 	view_state.enter_placement(ttype)
 	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
 	view_state.placement_ghost_valid = false
 
 func _on_shop_pressed(ttype: String) -> void:
-	# Fires only on a clean click (no drag). Placement already active from button_down;
-	# just re-confirm the type and show the placement hint.
+	# Clean click (release still over the button). Keyboard accept reaches here
+	# without button_down, so it still has to arm placement itself.
 	if not _shop_affordable(ttype):
+		_shop_repeat_click = false
 		return
-	view_state.enter_placement(ttype)
-	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
-	view_state.placement_ghost_valid = false
+	if _shop_repeat_click:
+		_shop_repeat_click = false
+		view_state.exit_placement()
+		view_state.show_toast("Placement cancelled.", Time.get_ticks_msec(), 700)
+		return
+	if not view_state.placement_active or view_state.placement_tower_type != ttype:
+		view_state.enter_placement(ttype)
+		view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
+		view_state.placement_ghost_valid = false
 	var mode_text: String = "Tap the map to place." if view_state.placement_mode == "drop" else "Drag or tap the map to place."
 	view_state.show_toast(mode_text, Time.get_ticks_msec(), 1000)
 
@@ -1834,7 +1934,10 @@ func _on_run_ended() -> void:
 	else:
 		JuiceManager.play(JuiceManager.SFX.GAME_OVER)
 	var run_result = Progression.record_run(game_state, game_state.map_id)
-	_run_recorded = true
+	var save_failed: bool = run_result is Dictionary and bool(run_result.get("save_failed", false))
+	# Only a committed profile may be treated as recorded. A failed write stays
+	# retryable and must not be described as banked.
+	_run_recorded = not save_failed
 	var rp: int = run_result.get("rp", 0) if run_result is Dictionary else int(run_result)
 	Progression.pending_end_stats = {
 		"rp_earned":               rp,
@@ -1848,5 +1951,7 @@ func _on_run_ended() -> void:
 		"gold_earned":             game_state.stat_gold_earned,
 		"newly_unlocked_variants": run_result.get("newly_unlocked_variants", []) if run_result is Dictionary else [],
 		"milestone_deltas":        run_result.get("milestone_deltas", []) if run_result is Dictionary else [],
+		"save_failed":             save_failed,
+		"persisted":               not save_failed,
 	}
 	get_tree().change_scene_to_file("res://scenes/EndScreen.tscn")

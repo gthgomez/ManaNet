@@ -48,8 +48,10 @@ var _pool_started_ms: Array[int] = []
 var _sfx_enabled: bool = true
 var _haptics_enabled: bool = true
 var _loaded_streams: Dictionary = {}   # SFX -> AudioStream cache
+var _created_sfx_bus: bool = false
 
 func _ready() -> void:
+	tree_exiting.connect(_release_audio)
 	_ensure_sfx_bus()
 	for _i in _POOL_SIZE:
 		var p := AudioStreamPlayer.new()
@@ -67,6 +69,25 @@ func _ensure_sfx_bus() -> void:
 	var idx := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(idx, "SFX")
 	AudioServer.set_bus_send(idx, "Master")
+	_created_sfx_bus = true
+
+func stop_all() -> void:
+	_release_audio()
+
+func _release_audio() -> void:
+	# Stop while the audio server is still running. Doing this only inside
+	# tree_exiting is too late: Godot has already detached the Ogg playback.
+	for p in _pool:
+		if not is_instance_valid(p):
+			continue
+		p.stop()
+		p.stream = null
+	_loaded_streams.clear()
+	if _created_sfx_bus:
+		var idx := AudioServer.get_bus_index("SFX")
+		if idx >= 0:
+			AudioServer.remove_bus(idx)
+		_created_sfx_bus = false
 
 func configure_from_progression() -> void:
 	# Autoloads are absent during headless --script tooling; never crash there.
