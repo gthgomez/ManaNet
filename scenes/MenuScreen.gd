@@ -15,6 +15,10 @@ const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 @onready var _settings_btn: Button  = $VBox/ActionCol/Row2/SettingsBtn
 @onready var _bg: ColorRect         = $BG
 
+# Product wordmark (text), shown above the locked legacy logo asset.
+var _product_name: Label = null
+var _product_tagline: Label = null
+
 # Gap 1 — ambient particles
 var _particles: CPUParticles2D = null
 # Gap 2 — glass panel behind VBox
@@ -59,6 +63,7 @@ func _ready() -> void:
 
 	# VBox content additions
 	_add_title_rule()       # Gap 5
+	_add_product_wordmark() # ManaNet identity above the locked logo asset
 	_add_last_run_label()   # Previous pass + Gap 6
 	_add_play_context_label() # Gap 8
 
@@ -114,6 +119,23 @@ func _apply_visuals() -> void:
 
 	_THEME.apply_label(_subtitle, "muted")
 	_subtitle.text = _BRAND.FANTASY_SUBTITLE
+	# The shipped logo asset still reads "Tactical Tower Defense" and is locked.
+	# Show the real product wordmark above it so the first impression is ManaNet.
+	if _product_name != null:
+		_product_name.text = _BRAND.PRODUCT_NAME
+		_THEME.apply_label(_product_name, "heading")
+		_product_name.add_theme_font_size_override("font_size", 24 if viewport_is_compact() else 40)
+		_product_name.add_theme_color_override("font_color", _THEME.CYAN)
+		_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_product_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_product_name.custom_minimum_size = Vector2(0.0, 34.0 if viewport_is_compact() else 46.0)
+	if _product_tagline != null:
+		_product_tagline.text = _BRAND.PRODUCT_TAGLINE
+		_THEME.apply_label(_product_tagline, "muted")
+		_product_tagline.add_theme_font_size_override("font_size", 10 if viewport_is_compact() else 12)
+		_product_tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_product_tagline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_product_tagline.custom_minimum_size = Vector2(0.0, 14.0 if viewport_is_compact() else 18.0)
 
 	_THEME.apply_button(_play_btn, "primary")
 	_THEME.apply_button(_base_btn, "secondary")
@@ -150,6 +172,12 @@ func _apply_visuals() -> void:
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
 
+## Compact metrics are needed on short or narrow screens. Shared so the visual
+## styling and the box layout cannot disagree about which mode is active.
+func viewport_is_compact() -> bool:
+	var vp: Vector2 = _LAYOUT.viewport_size(self)
+	return vp.y < 480.0 or vp.x < 640.0
+
 func _apply_layout() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
 	var margin_h: float = _LAYOUT.edge_margin(viewport)
@@ -161,17 +189,25 @@ func _apply_layout() -> void:
 	# Compact metrics on short screens. A 320px-tall phone landscape cannot fit
 	# an 84px title + 32px separations + 64px play button (measured bottom 348 in
 	# a 320px viewport), so the whole column must shrink, not just its box.
-	var compact: bool = viewport.y < 480.0 or viewport.x < 640.0
-	var title_h: float = (44.0 if compact else (110.0 if viewport.x >= 1200.0 else 84.0))
-	var sep: int = 10 if compact else 32
-	var play_h: float = 52.0 if compact else 64.0
-	var row2_h: float = 36.0 if compact else _LAYOUT.TOUCH_HEIGHT
+	var compact: bool = viewport_is_compact()
+	var title_h: float = (32.0 if compact else (110.0 if viewport.x >= 1200.0 else 84.0))
+	var sep: int = 6 if compact else 32
+	var play_h: float = 46.0 if compact else 64.0
+	var row2_h: float = 34.0 if compact else _LAYOUT.TOUCH_HEIGHT
 
-	# Height must also respect the viewport and the real content minimum.
-	var content_min: float = title_h + 24.0 + float(sep * 3) + play_h + row2_h
-	var avail_h: float = viewport.y - _LAYOUT.top_margin(viewport) - _LAYOUT.bottom_margin(viewport) - 16.0
-	var height: float = clampf(viewport.y * 0.72, content_min, 600.0)
-	height = maxf(minf(height, avail_h), minf(content_min, avail_h))
+	# Height must also respect the viewport and the real content minimum. The
+	# minimum must include the wordmark + tagline rows that now sit above the
+	# logo; omitting them let the column overflow and overlap the showcase.
+	var wordmark_h: float = 30.0 if compact else 46.0
+	var tagline_h: float = 12.0 if compact else 18.0
+	var content_min: float = wordmark_h + tagline_h + title_h + 24.0 + float(sep * 4) + play_h + row2_h
+	var avail_h: float = viewport.y - _LAYOUT.top_margin(viewport) - _LAYOUT.bottom_margin(viewport) - 12.0
+	# Clamp the column to what the viewport can actually show. If even the
+	# content minimum does not fit (320px-tall phone landscape), the column gets
+	# the available height and its own contents are compacted above.
+	var height: float = clampf(viewport.y * 0.72, minf(content_min, avail_h), 600.0)
+	height = minf(height, avail_h)
+	height = maxf(height, 1.0)
 	var x: float      = (viewport.x - width) * 0.5
 	var top_min: float    = _LAYOUT.top_margin(viewport) + 32.0
 	var bottom_min: float = _LAYOUT.bottom_margin(viewport) + 24.0
@@ -238,12 +274,18 @@ func _apply_layout() -> void:
 		var ts_x    := (viewport.x - total_w) * 0.5
 		var desired_y := y + height + 14.0
 		var max_y := viewport.y - bottom - ts_sz - (34.0 if compact_showcase else 24.0)
-		var ts_y: float = minf(desired_y, max_y)
+		# minf() used to pin the row to max_y even when that was *above* the
+		# column's bottom, so the showcase drew behind the action buttons. Only
+		# show it when there is genuine room beneath the column.
+		var has_room: bool = desired_y <= max_y
 		_tower_base_y.resize(count)
 		for i in count:
+			_tower_showcase[i].visible = has_room
+			if not has_room:
+				continue
 			_tower_showcase[i].size     = Vector2(ts_sz, ts_sz)
-			_tower_showcase[i].position = Vector2(ts_x + i * (ts_sz + ts_gap), ts_y)
-			_tower_base_y[i]            = ts_y
+			_tower_showcase[i].position = Vector2(ts_x + i * (ts_sz + ts_gap), desired_y)
+			_tower_base_y[i]            = desired_y
 
 	# Gap 1 — center particles origin and expand emission rect to full screen
 	if _particles:
@@ -343,6 +385,22 @@ func _on_mute_toggle() -> void:
 	JuiceManager.configure_from_progression()
 
 # ── Gap 5: Title decorative gold rule ─────────────────────────────────────────
+
+# ── Product wordmark ──────────────────────────────────────────────────────────
+# The shipped title_logo.png still reads "Tactical Tower Defense" and is
+# asset-locked, so the menu presents the real product name as text above it.
+func _add_product_wordmark() -> void:
+	_product_name = Label.new()
+	_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_product_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vbox.add_child(_product_name)
+	_vbox.move_child(_product_name, _title.get_index())
+
+	_product_tagline = Label.new()
+	_product_tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_product_tagline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vbox.add_child(_product_tagline)
+	_vbox.move_child(_product_tagline, _title.get_index() + 1)
 
 func _add_title_rule() -> void:
 	_title_rule = ColorRect.new()

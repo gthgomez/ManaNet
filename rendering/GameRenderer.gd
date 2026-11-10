@@ -428,6 +428,7 @@ func _draw() -> void:
 	_draw_path(shake)
 	_draw_range_circle(now_ms, shake)
 	_draw_projectile_trails(shake)
+	_draw_tower_base_glow(shake)
 	_draw_portals(now_ms, shake)
 	_draw_effects(now_ms, shake)
 	# Enemies and towers are drawn by MultiMeshInstance2D nodes (no _draw needed)
@@ -560,6 +561,24 @@ func _draw_range_circle(now_ms: int, shake: Vector2) -> void:
 		var dot_p := p + Vector2(cos(angle), sin(angle)) * r
 		draw_circle(dot_p, 3.0, Color.WHITE)
 		draw_circle(dot_p, 2.0, col)
+
+# --- 3b. Tower base glow (readability) ---
+
+## Tower chassis art is dark navy (#15263b / #1a3148) on a #0c0e1f field, so a
+## placed tower was nearly invisible at its ~48px draw size. This paints a soft
+## faction-coloured pad beneath each tower's base, giving the silhouette a
+## readable edge without altering or replacing the shipped art.
+func _draw_tower_base_glow(shake: Vector2) -> void:
+	if game_state == null:
+		return
+	for tower in game_state.towers:
+		var c: Vector2 = tower.pos + shake
+		var r: float = float(tower.radius) + 3.0
+		var tint: Color = tower.variant_tint if tower.variant_tint.a > 0.0 else tower.color
+		# Soft outer halo, then a brighter inner ring at the chassis edge.
+		draw_circle(c, r * 1.45, Color(tint.r, tint.g, tint.b, 0.10))
+		draw_circle(c, r * 1.05, Color(tint.r, tint.g, tint.b, 0.16))
+		draw_arc(c, r + 1.0, 0.0, TAU, 28, Color(tint.r, tint.g, tint.b, 0.55), 1.5, true)
 
 # --- 4. Effects ---
 

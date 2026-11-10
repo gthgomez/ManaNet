@@ -6,6 +6,12 @@ extends RefCounted
 
 const FANTASY_SUBTITLE := "Hold the grid for 15 waves. Patch smart. Deploy wisely."
 
+## Product wordmark. The shipped title_logo.png still reads "Tactical Tower
+## Defense" and is asset-locked (AGES: no overwriting shipped sprites without a
+## human promote step), so the menu shows the real product name as text.
+const PRODUCT_NAME := "MANANET"
+const PRODUCT_TAGLINE := "CYBER-ARCANA NETWORK DEFENSE"
+
 const CURRENCY_RUN := "Credits"
 const CURRENCY_META := "Shards"
 const CORE_RESOURCE := "Integrity"

@@ -861,15 +861,18 @@ func _apply_responsive_layout() -> void:
 	if _instruction_banner != null:
 		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin_l - margin_r))
 		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport) else 52.0
-		# Never let the banner grow taller than its reserved band. On narrow
-		# portrait screens the label's static 400px width minimum forced 3 lines
-		# and a 75-79px box, covering the playfield. Clear the label's width floor
-		# and clip so the banner keeps its reserved height at every width.
-		banner_h = minf(banner_h, 60.0)
+		# The banner must never grow past its reserved band. On narrow portrait
+		# screens the text wraps, so scale the font down until it fits in at most
+		# two lines and clamp the box. (Do NOT use clip_text: it clips vertically
+		# too and collapses the label to 1px.)
 		var banner_font: int = int(clampf(viewport.y * 0.032, 14.0, 20.0))
+		if banner_w < 340.0:
+			banner_font = 12
+		elif banner_w < 420.0:
+			banner_font = 13
+		banner_h = minf(banner_h, 60.0)
 		_instruction_label.add_theme_font_size_override("font_size", banner_font)
-		_instruction_label.custom_minimum_size = Vector2.ZERO
-		_instruction_label.clip_text = true
+		_instruction_label.custom_minimum_size = Vector2(maxf(80.0, banner_w - 28.0), 0)
 		_instruction_banner.custom_minimum_size = Vector2.ZERO
 		_LAYOUT.apply_modal(_instruction_banner, Rect2(Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
 
