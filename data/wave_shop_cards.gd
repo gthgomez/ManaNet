@@ -28,7 +28,7 @@ const CARDS: Array = [
 	{
 		"id":    "slow_wave",
 		"label": "Entropy Field",
-		"desc":  "Next wave enemies spawn 20% slower.",
+		"desc":  "Next wave's enemies move 20% slower when they spawn.",
 		"tag":   "control",
 		"icon":  "🌀",
 	},
@@ -63,7 +63,7 @@ const CARDS: Array = [
 	{
 		"id":    "rapid_spawn",
 		"label": "Prep Time",
-		"desc":  "Spawn interval +40% slower this wave (more time to build).",
+		"desc":  "Next wave's spawn interval is 40% longer (more time before each enemy).",
 		"tag":   "control",
 		"icon":  "⏳",
 	},

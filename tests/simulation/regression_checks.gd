@@ -43,6 +43,7 @@ func _init() -> void:
 	_test_wave_shop_offers_authoritative()
 	_test_wave_shop_duplicate_action_rejected()
 	_test_sudden_death_excludes_healing_everywhere()
+	_test_card_effects_match_descriptions()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass_count)
 	print("FAIL: %d" % _fail_count)
@@ -706,3 +707,60 @@ func _test_sudden_death_excludes_healing_everywhere() -> void:
 	_check(not has_heal, "wave-5 Sudden Death shop contains no healing card")
 	_check(offers.size() == 3, "milestone shop still offers 3 cards (got %d)" % offers.size())
 	state.dispose()
+
+# --- Card/rules truthfulness (Workstream C4) --------------------------------
+
+func _test_card_effects_match_descriptions() -> void:
+	var state := _make_state()
+	state.wave_shop_pending = true
+	state.wave_ready = false
+
+	# Entropy Field claims enemies MOVE slower (not spawn slower). Verify the
+	# effect is a movement-speed multiplier applied at spawn.
+	state._wave_shop_offers = [{"id": "slow_wave"}]
+	state.apply_action({"type": "wave_shop_pick", "card_id": "slow_wave"}, 1000)
+	_check(is_equal_approx(state._ws_next_spawn_speed_mult, 0.80),
+		"Entropy Field sets an 80% spawn movement-speed multiplier (matches desc)")
+	# The description says the card affects the NEXT wave: picking it clears the
+	# current multiplier so a second application is not silently doubled.
+	_check(is_equal_approx(state._ws_spawn_interval_mult, 1.0),
+		"Entropy Field does not also change the spawn interval")
+	state.dispose()
+
+	# Prep Time claims a longer spawn interval, not slower enemies.
+	var state2 := _make_state()
+	state2.wave_shop_pending = true
+	state2.wave_ready = false
+	state2._wave_shop_offers = [{"id": "rapid_spawn"}]
+	state2.apply_action({"type": "wave_shop_pick", "card_id": "rapid_spawn"}, 1000)
+	_check(is_equal_approx(state2._ws_spawn_interval_mult, 1.40),
+		"Prep Time extends the spawn interval by 40% (matches desc)")
+	_check(is_equal_approx(state2._ws_next_spawn_speed_mult, 1.0),
+		"Prep Time does not also slow enemy movement")
+	state2.dispose()
+
+	# Windfall's credit amount must match its wave-band description.
+	for wave_band in [[1, 45], [6, 70], [11, 95]]:
+		var s := _make_state()
+		s.wave = int(wave_band[0])
+		s.wave_shop_pending = true
+		s.wave_ready = false
+		s._wave_shop_offers = [{"id": "windfall"}]
+		var before: int = s.gold
+		s.apply_action({"type": "wave_shop_pick", "card_id": "windfall"}, 1000)
+		_check(s.gold - before == int(wave_band[1]),
+			"Windfall at wave %d grants %d credits (got %d)"
+				% [wave_band[0], wave_band[1], s.gold - before])
+		s.dispose()
+
+	# Emergency Protocol claims +2 Integrity.
+	var s3 := _make_state()
+	s3.wave = 5
+	s3.wave_shop_pending = true
+	s3.wave_ready = false
+	s3._wave_shop_offers = [{"id": "emergency_protocol"}]
+	var lives_before: int = s3.lives
+	s3.apply_action({"type": "wave_shop_pick", "card_id": "emergency_protocol"}, 1000)
+	_check(s3.lives - lives_before == 2,
+		"Emergency Protocol grants exactly +2 Integrity (got %d)" % (s3.lives - lives_before))
+	s3.dispose()
