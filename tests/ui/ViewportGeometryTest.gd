@@ -210,7 +210,39 @@ func _check_menu_and_end(label: String, w: int, h: int) -> void:
 			and play_rect.position.x + play_rect.size.x <= vp.x + 1.0
 			and play_rect.position.y + play_rect.size.y <= vp.y + 1.0,
 		"%s: menu play button is on-screen" % label)
+	# Every action button must fit; the column used to overlap the buttons.
+	for btn in [menu._base_btn, menu._settings_btn]:
+		var br: Rect2 = btn.get_global_rect()
+		_check(br.position.y + br.size.y <= vp.y + 1.0,
+			"%s: '%s' button stays on-screen (bottom %.0f <= %.0f)"
+				% [label, btn.text, br.position.y + br.size.y, vp.y])
 	await _unmount(menu)
+
+	# Map select: on screens wide enough for three cards they must all be
+	# visible. On narrow screens the card row is inside a ScrollContainer by
+	# design, so horizontal scrolling is the supported behaviour — assert that a
+	# scrollbar is available rather than pretending the cards fit.
+	var map_sel: Node = await _mount("res://scenes/MapSelectScreen.tscn")
+	await get_tree().process_frame
+	var mvp: Vector2 = map_sel.get_viewport_rect().size
+	var max_right: float = 0.0
+	var cards: int = 0
+	for child in map_sel._card_container.get_children():
+		if child is PanelContainer:
+			cards += 1
+			var r: Rect2 = child.get_global_rect()
+			max_right = maxf(max_right, r.position.x + r.size.x)
+	_check(cards == 3, "%s: map select shows 3 maps (got %d)" % [label, cards])
+	if w >= 900:
+		_check(max_right <= mvp.x + 1.0,
+			"%s: all map cards fit horizontally at this width (right %.0f <= %.0f)"
+				% [label, max_right, mvp.x])
+	else:
+		var scrollable: bool = map_sel._scroll.horizontal_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED
+		_check(scrollable,
+			"%s: narrow map row is horizontally scrollable (right %.0f > %.0f by design)"
+				% [label, max_right, mvp.x])
+	await _unmount(map_sel)
 
 	Progression.pending_end_stats = {
 		"won": true, "waves": 15, "perfect_waves": 2, "lives": 7, "map_id": 0,
