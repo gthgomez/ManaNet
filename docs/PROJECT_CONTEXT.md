@@ -66,14 +66,29 @@ Parallel polish with SimLife (Ship B). Prefer open polish items in `IMPROVEMENT_
 
 Run from the repository root.
 
-- Full verification (parse gate + 82-check audit, exits nonzero on failure): `python3 tools/verify_game.py`
+- Full verification, every gate (parse, audit, simulation regression, UI
+  regression, player journey, viewport geometry, speed parity, save fault
+  injection, full-run qualification, verifier contract, smoke): `python3
+  tools/verify_game.py --all`. Every child process runs with an isolated
+  profile, so no gate can read or write a real player save.
+- Full audit only (parse gate + check audit): `python3 tools/verify_game.py`
 - Headless simulation: `godot --headless -s scripts/SimulationBot.gd`
 - Benchmark (live wave, p50/p95/p99 + liveness assertion): `godot --headless -s scripts/benchmark.gd`
 - Simulation regression checks: `godot --headless -s tests/simulation/regression_checks.gd`
-- UI regression harness (hermetic — backs up/restores the user save): `godot --headless tests/ui/UIRegressionTest.tscn`
+- Simulation speed parity (1x/2x/3x at equal simulated time): `godot --headless -s tests/simulation/speed_parity.gd`
+- Save fault injection (corrupt/failed-write/version/quarantine): `godot --headless -s tests/simulation/save_faults.gd`
+- Full 15-wave qualification (all maps, all modifiers, strategies): `godot --headless -s tests/simulation/full_run.gd`
+- Economy probe (prints wave-by-wave resource curves): `godot --headless -s tests/simulation/economy_probe.gd`
+- UI regression harness: `godot --headless tests/ui/UIRegressionTest.tscn`
+- Player journey through real scenes: `godot --headless tests/ui/PlayerJourneyTest.tscn`
+- Viewport geometry across desktop/mobile sizes: `godot --headless tests/ui/ViewportGeometryTest.tscn`
 - Early-run smoke test (exits after wave 3; not a 15-wave balance test): `godot --headless scenes/SimTest.tscn`
 - Verifier exit-status contract: `python3 tests/verifier_exit/test_verifier_exit.py`
 - Run locally: Godot 4.6 editor playback
+
+Save isolation: set `MANANET_PROFILE_PATH` to redirect Progression persistence
+(including autoload startup) away from the player profile. `verify_game.py`
+does this automatically for every gate.
 
 If the `godot` executable is not on `PATH`, report verification as blocked and include the command you would run.
 
