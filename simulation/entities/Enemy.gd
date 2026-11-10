@@ -36,6 +36,15 @@ var vulnerable_mult: float = 1.0
 var burn_accum: float = 0.0    # fractional DoT carry so damage is frame-rate independent
 var regen_accum: float = 0.0   # fractional regen carry (boss regenerator)
 
+# Damage attribution — who last hurt this enemy, and who owns the burn DoT.
+# Kills are credited to the actual damage source (direct hit, splash, chain, or
+# burn), not merely to whatever tower's attack happened to notice the death.
+var last_damage_type: String = ""
+var burn_source_type: String = ""
+## Set once when this enemy's death has been processed, so death effects,
+## rewards, and killed-counts can never double-apply in one run.
+var death_processed: bool = false
+
 # String tag used for death-rattle particle dispatch
 var type_name: String = "Enemy"
 

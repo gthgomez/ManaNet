@@ -36,6 +36,13 @@ func _init() -> void:
 	_test_stealth_vision_paths()
 	_test_cannon_can_target_flying()
 	_test_incompatible_modifiers_rejected()
+	_test_kill_attribution_direct_and_splash()
+	_test_kill_attribution_burn()
+	_test_kill_not_double_counted()
+	_test_vulnerability_expiry_contract()
+	_test_wave_shop_offers_authoritative()
+	_test_wave_shop_duplicate_action_rejected()
+	_test_sudden_death_excludes_healing_everywhere()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass_count)
 	print("FAIL: %d" % _fail_count)
@@ -258,10 +265,11 @@ func _test_large_time_gaps_are_clamped() -> void:
 	state.dispose()
 
 func _test_flame_burst_density_is_tick_phase_independent() -> void:
-	# Same simulated burn duration from two different wall-clock phases must
-	# produce identical flame-burst cadence (old now_ms % 250 gate failed this).
-	# Counts emission events via last_flame_burst_ms transitions — particle
-	# survival is lifespan-random and therefore not a usable signal.
+	# Flame bursts are gated on the authoritative simulation clock, so the same
+	# simulated burn duration must produce the same burst cadence regardless of
+	# the wall-clock phase the run happens to start at. (The old now_ms % 250
+	# gate failed this; the interim wall-clock gate coupled it to the caller's
+	# timestamp.) Emissions are reported in sim-clock ms.
 	var results := []
 	for offset in [123456, 123456 + 137]:
 		var state := _make_straight_state()
@@ -273,18 +281,19 @@ func _test_flame_burst_density_is_tick_phase_independent() -> void:
 		enemy.burn_until = 999999999
 		var emissions: Array = []
 		var last_seen: int = -999999
-		for i in range(63):   # covers [offset, offset + 992] ms of burn
+		for i in range(63):   # covers ~992 ms of burn
 			state.update_simulation(offset + i * 16)
 			if enemy.last_flame_burst_ms != last_seen:
-				emissions.append(enemy.last_flame_burst_ms - offset)
+				emissions.append(enemy.last_flame_burst_ms)
 				last_seen = enemy.last_flame_burst_ms
 		results.append(emissions)
 		state.dispose()
 	_check(results[0].size() == 4 and results[1].size() == 4,
-		"flame bursts fire every ~250 ms regardless of clock phase (4 in 1000 ms; got %d vs %d)"
+		"flame bursts fire every ~250 sim ms regardless of wall-clock phase (4 in 1000 ms; got %d vs %d)"
 			% [results[0].size(), results[1].size()])
 	_check(results[0] == results[1],
-		"flame burst cadence identical across phases %s vs %s" % [str(results[0]), str(results[1])])
+		"flame burst cadence identical across wall-clock phases %s vs %s"
+			% [str(results[0]), str(results[1])])
 
 # --- Damage-over-time / regen integration ------------------------------------
 
@@ -362,7 +371,7 @@ func _test_projectile_swept_hit_at_high_speed() -> void:
 	state.enemies.append(target)
 	var tower := TowerScript.new(Vector2(100, 300), "archer", 1)
 	tower.game_state = state
-	var projectile := ProjectileScript.new(Vector2(100, 300), target, tower, 10, 100000, 0, 3.0)
+	var projectile := ProjectileScript.new(Vector2(100, 300), target, tower, 10, 100000, 0)
 	state.projectiles.append(projectile)
 	# A 3x-speed step moves ~81px; the swept segment must register the hit even
 	# though the end point can leap past the target's hit radius.
@@ -416,22 +425,25 @@ func _test_dead_enemy_does_not_leak() -> void:
 	state.dispose()
 
 func _test_spawn_pacing_scales_with_speed() -> void:
-	var slow := _make_state()
-	slow.spawn_interval_ms = 600
-	slow.wave_enemy_total = 100
-	slow.speed_multiplier = 1.0
-	slow.spawn_enemy(1000)
-	var slow_gap: int = slow.next_spawn_ms - 1000
-	var fast := _make_state()
-	fast.spawn_interval_ms = 600
-	fast.wave_enemy_total = 100
-	fast.speed_multiplier = 3.0
-	fast.spawn_enemy(1000)
-	var fast_gap: int = fast.next_spawn_ms - 1000
-	_check(absi(fast_gap - int(slow_gap / 3)) <= 1,
-		"3x speed scales spawn pacing to ~1/3 wall time (%d vs %d)" % [fast_gap, slow_gap])
-	slow.dispose()
-	fast.dispose()
+	# Spawn pacing is expressed in simulation time, so the sim-clock gap between
+	# spawns must be identical at every speed. Wall time then compresses by the
+	# speed multiplier automatically because the sim clock advances faster.
+	# (The previous contract divided the interval by speed on the wall clock,
+	# which is exactly the dual-time-model bug this refactor removes.)
+	var gaps: Dictionary = {}
+	for mult in [1.0, 2.0, 3.0]:
+		var st := _make_state()
+		st.spawn_interval_ms = 600
+		st.wave_enemy_total = 100
+		st.speed_multiplier = mult
+		st._sim_ms = 1000.0
+		st.spawn_enemy(1000)
+		gaps[mult] = st.next_spawn_ms - 1000
+		st.dispose()
+	_check(gaps[1.0] == 600, "1x spawn gap is the full interval (got %d)" % gaps[1.0])
+	_check(gaps[1.0] == gaps[2.0] and gaps[2.0] == gaps[3.0],
+		"2x and 3x use the same sim-clock spawn gap (1x=%d, 2x=%d, 3x=%d)"
+			% [gaps[1.0], gaps[2.0], gaps[3.0]])
 
 func _test_projectile_lifetime_is_bounded() -> void:
 	var state := _make_straight_state()
@@ -445,7 +457,7 @@ func _test_projectile_lifetime_is_bounded() -> void:
 	state.enemies.append(target)
 	var tower := TowerScript.new(Vector2(100, 300), "archer", 1)
 	tower.game_state = state
-	var projectile := ProjectileScript.new(Vector2(100, 300), target, tower, 10, -5000, 0, 1.0)
+	var projectile := ProjectileScript.new(Vector2(100, 300), target, tower, 10, -5000, 0)
 	state.projectiles.append(projectile)
 	state.update_simulation(0)
 	state.update_simulation(16)
@@ -502,3 +514,195 @@ func _test_incompatible_modifiers_rejected() -> void:
 	_check(prog._modifiers_compatible("mod_blitz", "mod_iron_economy"),
 		"compatible modifier pair is allowed")
 	prog.free()
+
+# --- Kill attribution (Workstream B3) ---------------------------------------
+
+func _test_kill_attribution_direct_and_splash() -> void:
+	var state := _make_state()
+	# Cannon with Siege splash (Top L1) kills a neighbor via splash only.
+	var cannon := TowerScript.new(Vector2(480.0, 420.0), "cannon", 1)
+	cannon.game_state = state
+	cannon.tracker.path_levels["Top"] = 1
+	var target := EnemyScript.new(state.path)
+	target.pos = Vector2(500, 500)
+	target.health = 10
+	var neighbor := EnemyScript.new(state.path)
+	neighbor.pos = Vector2(540, 500)
+	neighbor.health = 1          # dies to the 65% splash, not to the direct hit
+	state.enemies.append(target)
+	state.enemies.append(neighbor)
+	state.apply_hit(cannon, target, 100, 1000)
+	_check(state.stat_enemies_killed == 2, "direct hit + splash deaths both count (got %d)"
+		% state.stat_enemies_killed)
+	_check(int(state.stat_tower_kills_by_type.get("cannon", 0)) == 2,
+		"splash kills are credited to the cannon (got %d)"
+			% int(state.stat_tower_kills_by_type.get("cannon", 0)))
+	state.dispose()
+
+func _test_kill_attribution_burn() -> void:
+	# A mage applies burn, then an archer keeps attacking; the enemy dies to the
+	# burn tick and the kill must go to the mage.
+	var state := GameStateScript.new([Vector2(0, 300), Vector2(2000, 300)], {}, 0)
+	state.wave_ready = false
+	state.next_spawn_ms = 999999999
+	var mage := TowerScript.new(Vector2(100, 300), "mage", 1)
+	mage.game_state = state
+	mage.tracker.path_levels["Top"] = 1
+	var enemy := EnemyScript.new(state.path)
+	enemy.pos = Vector2(120, 300)
+	enemy.speed = 0.0
+	enemy.health = 400
+	enemy.max_health = 400
+	state.enemies.append(enemy)
+	# Apply a burn via a real mage hit.
+	state.apply_hit(mage, enemy, 10, 1000)
+	_check(enemy.burn_source_type == "mage", "burn is attributed to the mage that applied it")
+	# Force the enemy to die to its next burn tick.
+	enemy.health = 1
+	enemy.burn_dps = 1000
+	enemy.burn_until = 999999999
+	state.update_simulation(1000)
+	state.update_simulation(1016)
+	_check(state.stat_enemies_killed == 1, "burn death counts exactly one kill (got %d)"
+		% state.stat_enemies_killed)
+	_check(int(state.stat_tower_kills_by_type.get("mage", 0)) == 1,
+		"burn death is credited to the mage (got %d)"
+			% int(state.stat_tower_kills_by_type.get("mage", 0)))
+	_check(int(state.stat_tower_kills_by_type.get("archer", 0)) == 0,
+		"burn death is not credited to an unrelated tower")
+	state.dispose()
+
+func _test_kill_not_double_counted() -> void:
+	var state := _make_state()
+	var tower := TowerScript.new(Vector2(100, 100), "archer", 1)
+	tower.game_state = state
+	var enemy := EnemyScript.new(state.path)
+	enemy.health = 1
+	state.enemies.append(enemy)
+	state.apply_hit(tower, enemy, 500, 1000)
+	_check(enemy.death_processed, "death is marked processed on the killing hit")
+	var kills_after_hit: int = state.stat_enemies_killed
+	# A second hit on an already-dead enemy must be a no-op.
+	state.apply_hit(tower, enemy, 500, 1100)
+	_check(state.stat_enemies_killed == kills_after_hit,
+		"a second hit on a dead enemy does not add a kill (%d vs %d)"
+			% [state.stat_enemies_killed, kills_after_hit])
+	# The removal pass must not add another kill either.
+	state.update_simulation(1000)
+	state.update_simulation(1016)
+	_check(state.stat_enemies_killed == kills_after_hit,
+		"the dead-enemy removal pass does not double-count (%d vs %d)"
+			% [state.stat_enemies_killed, kills_after_hit])
+	state.dispose()
+
+# --- Status stacking (Workstream B4) ---------------------------------------
+
+func _test_vulnerability_expiry_contract() -> void:
+	var state := _make_state()
+	var strong := TowerScript.new(Vector2(100, 100), "mage", 1)
+	strong.tracker.path_levels["Bottom"] = 5      # 1.30x
+	var weak := TowerScript.new(Vector2(100, 100), "mage", 2)
+	weak.tracker.path_levels["Bottom"] = 1        # 1.06x
+	var target := EnemyScript.new(state.path)
+	target.health = 1000000
+	target.max_health = 1000000
+	state.enemies.append(target)
+
+	# Strong vulnerability, applied at t=1000, expires at t=3500.
+	state.apply_hit(strong, target, 100, 1000)
+	_check(is_equal_approx(target.vulnerable_mult, 1.30),
+		"strong vulnerability sets 1.30x (got %.2f)" % target.vulnerable_mult)
+
+	# After it expires, a WEAK application must not revive the 1.30x value.
+	state.apply_hit(weak, target, 100, 4000)
+	_check(is_equal_approx(target.vulnerable_mult, 1.06),
+		"an expired strong multiplier does not reactivate on a weak application (got %.2f)"
+			% target.vulnerable_mult)
+	var lost: int = 1000000 - target.health
+	# Both hits at base 100: first 130, second (weak) 106 => 236 total.
+	_check(lost == 236, "damage reflects the corrected vulnerability stack (got %d)" % lost)
+	state.dispose()
+
+# --- Wave-shop authority (Workstream C1) ------------------------------------
+
+func _test_wave_shop_offers_authoritative() -> void:
+	var state := _make_state()
+	state.wave_shop_pending = true
+	state.wave_ready = false
+	var offers: Array = state.get_wave_shop_offers()
+	_check(offers.size() == 3, "wave shop offers exactly 3 cards (got %d)" % offers.size())
+	var ids: Array = offers.map(func(c): return str(c.get("id", "")))
+	_check(ids.size() == 3 and not ids.has(""),
+		"every offered card has a real id %s" % str(ids))
+
+	# A card that exists in the catalogue but was NOT offered must be refused.
+	var not_offered := ""
+	for card in ["windfall", "life_recover", "dmg_wave", "slow_wave", "discount",
+			"frost_vanguard", "gold_wave", "expose", "rapid_spawn"]:
+		if not ids.has(card):
+			not_offered = card
+			break
+	if not_offered == "":
+		_check(true, "all standard cards were offered; skipping un-offered case")
+	else:
+		var gold_before: int = state.gold
+		var lives_before: int = state.lives
+		var res: Dictionary = state.apply_action(
+			{"type": "wave_shop_pick", "card_id": not_offered}, 1000)
+		_check(not res.get("success", true),
+			"a catalogue card that was not offered is rejected (%s)" % not_offered)
+		_check(state.gold == gold_before and state.lives == lives_before,
+			"a rejected un-offered card does not mutate economy")
+		_check(state.wave_shop_pending, "a rejected card leaves the shop pending")
+
+	# An offered card is accepted exactly once.
+	var chosen: String = ids[0]
+	var ok: Dictionary = state.apply_action({"type": "wave_shop_pick", "card_id": chosen}, 1000)
+	_check(ok.get("success", false), "an offered card is accepted (%s)" % chosen)
+	_check(not state.wave_shop_pending, "accepting a card closes the shop gate")
+	_check(state.get_wave_shop_offers().is_empty(), "offers are cleared after a pick")
+	state.dispose()
+
+func _test_wave_shop_duplicate_action_rejected() -> void:
+	var state := _make_state()
+	state.wave_shop_pending = true
+	state.wave_ready = false
+	var offers: Array = state.get_wave_shop_offers()
+	var chosen: String = str(offers[0].get("id", ""))
+	var first: Dictionary = state.apply_action({"type": "wave_shop_pick", "card_id": chosen}, 1000)
+	_check(first.get("success", false), "first pick succeeds")
+	var gold_after: int = state.gold
+	var lives_after: int = state.lives
+	var second: Dictionary = state.apply_action({"type": "wave_shop_pick", "card_id": chosen}, 1000)
+	_check(not second.get("success", true),
+		"replaying the same card cannot apply the bonus twice")
+	_check(state.gold == gold_after and state.lives == lives_after,
+		"duplicate pick does not mutate economy")
+	state.dispose()
+
+func _test_sudden_death_excludes_healing_everywhere() -> void:
+	var cards = load("res://data/wave_shop_cards.gd")
+	var standard: Array = cards.filtered_pool(["mod_sudden_death"])
+	var milestone: Array = cards.milestone_pool(["mod_sudden_death"])
+	var standard_has_heal: bool = standard.any(func(c): return c["id"] == "life_recover")
+	var milestone_has_heal: bool = milestone.any(func(c): return c["id"] == "emergency_protocol")
+	_check(not standard_has_heal, "Sudden Death removes life_recover from the standard pool")
+	_check(not milestone_has_heal,
+		"Sudden Death removes emergency_protocol from the milestone pool")
+	# Control: without the modifier both heal cards remain available.
+	var std_normal: Array = cards.filtered_pool([])
+	var ms_normal: Array = cards.milestone_pool([])
+	_check(std_normal.any(func(c): return c["id"] == "life_recover"),
+		"life_recover is offered without Sudden Death")
+	_check(ms_normal.any(func(c): return c["id"] == "emergency_protocol"),
+		"emergency_protocol is offered without Sudden Death")
+
+	# End-to-end: a milestone wave shop under Sudden Death never offers healing.
+	var state := GameStateScript.new(_MAPS.MAPS[0]["path"], {"modifier_ids": ["mod_sudden_death"]}, 0)
+	state.wave = 5
+	state.wave_shop_pending = true
+	var offers: Array = state.get_wave_shop_offers()
+	var has_heal: bool = offers.any(func(c): return c["id"] == "emergency_protocol")
+	_check(not has_heal, "wave-5 Sudden Death shop contains no healing card")
+	_check(offers.size() == 3, "milestone shop still offers 3 cards (got %d)" % offers.size())
+	state.dispose()

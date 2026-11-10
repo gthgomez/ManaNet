@@ -5,6 +5,10 @@ extends Node
 #
 # Save file: user://td_progression.json
 # Atomic write: user://td_progression.tmp → rename
+#
+# Test/tooling isolation: set MANANET_PROFILE_PATH in the environment (or call
+# initialize(path) before the first save) to redirect *all* persistence —
+# including autoload startup — away from the player's real profile.
 
 # ---------------------------------------------------------------------------
 # Catalogue constants (mirrors of Python STARTING_TOWER_CHAIN etc.)
@@ -148,15 +152,42 @@ const TOWER_VARIANTS: Array = [
 # Internal state
 # ---------------------------------------------------------------------------
 
+## Current on-disk save schema. Bumped only for breaking layout changes; older
+## files are migrated forward by _normalize_profile().
+const SAVE_VERSION: int = 1
+
 var _profile: Dictionary = {}
 var _save_path: String = "user://td_progression.json"
 var _tmp_path: String = "user://td_progression.tmp"
+var _initialized: bool = false
+
+func _init() -> void:
+	# Resolve isolation before anything can load or save. Tests and tooling set
+	# MANANET_PROFILE_PATH so even autoload startup never touches the real file.
+	var override: String = OS.get_environment("MANANET_PROFILE_PATH")
+	if override != "":
+		_save_path = override
+		_tmp_path = override + ".tmp"
 
 ## Redirect persistence for tests/tooling. A verification run must never open,
 ## let alone overwrite, the player's real profile.
 func set_save_path(path: String) -> void:
 	_save_path = path
 	_tmp_path = path + ".tmp"
+
+## Explicit profile initialization. Safe to call before the node enters the
+## tree; _ready() becomes a no-op once this has run. Never relies on _ready()
+## timing, which is what left test-created instances uninitialized.
+func initialize(path: String = "") -> void:
+	if path != "":
+		set_save_path(path)
+	if _initialized:
+		return
+	load_profile()
+	_initialized = true
+
+func is_initialized() -> bool:
+	return _initialized
 # Legacy desktop save from the Kivy predecessor (TowerDefenseKivy writes
 # td_progression.json at its repo root as the desktop fallback). res://../
 # is not portable, so resolve the sibling project path absolutely; on Android
@@ -173,7 +204,7 @@ var pending_end_stats: Dictionary = {}
 # ---------------------------------------------------------------------------
 
 func _ready() -> void:
-	load_profile()
+	initialize()
 
 # ---------------------------------------------------------------------------
 # Default profile / settings
@@ -232,6 +263,7 @@ func _default_profile() -> Dictionary:
 # ---------------------------------------------------------------------------
 
 func load_profile() -> Dictionary:
+	_initialized = true
 	var loaded := _read_profile_file(_save_path)
 	if not loaded.is_empty():
 		_profile = loaded
@@ -259,19 +291,37 @@ func _read_profile_file(path: String) -> Dictionary:
 	if not parsed is Dictionary:
 		# Never silently overwrite a corrupt profile later; quarantine it so a
 		# later save cannot destroy whatever the player had.
-		var stamp: int = int(Time.get_unix_time_from_system())
-		var quarantine: String = "%s.corrupt-%d" % [path, stamp]
-		DirAccess.rename_absolute(
-			ProjectSettings.globalize_path(path),
-			ProjectSettings.globalize_path(quarantine)
-		)
-		push_warning("Corrupt progression save quarantined as %s" % quarantine)
+		_quarantine(path, "corrupt")
+		return {}
+	# Unsupported *future* schema: the file is not corrupt, but this build
+	# cannot reason about it. Preserve it untouched and fall back to defaults
+	# rather than rewriting it with a lower version.
+	var file_version: int = _as_int(parsed.get("version"), 0)
+	if file_version > SAVE_VERSION:
+		push_warning("Progression save version %d is newer than supported %d; leaving it untouched"
+			% [file_version, SAVE_VERSION])
 		return {}
 	var default := _default_profile()
 	_deep_merge(default, parsed)
 	_normalize_profile(default)
 	default["engine"] = "godot"
+	default["version"] = SAVE_VERSION
 	return default
+
+## Move a damaged save aside with a checked rename. Returns true only when the
+## file really moved; a failed quarantine is reported, never treated as success.
+func _quarantine(path: String, reason: String) -> bool:
+	var stamp: int = int(Time.get_unix_time_from_system())
+	var quarantine: String = "%s.%s-%d" % [path, reason, stamp]
+	var err: int = DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(path),
+		ProjectSettings.globalize_path(quarantine)
+	)
+	if err != OK:
+		push_error("Could not quarantine %s save (error %d); file left in place" % [reason, err])
+		return false
+	push_warning("Progression save quarantined as %s" % quarantine)
+	return true
 
 func _as_int(value, fallback: int = 0) -> int:
 	if value is int:
@@ -281,30 +331,39 @@ func _as_int(value, fallback: int = 0) -> int:
 	return fallback
 
 func _normalize_profile(profile: Dictionary) -> void:
-	if profile.get("active_starting_tower") == null:
-		profile["active_starting_tower"] = ""
-	if profile.get("active_modifier") == null:
-		profile["active_modifier"] = ""
-	if profile.get("active_modifier_2") == null:
-		profile["active_modifier_2"] = ""
+	for key in ["active_starting_tower", "active_modifier", "active_modifier_2"]:
+		var v = profile.get(key)
+		profile[key] = "" if v == null else str(v)
 
 	# Type-validate persisted collections. A parseable save with wrong-typed
 	# keys used to crash record_run() at the end of a run.
 	for key in ["unlocked", "unlocked_variants"]:
 		if not profile.get(key) is Array:
 			profile[key] = []
+		else:
+			var cleaned: Array = []
+			for entry in profile[key]:
+				if entry is String and entry != "":
+					cleaned.append(entry)
+			profile[key] = cleaned
 	for key in ["tower_use_counts", "tower_kill_counts", "active_variants", "settings"]:
 		if not profile.get(key) is Dictionary:
 			profile[key] = _default_profile()[key]
 	for key in ["total_rp", "banked_rp"]:
 		profile[key] = _as_int(profile.get(key), 0)
 
+	_normalize_settings(profile["settings"])
+
 	var default_variants: Dictionary = _default_profile()["active_variants"]
 	for ttype in default_variants:
 		if not ttype in profile["active_variants"] or profile["active_variants"][ttype] == null:
 			profile["active_variants"][ttype] = ""
 		else:
-			profile["active_variants"][ttype] = str(profile["active_variants"][ttype])
+			var vkey: String = str(profile["active_variants"][ttype])
+			# Drop references to variants this build does not know about.
+			if vkey != "" and not _variant_exists(vkey):
+				vkey = ""
+			profile["active_variants"][ttype] = vkey
 	for key in ["tower_use_counts", "tower_kill_counts"]:
 		for ttype in default_variants:
 			profile[key][ttype] = _as_int(profile[key].get(ttype), 0)
@@ -317,24 +376,111 @@ func _normalize_profile(profile: Dictionary) -> void:
 			clean_history.append(entry)
 	profile["run_history"] = clean_history
 
-func save_profile() -> void:
-	# Never serialize an uninitialized profile. Tests and tooling can construct
-	# Progression without _ready()/load_profile(); writing then would replace a
-	# real save with a stub (observed: a 282-byte profile became 45 bytes).
+	# Modifier compatibility must hold for loaded saves too, not just when the
+	# player toggles them in the UI: an old/malformed file could otherwise start
+	# a run with an invalid stack (e.g. Sudden Death + Glass Cannon life clash).
+	if profile["active_modifier"] != "" and not profile["active_modifier"] in profile["unlocked"]:
+		profile["active_modifier"] = ""
+	if profile["active_modifier_2"] != "" and (
+			not profile["active_modifier_2"] in profile["unlocked"]
+			or profile["active_modifier_2"] == profile["active_modifier"]
+			or not _modifiers_compatible(profile["active_modifier"], profile["active_modifier_2"])):
+		profile["active_modifier_2"] = ""
+
+## Validate settings values against their default types so a corrupt save cannot
+## put a String into a bool setting and silently break runtime behavior.
+func _normalize_settings(settings: Dictionary) -> void:
+	var defaults := _default_settings()
+	for key in defaults.keys():
+		if not key in settings:
+			settings[key] = defaults[key]
+			continue
+		var dflt = defaults[key]
+		var value = settings[key]
+		if dflt is bool and not value is bool:
+			settings[key] = dflt
+		elif dflt is int and not (value is int or value is float):
+			settings[key] = dflt
+		elif dflt is int:
+			settings[key] = int(value)
+		elif dflt is float and not (value is int or value is float):
+			settings[key] = dflt
+		elif dflt is float:
+			settings[key] = float(value)
+		elif dflt is String and not value is String:
+			settings[key] = dflt
+	# A persisted speed that this build does not offer would make speed buttons
+	# disagree with the simulation; snap it to a supported value.
+	var speed: float = float(settings.get("default_speed", 1.0))
+	if not is_equal_approx(speed, 1.0) and not is_equal_approx(speed, 2.0) and not is_equal_approx(speed, 3.0):
+		settings["default_speed"] = 1.0
+	if not str(settings.get("default_target_mode", "first")) in ["first", "last", "strong", "weak", "close"]:
+		settings["default_target_mode"] = "first"
+	if not str(settings.get("placement_mode", "drag")) in ["drag", "tap"]:
+		settings["placement_mode"] = "drag"
+
+func _variant_exists(variant_key: String) -> bool:
+	for variant in TOWER_VARIANTS:
+		if variant["variant_key"] == variant_key:
+			return true
+	return false
+
+## Persist the profile atomically. Returns true only when the new bytes were
+## really committed to _save_path. Every failure path is reported and leaves the
+## previous save intact.
+func save_profile() -> bool:
+	# Root-cause fix for the old "Refusing to save an uninitialized profile"
+	# error: initialize on demand instead of dropping the write. Callers that
+	# update a setting always get that setting persisted.
+	if not _initialized or _profile.is_empty() or not _profile.has("version"):
+		initialize()
 	if _profile.is_empty() or not _profile.has("version"):
-		push_error("Refusing to save an uninitialized progression profile")
-		return
+		push_error("Cannot save progression: profile failed to initialize")
+		return false
+
+	_profile["version"] = SAVE_VERSION
 	var text := JSON.stringify(_profile, "\t")
+
 	var f := FileAccess.open(_tmp_path, FileAccess.WRITE)
-	if f:
-		f.store_string(text)
-		f.close()
-		var err: int = DirAccess.rename_absolute(
-			ProjectSettings.globalize_path(_tmp_path),
-			ProjectSettings.globalize_path(_save_path)
-		)
-		if err != OK:
-			push_error("Failed to commit progression save (error %d); previous save left intact" % err)
+	if f == null:
+		push_error("Cannot open progression temp file %s (error %d); save aborted"
+			% [_tmp_path, FileAccess.get_open_error()])
+		return false
+	f.store_string(text)
+	var write_err: int = f.get_error()
+	f.close()
+	if write_err != OK:
+		push_error("Failed writing progression temp file (error %d); save aborted" % write_err)
+		_remove_if_exists(_tmp_path)
+		return false
+
+	# Verify the temp file really holds parseable JSON before swapping it in.
+	if JSON.parse_string(_read_text(_tmp_path)) == null:
+		push_error("Progression temp file failed verification; previous save left intact")
+		_remove_if_exists(_tmp_path)
+		return false
+
+	var err: int = DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(_tmp_path),
+		ProjectSettings.globalize_path(_save_path)
+	)
+	if err != OK:
+		push_error("Failed to commit progression save (error %d); previous save left intact" % err)
+		_remove_if_exists(_tmp_path)
+		return false
+	return true
+
+func _read_text(path: String) -> String:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return ""
+	var text := f.get_as_text()
+	f.close()
+	return text
+
+func _remove_if_exists(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 func _deep_merge(base: Dictionary, override: Dictionary) -> void:
 	for key in override:
@@ -385,6 +531,9 @@ func record_run(gs: Object, map_id: int, abandoned: bool = false) -> Dictionary:
 		pre_use[ttype]  = _profile["tower_use_counts"].get(ttype, 0)
 		pre_kill[ttype] = _profile["tower_kill_counts"].get(ttype, 0)
 	var prev_unlocked_v: Array = _profile["unlocked_variants"].duplicate()
+	var prev_total_rp: int = _profile["total_rp"] - rp
+	var prev_banked_rp: int = _profile["banked_rp"] - rp
+	var prev_history: Array = _profile["run_history"].duplicate(true)
 
 	for ttype in gs.stat_tower_use_by_type:
 		_profile["tower_use_counts"][ttype] = \
@@ -409,7 +558,24 @@ func record_run(gs: Object, map_id: int, abandoned: bool = false) -> Dictionary:
 		_profile["run_history"] = _profile["run_history"].slice(-50)
 
 	_check_milestone_unlocks()
-	save_profile()
+	var saved: bool = save_profile()
+	if not saved:
+		# Report the truth: this run's progress is not durable. Roll the
+		# in-memory counters back so a later successful save cannot bank a run
+		# whose record already failed.
+		_profile["total_rp"]  = prev_total_rp
+		_profile["banked_rp"] = prev_banked_rp
+		_profile["run_history"] = prev_history
+		_profile["unlocked_variants"] = prev_unlocked_v
+		for ttype in pre_use:
+			_profile["tower_use_counts"][ttype] = pre_use[ttype]
+			_profile["tower_kill_counts"][ttype] = pre_kill[ttype]
+		return {
+			"rp":                     0,
+			"newly_unlocked_variants": [],
+			"milestone_deltas":       [],
+			"save_failed":            true,
+		}
 
 	# Build milestone delta info for the end screen
 	var newly_unlocked: Array = []
@@ -483,9 +649,14 @@ func purchase_upgrade(unlock_id: String) -> Dictionary:
 	if _profile["banked_rp"] < cost:
 		return {"success": false, "reason": "not_enough_rp", "banked_rp": _profile["banked_rp"]}
 
+	var prev_rp: int = _profile["banked_rp"]
 	_profile["banked_rp"] -= cost
 	_profile["unlocked"].append(unlock_id)
-	save_profile()
+	if not save_profile():
+		# Never leave a purchase applied in memory when it did not persist.
+		_profile["banked_rp"] = prev_rp
+		_profile["unlocked"].erase(unlock_id)
+		return {"success": false, "reason": "save_failed", "banked_rp": _profile["banked_rp"]}
 	return {"success": true, "banked_rp": _profile["banked_rp"]}
 
 func _find_upgrade_cost(unlock_id: String) -> int:
@@ -503,8 +674,10 @@ func _find_upgrade_cost(unlock_id: String) -> int:
 func set_active_starting_tower(unlock_id: String) -> void:
 	if unlock_id != "" and not unlock_id in _profile["unlocked"]:
 		return
+	var prev = _profile["active_starting_tower"]
 	_profile["active_starting_tower"] = unlock_id
-	save_profile()
+	if not save_profile():
+		_profile["active_starting_tower"] = prev
 
 func get_active_modifier() -> String:
 	return _profile.get("active_modifier", "")
@@ -512,11 +685,15 @@ func get_active_modifier() -> String:
 func set_active_modifier(mod_id: String) -> void:
 	if mod_id != "" and not mod_id in _profile["unlocked"]:
 		return
+	var prev = _profile["active_modifier"]
+	var prev_2 = _profile.get("active_modifier_2", "")
 	_profile["active_modifier"] = mod_id
 	# Clear modifier_2 if it's now incompatible with the new primary
 	if not _modifiers_compatible(_profile["active_modifier"], _profile.get("active_modifier_2", "")):
 		_profile["active_modifier_2"] = ""
-	save_profile()
+	if not save_profile():
+		_profile["active_modifier"] = prev
+		_profile["active_modifier_2"] = prev_2
 
 func set_active_modifier_2(mod_id: String) -> void:
 	if mod_id != "" and not mod_id in _profile["unlocked"]:
@@ -524,8 +701,10 @@ func set_active_modifier_2(mod_id: String) -> void:
 	var mod1: String = _profile.get("active_modifier", "")
 	if mod_id != "" and not _modifiers_compatible(mod1, mod_id):
 		return  # incompatible pair — silently reject
+	var prev = _profile.get("active_modifier_2", "")
 	_profile["active_modifier_2"] = mod_id
-	save_profile()
+	if not save_profile():
+		_profile["active_modifier_2"] = prev
 
 func get_active_modifier_2() -> String:
 	return _profile.get("active_modifier_2", "")
@@ -564,8 +743,10 @@ func _modifiers_compatible(mod_a: String, mod_b: String) -> bool:
 func set_active_variant(tower_type: String, variant_key: String) -> void:
 	if variant_key != "" and not variant_key in _profile["unlocked_variants"]:
 		return
+	var prev = _profile["active_variants"].get(tower_type, "")
 	_profile["active_variants"][tower_type] = variant_key
-	save_profile()
+	if not save_profile():
+		_profile["active_variants"][tower_type] = prev
 
 # ---------------------------------------------------------------------------
 # Settings
@@ -585,13 +766,23 @@ func set_setting(key: String, value) -> bool:
 		return false
 	if not "settings" in _profile:
 		_profile["settings"] = {}
+	var had_prev: bool = _profile["settings"].has(key)
+	var prev = _profile["settings"].get(key)
 	_profile["settings"][key] = value
-	save_profile()
+	if not save_profile():
+		# A setting that did not persist must not look applied in memory.
+		if had_prev:
+			_profile["settings"][key] = prev
+		else:
+			_profile["settings"].erase(key)
+		return false
 	return true
 
 func reset_settings() -> void:
+	var prev: Dictionary = _profile.get("settings", {}).duplicate(true)
 	_profile["settings"] = _default_settings()
-	save_profile()
+	if not save_profile():
+		_profile["settings"] = prev
 
 # ---------------------------------------------------------------------------
 # Run-start config  (mirrors get_run_config in progression.py)
@@ -649,6 +840,9 @@ func get_run_config() -> Dictionary:
 		active_mods.append(mod2)
 
 	cfg["modifier_id"] = active_mods[0] if not active_mods.is_empty() else ""
+	# Full modifier list: GameState needs all of them (not just the primary) to
+	# filter wave-shop offers and validate rules like Sudden Death.
+	cfg["modifier_ids"] = active_mods.duplicate()
 
 	for mod in active_mods:
 		_apply_modifier_to_config(mod, cfg)

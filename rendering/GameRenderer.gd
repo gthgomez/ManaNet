@@ -277,6 +277,9 @@ func _update_multimeshes(now_ms: int) -> void:
 	_update_projectile_meshes()
 
 func _update_enemy_meshes(now_ms: int) -> void:
+	# Activity timestamps (flash, statuses, damage age) are simulation-clock
+	# values; only decorative pulses use the wall clock.
+	var sim_ms: int = game_state.sim_now()
 	# Compute shake once per pass, not once per instance.
 	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 	# Bucket enemies by type index
@@ -303,40 +306,41 @@ func _update_enemy_meshes(now_ms: int) -> void:
 			var xform := Transform2D(0.0, Vector2(scale_x, sz), 0.0, draw_pos)
 			mmi.multimesh.set_instance_transform_2d(j, xform)
 			# Flash: set custom data x to 1.0 if flashing
-			var flash: float = 1.0 if now_ms < enemy.flash_until else 0.0
+			var flash: float = 1.0 if sim_ms < enemy.flash_until else 0.0
 			mmi.multimesh.set_instance_custom_data(j, Color(flash, 0, 0, 0))
 
 			# Tint: chilled = blue tint, frozen = white
-			var col: Color = _enemy_base_color(enemy, now_ms)
+			var col: Color = _enemy_base_color(enemy, sim_ms, now_ms)
 			mmi.multimesh.set_instance_color(j, col)
 
-func _enemy_base_color(enemy: Enemy, now_ms: int) -> Color:
+func _enemy_base_color(enemy: Enemy, sim_ms: int, wall_ms: int) -> Color:
 	var base: Color = Color.WHITE
 	# Boss stealth: dim until revealed (Swarm Carrier / stealthed types)
-	if enemy.stealthed and now_ms >= enemy.revealed_until:
+	if enemy.stealthed and sim_ms >= enemy.revealed_until:
 		return Color(0.45, 0.55, 0.70, 0.55)
-	if now_ms < enemy.frozen_until:
+	if sim_ms < enemy.frozen_until:
 		return base.lerp(Color.WHITE, 0.65)
-	if now_ms < enemy.chilled_until:
+	if sim_ms < enemy.chilled_until:
 		return base.lerp(Color(0.5, 0.8, 1.0), 0.45)
-	if now_ms < enemy.revealed_until:
+	if sim_ms < enemy.revealed_until:
 		return base.lerp(Color(1.0, 1.0, 0.4), 0.35)
 	# Boss regenerator: soft green pulse while healing below max HP
 	if enemy is Enemy.BossRegenerator and enemy.health > 0 and enemy.health < enemy.max_health:
-		var pulse: float = 0.35 + 0.25 * (0.5 + 0.5 * sin(float(now_ms) * 0.008))
+		var pulse: float = 0.35 + 0.25 * (0.5 + 0.5 * sin(float(wall_ms) * 0.008))
 		return base.lerp(Color(0.35, 1.0, 0.55), pulse)
 	# Damage-over-time / debuff readability.
-	if now_ms < enemy.burn_until:
+	if sim_ms < enemy.burn_until:
 		base = base.lerp(Color(1.0, 0.45, 0.15), 0.30)
-	if now_ms < enemy.marked_until:
+	if sim_ms < enemy.marked_until:
 		base = base.lerp(Color(0.90, 0.50, 1.0), 0.30)
-	if now_ms < enemy.transmute_until:
+	if sim_ms < enemy.transmute_until:
 		base = base.lerp(Color(1.0, 0.85, 0.25), 0.25)
-	if now_ms < enemy.rooted_until:
+	if sim_ms < enemy.rooted_until:
 		base = base.lerp(Color(0.40, 0.90, 0.40), 0.30)
 	return base
 
 func _update_tower_meshes(now_ms: int) -> void:
+	var sim_ms: int = game_state.sim_now()
 	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 	# Bucket towers by type
 	var buckets: Array = []
@@ -362,11 +366,11 @@ func _update_tower_meshes(now_ms: int) -> void:
 			var col: Color
 			if view_state and view_state.selected_tower_id == tower.id:
 				col = Color.WHITE.lerp(tower.color, 0.25)
-			elif now_ms < tower.muzzle_flash_until:
+			elif sim_ms < tower.muzzle_flash_until:
 				col = Color(2.5, 2.5, 2.5) # Over-bright white fire
-			elif now_ms < tower.burst_until:
+			elif sim_ms < tower.burst_until:
 				col = Color.WHITE.lerp(Color(1.0, 0.9, 0.2), 0.45)
-			elif now_ms < tower.flash_until:
+			elif sim_ms < tower.flash_until:
 				col = Color(1.25, 1.25, 1.25)
 			elif tower.variant_tint.a > 0.0:
 				col = Color.WHITE.lerp(tower.variant_tint, 0.4)
@@ -698,8 +702,11 @@ func _draw_lightning_bolt(a: Vector2, b: Vector2, color: Color, alpha: float, no
 func _draw_particles(now_ms: int, shake: Vector2) -> void:
 	if game_state == null:
 		return
+	# Particles live on the simulation clock, so their age must be measured
+	# against that clock (not the wall clock passed in for effects).
+	var sim_now: int = game_state.sim_now()
 	for p in game_state.particles:
-		var age: float = float(now_ms - p.start_ms)
+		var age: float = float(sim_now - p.start_ms)
 		var life_frac: float = clampf(age / float(p.lifespan_ms), 0.0, 1.0)
 		var alpha: float = 1.0 - life_frac
 		var draw_pos: Vector2 = p.pos + shake
@@ -728,7 +735,9 @@ func _draw_health_bars(canvas: CanvasItem, shake: Vector2) -> void:
 		return
 	const BAR_W: float = 34.0
 	const BAR_H: float = 6.0
-	var now_ms: int = Time.get_ticks_msec()
+	# Health-bar visibility depends on sim-time activity (damage age, statuses),
+	# so it reads the simulation clock rather than wall time.
+	var now_ms: int = game_state.sim_now()
 	for enemy in game_state.enemies:
 		var has_status: bool = _enemy_has_visible_status(enemy, now_ms)
 		var has_shield: bool = enemy.shields > 0
@@ -832,16 +841,18 @@ func _draw_enemy_status_pips(canvas: CanvasItem, enemy: Enemy, now_ms: int, star
 		canvas.draw_circle(p, 3.5, Color(0.0, 0.0, 0.0, 0.72))
 		canvas.draw_circle(p, 2.4, colors[i])
 
-func _draw_boss_telegraphs(canvas: CanvasItem, shake: Vector2, now_ms: int) -> void:
+func _draw_boss_telegraphs(canvas: CanvasItem, shake: Vector2, now_ms: int, wall_ms: int = -1) -> void:
 	## Identity / UX: boss states must be readable without a wiki (W1 contracts).
 	if game_state == null:
 		return
+	# Pulse phases animate on the wall clock; state checks use sim time.
+	var pulse_ms: int = wall_ms if wall_ms >= 0 else now_ms
 	for enemy in game_state.enemies:
 		var pos: Vector2 = enemy.pos + shake
 		var r: float = float(enemy.radius) + 6.0
 		var hit_shield: int = _boss_hit_shield_hp(enemy)
 		if hit_shield > 0:
-			var pulse: float = 0.55 + 0.25 * (0.5 + 0.5 * sin(float(now_ms) * 0.006))
+			var pulse: float = 0.55 + 0.25 * (0.5 + 0.5 * sin(float(pulse_ms) * 0.006))
 			var col := Color(0.45, 0.82, 1.0, pulse)
 			canvas.draw_arc(pos, r + 2.0, 0.0, TAU, 40, col, 2.5, true)
 			# Remaining hit charges as arc segments
@@ -853,17 +864,20 @@ func _draw_boss_telegraphs(canvas: CanvasItem, shake: Vector2, now_ms: int) -> v
 		elif enemy is Enemy.BossSwarmCarrier and enemy.stealthed and now_ms >= enemy.revealed_until:
 			canvas.draw_arc(pos, r, 0.0, TAU, 32, Color(0.5, 0.6, 0.85, 0.35), 1.5, true)
 		elif enemy is Enemy.BossRegenerator and enemy.health > 0 and enemy.health < enemy.max_health:
-			var gpulse: float = 0.4 + 0.35 * (0.5 + 0.5 * sin(float(now_ms) * 0.01))
+			var gpulse: float = 0.4 + 0.35 * (0.5 + 0.5 * sin(float(pulse_ms) * 0.01))
 			canvas.draw_arc(pos, r + 3.0, 0.0, TAU, 36, Color(0.3, 1.0, 0.5, gpulse), 2.0, true)
 
 func _draw_overlay_on(canvas: CanvasItem) -> void:
 	if game_state == null: return
-	var now_ms: int = Time.get_ticks_msec()
-	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
+	# Status/telegraph timestamps are sim-clock values; the pulse phases are
+	# decorative and use wall time so they still animate between gameplay ticks.
+	var sim_ms: int = game_state.sim_now()
+	var wall_ms: int = Time.get_ticks_msec()
+	var shake: Vector2 = view_state.get_screen_shake_offset(wall_ms) if view_state else Vector2.ZERO
 
-	_draw_boss_telegraphs(canvas, shake, now_ms)
+	_draw_boss_telegraphs(canvas, shake, sim_ms, wall_ms)
 	_draw_health_bars(canvas, shake)
-	_draw_tower_badges(canvas, now_ms, shake)
+	_draw_tower_badges(canvas, sim_ms, shake)
 
 # --- 7. Tower badges (level dot + variant badge letter) ---
 

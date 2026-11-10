@@ -108,7 +108,9 @@ const MILESTONE_CARDS: Array = [
 	},
 ]
 
-# Filter out cards that conflict with any active modifier (primary + stack).
+## Filter out cards that conflict with any active modifier (primary + stack).
+## Sudden Death's defining rule is "only 1 Integrity"; any life recovery would
+## contradict it, so healing is excluded from the standard pool here.
 static func filtered_pool(active_modifiers) -> Array:
 	var mods: Array = []
 	if active_modifiers is String:
@@ -125,12 +127,18 @@ static func filtered_pool(active_modifiers) -> Array:
 				pool = pool.filter(func(c): return c["id"] != "life_recover")
 	return pool
 
-# Draw `count` cards. At milestone waves (5/10/15) always uses the milestone pool.
-static func draw_cards(pool: Array, count: int, wave: int = 0) -> Array:
-	if wave in [5, 10, 15]:
-		var ms: Array = MILESTONE_CARDS.duplicate()
-		ms.shuffle()
-		return ms.slice(0, mini(count, ms.size()))
-	var shuffled: Array = pool.duplicate()
-	shuffled.shuffle()
-	return shuffled.slice(0, mini(count, shuffled.size()))
+## Milestone (boss-wave) pool, filtered the same way. Boss rewards must obey the
+## same modifier rules as the standard pool, otherwise Sudden Death could still
+## hand the player Emergency Protocol at wave 5/10/15.
+static func milestone_pool(active_modifiers) -> Array:
+	var mods: Array = []
+	if active_modifiers is String:
+		if active_modifiers != "":
+			mods.append(active_modifiers)
+	elif active_modifiers is Array:
+		mods = active_modifiers
+	var pool: Array = MILESTONE_CARDS.duplicate()
+	for m in mods:
+		if m == "mod_sudden_death":
+			pool = pool.filter(func(c): return c["id"] != "emergency_protocol")
+	return pool

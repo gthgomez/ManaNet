@@ -277,16 +277,29 @@ func _test_settings() -> void:
 
 	var prog_node = load("res://autoloads/Progression.gd").new()
 	prog_node.name = "ProgressionTest"
+	# CRITICAL ordering: point persistence at the scratch file BEFORE the node
+	# enters the tree. add_child() runs _ready() synchronously, so setting the
+	# path afterwards let _ready()/load_profile() open the real profile first.
+	prog_node.initialize(_AUDIT_SAVE_PATH)
 	root.add_child(prog_node)
-	prog_node.set_save_path(_AUDIT_SAVE_PATH)
 
 	var s = prog_node.get_settings()
 	_check(s is Dictionary, "get_settings() returns Dictionary", "get_settings() returned non-Dictionary: %s" % typeof(s))
 	_check(s.has("confirm_restart"), "Settings has 'confirm_restart' key", "Settings missing 'confirm_restart' key")
 
-	prog_node.set_setting("confirm_sell", false)
+	var saved_ok: bool = prog_node.set_setting("confirm_sell", false)
+	_check(saved_ok, "set_setting() reports a committed write", "set_setting() reported the write did not persist")
 	var s2 = prog_node.get_settings()
 	_check(s2.get("confirm_sell") == false, "set_setting() updates 'confirm_sell'", "set_setting() did not update 'confirm_sell'")
+
+	# A real persistence check: read the bytes back off disk and prove the value
+	# survived, instead of trusting the in-memory dictionary.
+	var on_disk = JSON.parse_string(FileAccess.get_file_as_string(_AUDIT_SAVE_PATH))
+	var disk_setting = null
+	if on_disk is Dictionary:
+		disk_setting = on_disk.get("settings", {}).get("confirm_sell")
+	_check(disk_setting == false, "setting survives a real disk round-trip",
+		"setting was not written to disk (got %s)" % str(disk_setting))
 
 	var profile = prog_node.load_profile()
 	_check(profile is Dictionary, "load_profile() returns Dictionary", "load_profile() returned non-Dictionary: %s" % typeof(profile))
@@ -296,6 +309,7 @@ func _test_settings() -> void:
 	_check(cfg is Dictionary, "get_run_config() returns Dictionary", "get_run_config() returned: %s" % typeof(cfg))
 
 	# Clean up the scratch save and prove the real one is untouched.
+	prog_node.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(_AUDIT_SAVE_PATH))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(_AUDIT_SAVE_PATH + ".tmp"))
 	var now := PackedByteArray()

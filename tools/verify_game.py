@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 EXPECTED_ENGINE = "4.6.2"
 TIMEOUT_SECONDS = 600
@@ -35,6 +36,24 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def fail(msg, code=2):
     print("verify_game: %s" % msg, file=sys.stderr)
     return code
+
+
+def isolated_env():
+    """Environment that keeps every verification process off the real profile.
+
+    MANANET_PROFILE_PATH redirects Progression's persistence (including autoload
+    startup) to a scratch file. A separate XDG_DATA_HOME also isolates Godot's
+    user:// directory, so even a tool that ignores the override cannot touch the
+    player's save.
+    """
+    env = dict(os.environ)
+    scratch = tempfile.mkdtemp(prefix="mananet-verify-")
+    profile_dir = os.path.join(scratch, "profile")
+    os.makedirs(profile_dir, exist_ok=True)
+    env["MANANET_PROFILE_PATH"] = os.path.join(profile_dir, "td_progression.json")
+    env["XDG_DATA_HOME"] = os.path.join(scratch, "xdg")
+    env["MANANET_VERIFY_SCRATCH"] = scratch
+    return env
 
 
 def find_godot():
@@ -54,30 +73,34 @@ def find_godot():
     return None
 
 
-def engine_version(godot):
+def engine_version(godot, env=None):
     try:
         out = subprocess.run(
             [godot, "--version"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
     return (out.stdout + out.stderr).strip()
 
 
-def run(godot, args, timeout=TIMEOUT_SECONDS):
-    """Run the engine; return (exit_code_or_None, elapsed_ok)."""
+def run(godot, args, timeout=TIMEOUT_SECONDS, env=None, must_exit_zero=False):
+    """Run the engine; return its exit code, or None on timeout.
+
+    When must_exit_zero is set a nonzero exit is treated as a test failure and
+    returned as-is so the caller cannot mistake it for success.
+    """
     try:
         proc = subprocess.run(
             [godot] + args, cwd=REPO_ROOT,
-            timeout=timeout,
+            timeout=timeout, env=env,
         )
         return proc.returncode
     except subprocess.TimeoutExpired:
         return None
 
 
-def run_parse_gate(godot):
+def run_parse_gate(godot, env=None):
     """Import the project and fail on fatal parse/load errors.
 
     A per-file GDScript loader cannot be used here: running with --script does
@@ -88,7 +111,7 @@ def run_parse_gate(godot):
     try:
         proc = subprocess.run(
             [godot, "--headless", "--path", REPO_ROOT, "--import"],
-            capture_output=True, text=True, timeout=TIMEOUT_SECONDS,
+            capture_output=True, text=True, timeout=TIMEOUT_SECONDS, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return 2, "import timed out or failed to start"
@@ -117,6 +140,9 @@ def main():
                         help="pass ARGS straight to the engine and propagate its exit code")
     parser.add_argument("--allow-engine-mismatch", action="store_true",
                         help="warn instead of failing when the engine is not %s" % EXPECTED_ENGINE)
+    parser.add_argument("--all", action="store_true",
+                        help="run every gate: parse, audit, simulation regression, "
+                             "UI regression, verifier exit contract, and early-run smoke")
     opts = parser.parse_args()
 
     godot = find_godot()
@@ -125,7 +151,10 @@ def main():
                     "executable or put 'godot' on PATH." % EXPECTED_ENGINE)
     print("verify_game: engine = %s" % godot)
 
-    version = engine_version(godot)
+    env = isolated_env()
+    print("verify_game: isolated profile = %s" % env["MANANET_PROFILE_PATH"])
+
+    version = engine_version(godot, env=env)
     print("verify_game: engine version = %s" % (version or "<unknown>"))
     if EXPECTED_ENGINE not in (version or ""):
         msg = ("engine version mismatch: expected %s, got '%s'"
@@ -136,17 +165,17 @@ def main():
             return fail(msg)
 
     # Local parse gate: the project must import with no fatal script errors.
-    code, msg = run_parse_gate(godot)
+    code, msg = run_parse_gate(godot, env=env)
     if code != 0:
         return fail("script parse gate failed: %s" % msg, code)
     print("verify_game: PASS script parse gate")
 
     if opts.raw is not None and opts.raw:
-        code = run(godot, opts.raw)
+        code = run(godot, opts.raw, env=env)
         return fail("engine timed out") if code is None else code
 
     if opts.quit:
-        code = run(godot, ["--headless", "--path", REPO_ROOT, "--quit"])
+        code = run(godot, ["--headless", "--path", REPO_ROOT, "--quit"], env=env)
         if code is None:
             return fail("engine timed out during --quit smoke test")
         if code != 0:
@@ -158,7 +187,7 @@ def main():
     base = ["--headless", "--path", REPO_ROOT, "--script", "scripts/full_audit.gd"]
     if opts.negative_control:
         # Test-only invocation: inject one deliberate failure after "--".
-        code = run(godot, base + ["--", "--negative-control"])
+        code = run(godot, base + ["--", "--negative-control"], env=env)
         if code is None:
             return fail("engine timed out during negative-control run")
         if code == 0:
@@ -167,13 +196,56 @@ def main():
         print("verify_game: PASS negative control (exit %d as required)" % code)
         return code
 
-    code = run(godot, base)
+    code = run(godot, base, env=env)
     if code is None:
         return fail("engine timed out during full audit")
     if code != 0:
         print("verify_game: FAIL audit exited %d" % code, file=sys.stderr)
         return code
     print("verify_game: PASS full audit (exit 0)")
+
+    if not opts.all:
+        return 0
+
+    legs = [
+        ("simulation regression",
+         ["--headless", "--path", REPO_ROOT, "--script",
+          "tests/simulation/regression_checks.gd"]),
+        ("UI regression",
+         ["--headless", "--path", REPO_ROOT,
+          "res://tests/ui/UIRegressionTest.tscn"]),
+        ("destination parity",
+         ["--headless", "--path", REPO_ROOT, "--script",
+          "tests/simulation/speed_parity.gd"]),
+        ("save fault injection",
+         ["--headless", "--path", REPO_ROOT, "--script",
+          "tests/simulation/save_faults.gd"]),
+        ("full-run qualification",
+         ["--headless", "--path", REPO_ROOT, "--script",
+          "tests/simulation/full_run.gd"]),
+        ("verifier exit contract", None),
+        ("early-run smoke",
+         ["--headless", "--path", REPO_ROOT, "scenes/SimTest.tscn"]),
+    ]
+    for name, args in legs:
+        if args is None:
+            # A Python test, not an engine script.
+            try:
+                proc = subprocess.run(
+                    [sys.executable,
+                     os.path.join(REPO_ROOT, "tests/verifier_exit/test_verifier_exit.py")],
+                    cwd=REPO_ROOT, env=env, timeout=TIMEOUT_SECONDS)
+                code = proc.returncode
+            except (OSError, subprocess.TimeoutExpired):
+                code = None
+        else:
+            code = run(godot, args, env=env)
+        if code is None:
+            return fail("%s timed out" % name)
+        if code != 0:
+            print("verify_game: FAIL %s exited %d" % (name, code), file=sys.stderr)
+            return code
+        print("verify_game: PASS %s (exit 0)" % name)
     return 0
 
 

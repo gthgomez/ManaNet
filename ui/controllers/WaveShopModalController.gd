@@ -44,7 +44,10 @@ func is_open() -> bool:
 ## Rebuilds the modal content. The owner then positions the modal, makes it
 ## visible, raises it above other HUD controls, plays the open SFX, and calls
 ## finish_open() — preserving the original operation order exactly.
-func show_shop(wave: int, modifiers, now_ms: int, host: Node) -> void:
+## `offers` are the cards GameState actually offered; the modal renders exactly
+## those and never invents its own, so what the player sees is what the
+## simulation will accept.
+func show_shop(wave: int, offers: Array, now_ms: int, host: Node) -> void:
 	# Rebuild content each time
 	for child in modal.get_children():
 		child.queue_free()
@@ -105,8 +108,7 @@ func show_shop(wave: int, modifiers, now_ms: int, host: Node) -> void:
 	help.custom_minimum_size = Vector2(0.0, help_h)
 	vbox.add_child(help)
 
-	var pool := _CARDS.filtered_pool(modifiers)
-	var drawn: Array = _CARDS.draw_cards(pool, 3, wave)
+	var drawn: Array = offers
 
 	var scroll_container := ScrollContainer.new()
 	scroll = scroll_container

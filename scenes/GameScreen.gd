@@ -730,7 +730,7 @@ func _dpad_return_focus() -> void:
 func _show_wave_shop(now_ms: int) -> void:
 	if _wave_shop == null or _wave_shop.modal == null:
 		return
-	_wave_shop.show_shop(game_state.wave, Progression.get_active_modifier_ids(), now_ms, self)
+	_wave_shop.show_shop(game_state.wave, game_state.get_wave_shop_offers(), now_ms, self)
 	_layout_modal(_wave_shop.modal, _wave_shop.desired_size)
 	_wave_shop.modal.visible = true
 	_raise_visible_modal_controls()
