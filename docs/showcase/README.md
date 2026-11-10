@@ -6,6 +6,15 @@ with the capture-only driver added in this branch. No game logic or shipped art
 was changed. ManaNet is the Godot port of the owner's
 [TowerDefenseKivy](https://github.com/gthgomez/TowerDefenseKivy), not an unrelated original implementation.
 
+> **Media currency (important):** the PNG screenshots were re-captured from the
+> current build and reflect the fixes in this branch (ManaNet wordmark, readable
+> towers, on-screen banner, fitting map cards). The `gameplay.mp4` and
+> `gameplay-preview.gif` still come from the older 2026-10-30 source above: this
+> environment has no FFmpeg, so the movie could not be re-encoded. Treat the
+> MP4/GIF as historical captures of the *previous* build, not as evidence for the
+> current UI. Regenerate them with `tools/showcase/capture.sh` on a machine with
+> FFmpeg before publishing them again.
+
 ## What the media shows
 
 | File | Actual recorded state |
@@ -57,8 +66,13 @@ X11 grab was discarded; published video comes from Godot's own movie writer.
 
 ## Verification and limits
 
-- Pinned-engine import and `python3 tools/verify_game.py`: **81 PASS, 0 WARN, 0 FAIL**, exit 0.
-- Final scripted runtime capture: exit 0; all four screenshots written and actual combat kills observed.
-- MP4/GIF decoding, dimensions, file sizes, hashes, and visual frame inspection are checked for this showcase.
+- Pinned-engine import and `python3 tools/verify_game.py --all`: all gates pass,
+  exit 0 (see the PR for per-suite counts).
+- PNG screenshots in this directory were re-captured from the current build via
+  `tools/showcase/capture.gd` under Xvfb; the MP4/GIF were **not** regenerated
+  (no FFmpeg) and remain historical captures of the previous build.
+- MP4/GIF decoding, dimensions, file sizes, hashes, and visual frame inspection
+  were checked for the original showcase. That provenance does not extend to the
+  current PNGs, which are newer.
 - No Android export, physical-device, touch, audio playback, multiplayer, store, or hosted-demo check is claimed.
 - This documentation/media work does not change the proprietary [license](../../LICENSE).
