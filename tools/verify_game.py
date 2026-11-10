@@ -240,17 +240,40 @@ def main():
                 proc = subprocess.run(
                     [sys.executable,
                      os.path.join(REPO_ROOT, "tests/verifier_exit/test_verifier_exit.py")],
-                    cwd=REPO_ROOT, env=env, timeout=TIMEOUT_SECONDS)
+                    cwd=REPO_ROOT, env=env, timeout=TIMEOUT_SECONDS,
+                    capture_output=True, text=True)
                 code = proc.returncode
+                output = proc.stdout + proc.stderr
             except (OSError, subprocess.TimeoutExpired):
                 code = None
+                output = ""
         else:
-            code = run(godot, args, env=env)
+            try:
+                proc = subprocess.run(
+                    [godot] + args, cwd=REPO_ROOT, timeout=TIMEOUT_SECONDS, env=env,
+                    capture_output=True, text=True)
+                code = proc.returncode
+                output = proc.stdout + proc.stderr
+            except subprocess.TimeoutExpired:
+                code = None
+                output = ""
         if code is None:
             return fail("%s timed out" % name)
         if code != 0:
+            print(output, file=sys.stderr)
             print("verify_game: FAIL %s exited %d" % (name, code), file=sys.stderr)
             return code
+        # Same error classification CI applies. Without this the local "all
+        # gates pass" claim can miss a runtime error that CI correctly rejects
+        # (a RefCounted free() in a test once shipped through that gap).
+        problems = [ln for ln in output.splitlines()
+                    if "SCRIPT ERROR" in ln
+                    or "ObjectDB instances leaked at exit" in ln
+                    or "resources still in use at exit" in ln]
+        if problems:
+            for ln in problems[:10]:
+                print("verify_game: %s: %s" % (name, ln.strip()), file=sys.stderr)
+            return fail("%s reported runtime errors/leaks" % name)
         print("verify_game: PASS %s (exit 0)" % name)
     return 0
 

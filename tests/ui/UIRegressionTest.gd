@@ -243,6 +243,9 @@ func _test_accessibility_settings() -> void:
 	reloaded.free()
 
 	# Runtime effect: reduce_motion must actually suppress screen shake.
+	# ViewState is a plain RefCounted class ("No Node" by design), so it is
+	# reference-counted and must simply be dropped — calling free()/queue_free()
+	# on it raises "Attempted to free a RefCounted object".
 	var vs = load("res://rendering/ViewState.gd").new()
 	vs.configure_from_settings({"reduce_motion": true})
 	vs.start_screen_shake(1000, 10.0, 500)
@@ -252,7 +255,7 @@ func _test_accessibility_settings() -> void:
 	vs.start_screen_shake(2000, 10.0, 500)
 	_check(vs.get_screen_shake_offset(2050) != Vector2.ZERO,
 		"screen shake is active when reduce_motion is off")
-	vs.free()
+	vs = null
 
 	# Audio/haptics: JuiceManager must reflect the muted/haptic settings.
 	JuiceManager.configure_from_progression()
