@@ -157,6 +157,7 @@ func _pass_test() -> void:
 	print("  RP this run    : %d" % rp)
 	print("  Sim ticks used : %d (~%.1f s)" % [_tick, float(_tick * _dt_ms) / 1000.0])
 	set_process(false)
+	_dispose_state()
 	get_tree().quit(0)
 
 func _fail(reason: String) -> void:
@@ -165,4 +166,14 @@ func _fail(reason: String) -> void:
 	print("  Wave: %d  Lives: %d  Gold: %d  Enemies: %d" % [
 		_gs.wave, _gs.lives, _gs.gold, _gs.enemies.size()])
 	set_process(false)
+	_dispose_state()
 	get_tree().quit(1)
+
+## Release the simulation's entity graph before quitting. Without this the
+## process exits holding live Tower/Enemy/Projectile instances, which Godot
+## reports as "ObjectDB instances leaked at exit" — a real ownership bug in the
+## test harness, not engine noise.
+func _dispose_state() -> void:
+	if _gs != null:
+		_gs.dispose()
+		_gs = null

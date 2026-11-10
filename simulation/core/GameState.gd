@@ -202,12 +202,13 @@ func _init(p_path: Array = [], run_config: Dictionary = {}, p_map_id: int = 0) -
 	wave_shop_pending = false
 	_wave_shop_offers = []
 	# Seeding: a caller may pass rng_seed for a reproducible run (tests, harness,
-	# replays). Otherwise the run is genuinely random, as a player expects.
+	# replays). Otherwise derive from the global stream, so the established
+	# seed(N)-then-construct test convention stays reproducible.
 	_fx_rng.randomize()
 	if cfg.has("rng_seed"):
 		rng.seed = int(cfg["rng_seed"])
 	else:
-		rng.randomize()
+		rng.seed = randi()
 	# The run config carries the resolved modifier list when available; fall back
 	# to the single primary id for older callers.
 	var mod_ids = cfg.get("modifier_ids", [])
