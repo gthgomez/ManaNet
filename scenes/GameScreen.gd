@@ -861,11 +861,17 @@ func _apply_responsive_layout() -> void:
 	if _instruction_banner != null:
 		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin_l - margin_r))
 		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport) else 52.0
+		# Never let the banner grow taller than its reserved band. On narrow
+		# portrait screens the label's static 400px width minimum forced 3 lines
+		# and a 75-79px box, covering the playfield. Clear the label's width floor
+		# and clip so the banner keeps its reserved height at every width.
+		banner_h = minf(banner_h, 60.0)
 		var banner_font: int = int(clampf(viewport.y * 0.032, 14.0, 20.0))
 		_instruction_label.add_theme_font_size_override("font_size", banner_font)
-		_instruction_label.custom_minimum_size = Vector2(maxf(0.0, banner_w - 28.0), 0)
+		_instruction_label.custom_minimum_size = Vector2.ZERO
+		_instruction_label.clip_text = true
 		_instruction_banner.custom_minimum_size = Vector2.ZERO
-		_LAYOUT.apply_rect(_instruction_banner, Rect2(Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
+		_LAYOUT.apply_modal(_instruction_banner, Rect2(Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
 
 	_layout_tower_panel(null)
 
@@ -936,17 +942,32 @@ func _layout_tower_panel(selected: Tower) -> void:
 	var margin_r: float = float(margins["right"])
 	var top: float = float(margins["top"])
 	var bottom: float = float(margins["bottom"])
-	var panel_h: float = 220.0
-	if _LAYOUT.is_short_height(viewport) or _LAYOUT.is_phone_ultrawide(viewport):
-		panel_h = 168.0
-	var size: Vector2 = Vector2(minf(460.0, maxf(300.0, viewport.x - margin_l - margin_r)), panel_h)
 	# Anchor to the real shop strip, not a hardcoded 92px guess (which was the
 	# wrong height and let upgrade/sell controls slide behind the shop cards).
 	var shop_y: float = viewport.y - bottom - 104.0
 	if _shop_scroll != null and _shop_scroll.size.y > 0.0:
 		shop_y = _shop_scroll.position.y
-	var low_y: float = maxf(top + 102.0, shop_y - size.y - 12.0)
-	var high_y: float = top + 102.0
+	var top_limit: float = top + 102.0
+	# Fit the panel into what is actually left between the top bar and the shop
+	# strip. A fixed 168px panel overlapped the shop strip on 320-360px-tall
+	# phone landscapes (measured panel bottom 292 vs shop top 204).
+	var hard_room: float = shop_y - top_limit - 12.0
+	if hard_room < 96.0:
+		# Not enough vertical room for a usable panel: hide it rather than
+		# drawing controls on top of the shop. Selection still works; the player
+		# can use the shop strip and the upgrade affordances there.
+		_tower_panel.visible = false
+		return
+	_tower_panel.visible = true
+	var panel_h: float = 220.0
+	if _LAYOUT.is_short_height(viewport) or _LAYOUT.is_phone_ultrawide(viewport):
+		panel_h = 168.0
+	panel_h = minf(panel_h, hard_room)
+	var panel_w: float = minf(460.0, maxf(300.0, viewport.x - margin_l - margin_r))
+	panel_w = minf(panel_w, maxf(240.0, viewport.x - margin_l - margin_r))
+	var size: Vector2 = Vector2(panel_w, panel_h)
+	var low_y: float = maxf(top_limit, shop_y - size.y - 12.0)
+	var high_y: float = top_limit
 	var x: float = margin_l
 	var y: float = low_y
 
@@ -959,7 +980,10 @@ func _layout_tower_panel(selected: Tower) -> void:
 		x = viewport.x - margin_r - size.x
 		y = low_y
 
-	_LAYOUT.apply_rect(_tower_panel, Rect2(Vector2(x, y), size))
+	# The panel's static content minimum (430x178) would otherwise override the
+	# fitted size and push it back over the shop strip. Clamp the minimum to the
+	# rect we just computed and clip, exactly like apply_modal does for modals.
+	_LAYOUT.apply_modal(_tower_panel, Rect2(Vector2(x, y), size))
 	_THEME.apply_glass_panel(_tower_panel)
 	if _tower_panel.material is ShaderMaterial:
 		_tower_panel.material.set_shader_parameter("panel_size", size)

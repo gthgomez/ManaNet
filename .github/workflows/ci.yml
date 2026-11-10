@@ -103,6 +103,14 @@ jobs:
           mkdir -p "$(dirname "$MANANET_PROFILE_PATH")"
           godot --headless --path . res://tests/ui/PlayerJourneyTest.tscn 2>&1 | tee journey.log
 
+      - name: Viewport geometry (desktop + mobile sizes)
+        env:
+          MANANET_PROFILE_PATH: ${{ runner.temp }}/ci-profile-geometry/td_progression.json
+        run: |
+          set -o pipefail
+          mkdir -p "$(dirname "$MANANET_PROFILE_PATH")"
+          godot --headless --path . res://tests/ui/ViewportGeometryTest.tscn 2>&1 | tee geometry.log
+
       - name: Benchmark liveness and percentiles
         run: |
           set -o pipefail
@@ -123,7 +131,7 @@ jobs:
           # Deliberate classification: SCRIPT ERROR is always fatal. Resource
           # leaks at exit are fatal for the harnesses that own their state, which
           # is what caught the undisposed SimTest GameState.
-          LOGS="regression.log speed_parity.log save_faults.log full_run.log simtest.log uiregression.log journey.log benchmark.log verify.log"
+          LOGS="regression.log speed_parity.log save_faults.log full_run.log simtest.log uiregression.log journey.log geometry.log benchmark.log verify.log"
           if grep -n "SCRIPT ERROR" $LOGS 2>/dev/null; then
             echo "::error::A headless run reported SCRIPT ERROR; see logs."
             exit 1

@@ -77,6 +77,11 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_apply_layout)
 	_apply_visuals()
 	_apply_layout()
+	# Second pass after the tree has measured content. The first pass can run
+	# before the viewport/stretch has settled (a 320px phone briefly reports the
+	# 900px design size), leaving the column wider than the screen. GameScreen
+	# uses the same deferred re-layout for the same reason.
+	call_deferred("_apply_layout")
 	_refresh_rp()
 
 	FocusManager.setup_dpad_neighbors([_base_btn, _settings_btn], false)
@@ -147,8 +152,26 @@ func _apply_visuals() -> void:
 
 func _apply_layout() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	var width: float  = minf(1100.0, maxf(600.0, viewport.x * 0.8))
-	var height: float = clampf(viewport.y * 0.72, 400.0, 600.0)
+	var margin_h: float = _LAYOUT.edge_margin(viewport)
+	# Never force a width wider than the viewport: the previous 600px floor
+	# overflowed a 568px-wide phone landscape and pushed the play button off
+	# screen (measured 601px wide in a 568px viewport).
+	var max_avail: float = maxf(240.0, viewport.x - margin_h * 2.0)
+	var width: float  = minf(max_avail, minf(1100.0, maxf(600.0, viewport.x * 0.8)))
+	# Compact metrics on short screens. A 320px-tall phone landscape cannot fit
+	# an 84px title + 32px separations + 64px play button (measured bottom 348 in
+	# a 320px viewport), so the whole column must shrink, not just its box.
+	var compact: bool = viewport.y < 480.0 or viewport.x < 640.0
+	var title_h: float = (44.0 if compact else (110.0 if viewport.x >= 1200.0 else 84.0))
+	var sep: int = 10 if compact else 32
+	var play_h: float = 52.0 if compact else 64.0
+	var row2_h: float = 36.0 if compact else _LAYOUT.TOUCH_HEIGHT
+
+	# Height must also respect the viewport and the real content minimum.
+	var content_min: float = title_h + 24.0 + float(sep * 3) + play_h + row2_h
+	var avail_h: float = viewport.y - _LAYOUT.top_margin(viewport) - _LAYOUT.bottom_margin(viewport) - 16.0
+	var height: float = clampf(viewport.y * 0.72, content_min, 600.0)
+	height = maxf(minf(height, avail_h), minf(content_min, avail_h))
 	var x: float      = (viewport.x - width) * 0.5
 	var top_min: float    = _LAYOUT.top_margin(viewport) + 32.0
 	var bottom_min: float = _LAYOUT.bottom_margin(viewport) + 24.0
@@ -156,14 +179,27 @@ func _apply_layout() -> void:
 			(viewport.y - height) * 0.44,
 			top_min,
 			maxf(top_min, viewport.y - height - bottom_min))
+	# The .tscn anchors the VBox at 0.5 with fixed ±280px offsets. set_anchors_preset
+	# inside apply_rect() recomputes offsets from those anchors, which re-inflated
+	# the column to 422px inside a 320px phone. Reset the anchor rectangle first so
+	# the computed rect is authoritative, then clip rather than overflow.
+	for edge in ["anchor_left", "anchor_top", "anchor_right", "anchor_bottom"]:
+		_vbox.set(edge, 0.0)
+	_vbox.custom_minimum_size = Vector2.ZERO
+	_vbox.clip_contents = true
 	_LAYOUT.apply_rect(_vbox, Rect2(Vector2(x, y), Vector2(width, height)))
 
-	_vbox.add_theme_constant_override("separation", 32)
-	_title.custom_minimum_size = Vector2(0.0, 110.0 if viewport.x >= 1200.0 else 84.0)
+	_vbox.add_theme_constant_override("separation", sep)
+	_title.custom_minimum_size = Vector2(0.0, title_h)
+	# A TextureRect defaults to KEEP_SIZE, so the logo texture's pixel width became
+	# the column's hard minimum and inflated it to 422px inside a 320px phone.
+	# Scale the logo to the column instead of letting it dictate the width.
+	_title.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_title.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_subtitle.autowrap_mode       = TextServer.AUTOWRAP_WORD_SMART
-	_play_btn.custom_minimum_size     = Vector2(0.0, 64.0)
-	_base_btn.custom_minimum_size     = Vector2(0.0, _LAYOUT.TOUCH_HEIGHT)
-	_settings_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.TOUCH_HEIGHT)
+	_play_btn.custom_minimum_size     = Vector2(0.0, play_h)
+	_base_btn.custom_minimum_size     = Vector2(0.0, row2_h)
+	_settings_btn.custom_minimum_size = Vector2(0.0, row2_h)
 
 	# Gap 2 — glass panel housing the content area
 	_ensure_glass()
