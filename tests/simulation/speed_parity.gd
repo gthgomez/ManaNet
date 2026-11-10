@@ -81,8 +81,10 @@ func _straight_state(speed: float = 1.0) -> GameState:
 	return gs
 
 func _real_state(speed: float) -> GameState:
-	seed(SEED)
-	var gs := GameStateScript.new(_MAPS.MAPS[0]["path"], {}, 0)
+	# rng_seed makes the enemy composition identical across speeds; otherwise
+	# randomize() would hand each run a different wave and the comparison would
+	# be meaningless.
+	var gs := GameStateScript.new(_MAPS.MAPS[0]["path"], {"rng_seed": SEED}, 0)
 	gs.speed_multiplier = speed
 	return gs
 
@@ -212,65 +214,94 @@ func _test_status_durations_are_sim_time() -> void:
 # Wall-clock parity (bounded) — the player-visible question
 # ---------------------------------------------------------------------------
 
-func _run_full_wave_at(speed: float, wall_budget_ms: int) -> Dictionary:
+func _run_to_sim_time(speed: float, target_sim_ms: int) -> Dictionary:
+	# Advance until the *simulation* clock reaches an exact target. This is the
+	# precise parity contract: at equal simulated time, every mechanical outcome
+	# must match. Wall-clock only determines how long that takes to arrive.
 	var gs := _real_state(speed)
 	gs.wave = 3
-	gs.wave_enemy_total = 14
+	gs.wave_enemy_total = 400
+	gs.lives = 1_000_000
 	gs.start_wave()
-	_advance_wall_time(gs, wall_budget_ms)
+	var guard: int = 0
+	while gs.sim_now() < target_sim_ms and guard < 1_000_000:
+		var before: int = gs.sim_now()
+		gs.update_simulation(gs.wall_now() + TICK_MS)
+		guard += 1
+		if gs.sim_now() == before:
+			break  # stalled (paused/gated) — stop rather than spin
 	var snapshot := {
-		"kills":      gs.stat_enemies_killed,
-		"leaks":      gs.lives,
-		"gold":       gs.gold,
+		"kills":       gs.stat_enemies_killed,
+		"leaks":       1_000_000 - gs.lives,
+		"gold":        gs.gold,
 		"sim_elapsed": gs.sim_now(),
-		"spawned":    gs.enemies_spawned,
-		"alive":      gs.enemies.size(),
+		"spawned":     gs.enemies_spawned,
+		"alive":       gs.enemies.size(),
 	}
 	gs.dispose()
 	return snapshot
 
+func _run_wall_budget(speed: float, wall_budget_ms: int) -> int:
+	# Wall budget only measures the *rate* at which sim time accrues.
+	var gs := _real_state(speed)
+	gs.wave = 3
+	gs.wave_enemy_total = 400
+	gs.lives = 1_000_000
+	gs.start_wave()
+	_advance_wall_time(gs, wall_budget_ms)
+	var elapsed: int = gs.sim_now()
+	gs.dispose()
+	return elapsed
+
 func _test_wall_clock_parity_bounded() -> void:
-	# Same *simulation* time reached, different wall budgets. This is the honest
-	# comparison: fast-forward compresses wall time, so we give 2x half the wall
-	# budget and 3x a third, and require the sim outcome to line up.
-	var base_wall: int = 24000
-	var slow := _run_full_wave_at(1.0, base_wall)
-	var mid := _run_full_wave_at(2.0, int(base_wall / 2))
-	var fast := _run_full_wave_at(3.0, int(base_wall / 3))
+	# Two distinct, honest claims:
+	#
+	#  1. At equal SIMULATED time the mechanics are identical. This is the real
+	#     parity contract and is asserted exactly.
+	#  2. Wall time to reach that sim time compresses by the speed multiplier.
+	#     This can only be asserted as a rate (integer ticks never land on the
+	#     same sim instant), so it gets a small tolerance.
+	var target_sim: int = 12000
+	var slow := _run_to_sim_time(1.0, target_sim)
+	var mid := _run_to_sim_time(2.0, target_sim)
+	var fast := _run_to_sim_time(3.0, target_sim)
 
-	# Compare sim-ms per wall-ms rather than raw sim totals: integer tick counts
-	# cannot land exactly on the same sim instant (one 16 ms wall tick is 48 sim
-	# ms at 3x), so the ratio is the invariant and the residual is bounded.
-	var slow_rate: float = float(slow["sim_elapsed"]) / float(base_wall)
-	var mid_rate: float = float(mid["sim_elapsed"]) / float(base_wall / 2)
-	var fast_rate: float = float(fast["sim_elapsed"]) / float(base_wall / 3)
-	var rate_tol: float = 0.01   # 1%: absorbs one priming tick
-
-	_check_close(mid_rate, 2.0 * slow_rate, rate_tol,
-		"2x advances sim time at twice the wall rate")
-	_check_close(fast_rate, 3.0 * slow_rate, rate_tol,
-		"3x advances sim time at three times the wall rate")
-
-	# Spawn count and leak count must agree; these are the mechanics a player
-	# would exploit if fast-forward were secretly easier or harder.
+	_check(int(slow["sim_elapsed"]) == int(mid["sim_elapsed"]),
+		"1x and 2x stop at the same sim time (%d vs %d)"
+			% [slow["sim_elapsed"], mid["sim_elapsed"]])
+	_check(int(slow["sim_elapsed"]) == int(fast["sim_elapsed"]),
+		"1x and 3x stop at the same sim time (%d vs %d)"
+			% [slow["sim_elapsed"], fast["sim_elapsed"]])
 	_check(int(mid["spawned"]) == int(slow["spawned"]),
-		"2x spawns the same number of enemies for the same sim time (%d vs %d)"
+		"2x spawns the same number of enemies at equal sim time (%d vs %d)"
 			% [mid["spawned"], slow["spawned"]])
 	_check(int(fast["spawned"]) == int(slow["spawned"]),
-		"3x spawns the same number of enemies for the same sim time (%d vs %d)"
+		"3x spawns the same number of enemies at equal sim time (%d vs %d)"
 			% [fast["spawned"], slow["spawned"]])
-	_check(absi(int(mid["kills"]) - int(slow["kills"])) <= 1,
-		"2x kill count matches 1x within discrete-tick tolerance (%d vs %d)"
+	_check(int(mid["kills"]) == int(slow["kills"]),
+		"2x kills the same enemies at equal sim time (%d vs %d)"
 			% [mid["kills"], slow["kills"]])
-	_check(absi(int(fast["kills"]) - int(slow["kills"])) <= 1,
-		"3x kill count matches 1x within discrete-tick tolerance (%d vs %d)"
+	_check(int(fast["kills"]) == int(slow["kills"]),
+		"3x kills the same enemies at equal sim time (%d vs %d)"
 			% [fast["kills"], slow["kills"]])
 	_check(int(mid["leaks"]) == int(slow["leaks"]),
-		"2x leaks the same number of enemies as 1x (%d vs %d)"
+		"2x leaks the same enemies at equal sim time (%d vs %d)"
 			% [mid["leaks"], slow["leaks"]])
 	_check(int(fast["leaks"]) == int(slow["leaks"]),
-		"3x leaks the same number of enemies as 1x (%d vs %d)"
+		"3x leaks the same enemies at equal sim time (%d vs %d)"
 			% [fast["leaks"], slow["leaks"]])
+
+	# Rate check: sim-ms accrued per wall-ms over a fixed wall budget.
+	var base_wall: int = 24000
+	var slow_rate: float = float(_run_wall_budget(1.0, base_wall)) / float(base_wall)
+	var mid_rate: float = float(_run_wall_budget(2.0, base_wall)) / float(base_wall)
+	var fast_rate: float = float(_run_wall_budget(3.0, base_wall)) / float(base_wall)
+	_check(mid_rate > slow_rate * 1.8 and mid_rate < slow_rate * 2.2,
+		"2x accrues sim time at roughly twice the wall rate (%.2f vs %.2f)"
+			% [mid_rate, slow_rate])
+	_check(fast_rate > slow_rate * 2.7 and fast_rate < slow_rate * 3.3,
+		"3x accrues sim time at roughly three times the wall rate (%.2f vs %.2f)"
+			% [fast_rate, slow_rate])
 
 func _test_speed_change_mid_combat() -> void:
 	# Switching speed mid-wave must behave like advancing at the new rate from

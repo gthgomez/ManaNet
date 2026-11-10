@@ -111,6 +111,14 @@ var _wave_shop_offers: Array = []
 ## Modifier ids active for this run, used to filter offers and validate picks.
 var _active_modifier_ids: Array = []
 
+## Gameplay RNG. Every roll that can change an outcome (spawn type, crits,
+## teleport/root procs, alchemy bonus, jitter) draws from here.
+var rng := RandomNumberGenerator.new()
+## Presentation RNG. Particle angles/lifespans draw from a SEPARATE stream so
+## visual load can never perturb gameplay rolls — otherwise a busier screen (or
+## a different tick count at 3x) would change crits and enemy composition.
+var _fx_rng := RandomNumberGenerator.new()
+
 const WAVE_SHOP_OFFER_COUNT: int = 3
 
 # ---------------------------------------------------------------------------
@@ -193,6 +201,13 @@ func _init(p_path: Array = [], run_config: Dictionary = {}, p_map_id: int = 0) -
 	_perm_kill_bonus = 0
 	wave_shop_pending = false
 	_wave_shop_offers = []
+	# Seeding: a caller may pass rng_seed for a reproducible run (tests, harness,
+	# replays). Otherwise the run is genuinely random, as a player expects.
+	_fx_rng.randomize()
+	if cfg.has("rng_seed"):
+		rng.seed = int(cfg["rng_seed"])
+	else:
+		rng.randomize()
 	# The run config carries the resolved modifier list when available; fall back
 	# to the single primary id for older callers.
 	var mod_ids = cfg.get("modifier_ids", [])
@@ -689,7 +704,7 @@ func spawn_enemy(now_ms: int) -> void:
 		else:
 			weights = [0.38, 0.16, 0.14, 0.12, 0.12, 0.08]
 
-		var roll: float = randf()
+		var roll: float = rng.randf()
 		var cumulative: float = 0.0
 		var chosen_idx: int = 0
 		for i in range(weights.size()):
@@ -717,7 +732,7 @@ func spawn_enemy(now_ms: int) -> void:
 		enemy.chilled_until = maxi(enemy.chilled_until, now_ms + 3000)
 		_ws_frost_vanguard_remaining -= 1
 
-	var jitter: int = randi_range(-5, 5)
+	var jitter: int = rng.randi_range(-5, 5)
 	enemy.pos.x += float(jitter)
 	enemy.pos.y += float(jitter)
 
@@ -841,7 +856,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 	if tower.ttype == "sniper":
 		if tower.tracker.path_levels["Top"] >= 1:
 			var crit_chance: float = 0.12 + 0.04 * float(tower.tracker.path_levels["Top"])
-			if randf() < crit_chance:
+			if rng.randf() < crit_chance:
 				damage = int(float(damage) * 2.5)
 				add_effect("banner", target.pos, now_ms, 420, -1, 24, Color(1.0, 0.157, 0.157), "CRIT!")
 				_add_particle_burst(target.pos, "spark", Color(1.0, 0.235, 0.157), 12, now_ms)
@@ -934,7 +949,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 			target.frozen_until = maxi(target.frozen_until, now_ms + f_ms)
 		
 		var t_chance: float = tower.teleport_chance()
-		if t_chance > 0.0 and randf() < t_chance:
+		if t_chance > 0.0 and rng.randf() < t_chance:
 			target.rewind_by_distance(0.18, now_ms)
 			add_effect("vortex", target.pos, now_ms, 450, -1, 32, Color(0.0, 0.8, 1.0))
 			_add_particle_burst(target.pos, "spark", Color(0.2, 0.8, 1.0), 15, now_ms)
@@ -976,7 +991,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 
 	# Archer Rooting
 	if tower.ttype == "archer" and tower.root_chance() > 0.0:
-		if randf() < tower.root_chance():
+		if rng.randf() < tower.root_chance():
 			target.rooted_until = maxi(target.rooted_until, now_ms + 1200)
 			add_effect("banner", target.pos, now_ms, 400, -1, 16, Color(0.4, 0.9, 0.4), "ROOTED")
 
@@ -1127,7 +1142,7 @@ func update_simulation(now_ms: int) -> void:
 
 		# Alchemy Bonus
 		if enemy.transmute_until > sim_ms:
-			var bonus: int = randi_range(1, 3)
+			var bonus: int = rng.randi_range(1, 3)
 			reward += bonus
 			add_effect("banner", enemy.pos, now_ms, 350, -1, 24, Color(1.0, 1.0, 0.4), "GOLD++")
 
@@ -1154,8 +1169,8 @@ func update_simulation(now_ms: int) -> void:
 				minion.health = maxi(1, int(float(minion.health) * _current_enemy_hp_multiplier() * _enemy_hp_mult))
 				minion.max_health = minion.health
 				minion.pos = Vector2(
-					enemy.pos.x + float(randi_range(-20, 20)),
-					enemy.pos.y + float(randi_range(-20, 20))
+					enemy.pos.x + float(rng.randi_range(-20, 20)),
+					enemy.pos.y + float(rng.randi_range(-20, 20))
 				)
 				minion.path_index = enemy.path_index
 				enemies.append(minion)
@@ -1238,7 +1253,7 @@ func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, n
 		return
 	count = mini(count, remaining)
 	for _i in range(count):
-		var angle: float = randf() * TAU
+		var angle: float = _fx_rng.randf() * TAU
 		var spd: float
 		var lifespan: int
 		var size: float
@@ -1248,25 +1263,25 @@ func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, n
 		match kind:
 			"spark":
 				spd      = randf_range(0.12, 0.45)
-				lifespan = randi_range(150, 450)
+				lifespan = _fx_rng.randi_range(150, 450)
 				size     = randf_range(1.2, 2.8)
 				gravity  = 0.004
 				friction = 0.94
 			"smoke":
 				spd      = randf_range(0.01, 0.06)
-				lifespan = randi_range(800, 1600)
+				lifespan = _fx_rng.randi_range(800, 1600)
 				size     = randf_range(4.0, 14.0)
 				gravity  = -0.003
 				friction = 0.96
 			"flame":
 				spd      = randf_range(0.04, 0.12)
-				lifespan = randi_range(300, 700)
+				lifespan = _fx_rng.randi_range(300, 700)
 				size     = randf_range(3.5, 7.0)
 				gravity  = -0.008 # Rises
 				friction = 0.95
 			_:  # debris
 				spd      = randf_range(0.08, 0.28)
-				lifespan = randi_range(500, 1000)
+				lifespan = _fx_rng.randi_range(500, 1000)
 				size     = randf_range(2.5, 5.0)
 				gravity  = 0.014
 				friction = 0.95
