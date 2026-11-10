@@ -33,6 +33,14 @@ func _ready() -> void:
 	await get_tree().process_frame
 	get_tree().quit(1 if _fail > 0 else 0)
 
+func _silence() -> void:
+	# Button cues keep an Ogg playback alive across process exit on the CI
+	# dummy driver. This journey is about controls, not audio.
+	if JuiceManager != null and JuiceManager.has_method("configure"):
+		JuiceManager.configure(false)
+		if JuiceManager.has_method("stop_all"):
+			JuiceManager.stop_all()
+
 func _check(condition: bool, message: String) -> void:
 	if condition:
 		_pass += 1
@@ -142,6 +150,7 @@ func _wait_scene(path_part: String, frames: int = 180) -> Node:
 		if current != null and current.get_script() != null:
 			if str(current.get_script().resource_path).find(path_part) >= 0:
 				await get_tree().process_frame
+				_silence()
 				return current
 		await get_tree().process_frame
 	return null
