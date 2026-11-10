@@ -15,6 +15,10 @@ const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 @onready var _settings_btn: Button  = $VBox/ActionCol/Row2/SettingsBtn
 @onready var _bg: ColorRect         = $BG
 
+# Product wordmark (text), shown above the locked legacy logo asset.
+var _product_name: Label = null
+var _product_tagline: Label = null
+
 # Gap 1 — ambient particles
 var _particles: CPUParticles2D = null
 # Gap 2 — glass panel behind VBox
@@ -49,9 +53,9 @@ func _ready() -> void:
 	add_child(backdrop)
 	move_child(backdrop, 0)
 
-	# Decor mage — rendered above BG so it's actually visible
-	if ResourceLoader.exists("res://assets/sprites/towers/mage.svg", "Texture2D"):
-		_add_decor_icon(load("res://assets/sprites/towers/mage.svg"))
+	# The 96px mage SVG carries an opaque plate and reads as a dark rectangle when
+	# scaled up. The tower showcase below is the cyber-arcana decoration instead.
+	# The SVG asset itself stays on disk; it is just not composed into the menu.
 
 	# Background elements (low z in tree) — must be added before overlays
 	_add_particles()        # Gap 1
@@ -59,6 +63,7 @@ func _ready() -> void:
 
 	# VBox content additions
 	_add_title_rule()       # Gap 5
+	_add_product_wordmark() # ManaNet identity above the locked logo asset
 	_add_last_run_label()   # Previous pass + Gap 6
 	_add_play_context_label() # Gap 8
 
@@ -66,10 +71,15 @@ func _ready() -> void:
 	_add_rp_pill()
 	_add_mute_toggle()      # Gap 4
 	_add_version_label()    # Gap 3 (dynamic)
+	_add_pending_save_button()
 
-	self.modulate.a = 0.0
-	var fade_tween := create_tween()
-	fade_tween.tween_property(self, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
+	var reduce_motion: bool = bool(Progression.get_settings().get("reduce_motion", false))
+	if reduce_motion:
+		self.modulate.a = 1.0
+	else:
+		self.modulate.a = 0.0
+		var fade_tween := create_tween()
+		fade_tween.tween_property(self, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
 
 	_play_btn.pressed.connect(_on_play)
 	_base_btn.pressed.connect(_on_cyberdeck)
@@ -77,6 +87,11 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_apply_layout)
 	_apply_visuals()
 	_apply_layout()
+	# Second pass after the tree has measured content. The first pass can run
+	# before the viewport/stretch has settled (a 320px phone briefly reports the
+	# 900px design size), leaving the column wider than the screen. GameScreen
+	# uses the same deferred re-layout for the same reason.
+	call_deferred("_apply_layout")
 	_refresh_rp()
 
 	FocusManager.setup_dpad_neighbors([_base_btn, _settings_btn], false)
@@ -91,6 +106,8 @@ func _ready() -> void:
 	FocusManager.back_pressed.connect(_on_back_pressed)
 
 func _process(delta: float) -> void:
+	if bool(Progression.get_settings().get("reduce_motion", false)):
+		return
 	_time += delta
 	for i in _tower_showcase.size():
 		if i < _tower_base_y.size() and _tower_base_y[i] > 0.0:
@@ -109,6 +126,25 @@ func _apply_visuals() -> void:
 
 	_THEME.apply_label(_subtitle, "muted")
 	_subtitle.text = _BRAND.FANTASY_SUBTITLE
+	# The shipped title texture still reads "Tactical Tower Defense". It stays
+	# in the project, but it is not part of the menu composition.
+	_title.visible = false
+	_title.custom_minimum_size = Vector2.ZERO
+	if _product_name != null:
+		_product_name.text = _BRAND.PRODUCT_NAME
+		_THEME.apply_label(_product_name, "heading")
+		_product_name.add_theme_font_size_override("font_size", 28 if viewport_is_compact() else 56)
+		_product_name.add_theme_color_override("font_color", Color(0.72, 0.96, 1.0))
+		_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_product_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_product_name.custom_minimum_size = Vector2(0.0, 34.0 if viewport_is_compact() else 64.0)
+	if _product_tagline != null:
+		_product_tagline.text = _BRAND.PRODUCT_TAGLINE
+		_THEME.apply_label(_product_tagline, "muted")
+		_product_tagline.add_theme_font_size_override("font_size", 10 if viewport_is_compact() else 12)
+		_product_tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_product_tagline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_product_tagline.custom_minimum_size = Vector2(0.0, 14.0 if viewport_is_compact() else 18.0)
 
 	_THEME.apply_button(_play_btn, "primary")
 	_THEME.apply_button(_base_btn, "secondary")
@@ -124,31 +160,61 @@ func _apply_visuals() -> void:
 	_base_btn.focus_mode     = Control.FOCUS_ALL
 	_settings_btn.focus_mode = Control.FOCUS_ALL
 
-	# Title tilt loop
-	_title.pivot_offset = _title.size * 0.5
-	var tt := create_tween().set_loops()
-	tt.tween_property(_title, "rotation", deg_to_rad(1.0),  4.0).set_trans(Tween.TRANS_SINE)
-	tt.tween_property(_title, "rotation", deg_to_rad(-1.0), 4.0).set_trans(Tween.TRANS_SINE)
-
-	# Play glint loop
-	var pt := create_tween().set_loops()
-	pt.tween_callback(func(): _THEME.trigger_glint(_play_btn)).set_delay(3.5)
+	var reduce_motion: bool = bool(Progression.get_settings().get("reduce_motion", false))
+	if not reduce_motion:
+		# Play glint loop
+		var pt := create_tween().set_loops()
+		pt.tween_callback(func(): _THEME.trigger_glint(_play_btn)).set_delay(3.5)
 
 	# Cyber-Deck glows when unspent Shards are available (not just on just_won)
 	var profile: Dictionary = Progression.load_profile()
 	if Progression.just_won() or profile.get("banked_rp", 0) > 0:
 		_THEME.set_button_glow(_base_btn, true)
-		var t := create_tween().set_loops()
-		t.tween_callback(func(): _THEME.trigger_glint(_base_btn)).set_delay(2.0)
+		if not reduce_motion:
+			var t := create_tween().set_loops()
+			t.tween_callback(func(): _THEME.trigger_glint(_base_btn)).set_delay(2.0)
 
 	_refresh_mute_btn()
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
 
+## Compact metrics are needed on short or narrow screens. Shared so the visual
+## styling and the box layout cannot disagree about which mode is active.
+func viewport_is_compact() -> bool:
+	var vp: Vector2 = _LAYOUT.viewport_size(self)
+	return vp.y < 480.0 or vp.x < 640.0
+
 func _apply_layout() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	var width: float  = minf(1100.0, maxf(600.0, viewport.x * 0.8))
-	var height: float = clampf(viewport.y * 0.72, 400.0, 600.0)
+	var margin_h: float = _LAYOUT.edge_margin(viewport)
+	# Never force a width wider than the viewport: the previous 600px floor
+	# overflowed a 568px-wide phone landscape and pushed the play button off
+	# screen (measured 601px wide in a 568px viewport).
+	var max_avail: float = maxf(240.0, viewport.x - margin_h * 2.0)
+	var width: float  = minf(max_avail, minf(1100.0, maxf(600.0, viewport.x * 0.8)))
+	# Compact metrics on short screens. A 320px-tall phone landscape cannot fit
+	# an 84px title + 32px separations + 64px play button (measured bottom 348 in
+	# a 320px viewport), so the whole column must shrink, not just its box.
+	var compact: bool = viewport_is_compact()
+	# The legacy logo is hidden, so the column no longer reserves a title plate.
+	var title_h: float = 0.0
+	var sep: int = 6 if compact else 32
+	var play_h: float = 46.0 if compact else 64.0
+	var row2_h: float = 34.0 if compact else _LAYOUT.TOUCH_HEIGHT
+
+	# Height must also respect the viewport and the real content minimum. The
+	# minimum must include the wordmark + tagline rows that now sit above the
+	# logo; omitting them let the column overflow and overlap the showcase.
+	var wordmark_h: float = 34.0 if compact else 64.0
+	var tagline_h: float = 12.0 if compact else 18.0
+	var content_min: float = wordmark_h + tagline_h + title_h + 24.0 + float(sep * 4) + play_h + row2_h
+	var avail_h: float = viewport.y - _LAYOUT.top_margin(viewport) - _LAYOUT.bottom_margin(viewport) - 12.0
+	# Clamp the column to what the viewport can actually show. If even the
+	# content minimum does not fit (320px-tall phone landscape), the column gets
+	# the available height and its own contents are compacted above.
+	var height: float = clampf(viewport.y * 0.72, minf(content_min, avail_h), 600.0)
+	height = minf(height, avail_h)
+	height = maxf(height, 1.0)
 	var x: float      = (viewport.x - width) * 0.5
 	var top_min: float    = _LAYOUT.top_margin(viewport) + 32.0
 	var bottom_min: float = _LAYOUT.bottom_margin(viewport) + 24.0
@@ -156,14 +222,27 @@ func _apply_layout() -> void:
 			(viewport.y - height) * 0.44,
 			top_min,
 			maxf(top_min, viewport.y - height - bottom_min))
+	# The .tscn anchors the VBox at 0.5 with fixed ±280px offsets. set_anchors_preset
+	# inside apply_rect() recomputes offsets from those anchors, which re-inflated
+	# the column to 422px inside a 320px phone. Reset the anchor rectangle first so
+	# the computed rect is authoritative, then clip rather than overflow.
+	for edge in ["anchor_left", "anchor_top", "anchor_right", "anchor_bottom"]:
+		_vbox.set(edge, 0.0)
+	_vbox.custom_minimum_size = Vector2.ZERO
+	_vbox.clip_contents = true
 	_LAYOUT.apply_rect(_vbox, Rect2(Vector2(x, y), Vector2(width, height)))
 
-	_vbox.add_theme_constant_override("separation", 32)
-	_title.custom_minimum_size = Vector2(0.0, 110.0 if viewport.x >= 1200.0 else 84.0)
+	_vbox.add_theme_constant_override("separation", sep)
+	_title.custom_minimum_size = Vector2(0.0, title_h)
+	# A TextureRect defaults to KEEP_SIZE, so the logo texture's pixel width became
+	# the column's hard minimum and inflated it to 422px inside a 320px phone.
+	# Scale the logo to the column instead of letting it dictate the width.
+	_title.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_title.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_subtitle.autowrap_mode       = TextServer.AUTOWRAP_WORD_SMART
-	_play_btn.custom_minimum_size     = Vector2(0.0, 64.0)
-	_base_btn.custom_minimum_size     = Vector2(0.0, _LAYOUT.TOUCH_HEIGHT)
-	_settings_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.TOUCH_HEIGHT)
+	_play_btn.custom_minimum_size     = Vector2(0.0, play_h)
+	_base_btn.custom_minimum_size     = Vector2(0.0, row2_h)
+	_settings_btn.custom_minimum_size = Vector2(0.0, row2_h)
 
 	# Gap 2 — glass panel housing the content area
 	_ensure_glass()
@@ -202,12 +281,18 @@ func _apply_layout() -> void:
 		var ts_x    := (viewport.x - total_w) * 0.5
 		var desired_y := y + height + 14.0
 		var max_y := viewport.y - bottom - ts_sz - (34.0 if compact_showcase else 24.0)
-		var ts_y: float = minf(desired_y, max_y)
+		# minf() used to pin the row to max_y even when that was *above* the
+		# column's bottom, so the showcase drew behind the action buttons. Only
+		# show it when there is genuine room beneath the column.
+		var has_room: bool = desired_y <= max_y
 		_tower_base_y.resize(count)
 		for i in count:
+			_tower_showcase[i].visible = has_room
+			if not has_room:
+				continue
 			_tower_showcase[i].size     = Vector2(ts_sz, ts_sz)
-			_tower_showcase[i].position = Vector2(ts_x + i * (ts_sz + ts_gap), ts_y)
-			_tower_base_y[i]            = ts_y
+			_tower_showcase[i].position = Vector2(ts_x + i * (ts_sz + ts_gap), desired_y)
+			_tower_base_y[i]            = desired_y
 
 	# Gap 1 — center particles origin and expand emission rect to full screen
 	if _particles:
@@ -307,6 +392,44 @@ func _on_mute_toggle() -> void:
 	JuiceManager.configure_from_progression()
 
 # ── Gap 5: Title decorative gold rule ─────────────────────────────────────────
+
+# ── Product wordmark ──────────────────────────────────────────────────────────
+# The shipped title_logo.png still reads "Tactical Tower Defense" and is
+# asset-locked, so the menu presents the real product name as text above it.
+func _add_pending_save_button() -> void:
+	if not Progression.has_pending_run():
+		return
+	var btn := Button.new()
+	btn.name = "RetrySaveBtn"
+	btn.text = _BRAND.SAVE_RETRY
+	btn.tooltip_text = _BRAND.UNSAVED_MENU
+	btn.custom_minimum_size = Vector2(0.0, 44.0)
+	btn.focus_mode = Control.FOCUS_ALL
+	_THEME.apply_button(btn, "primary")
+	btn.pressed.connect(func() -> void:
+		var result: Dictionary = Progression.retry_pending_run()
+		if result.get("save_failed", true):
+			btn.text = "Retry Save — still not saved"
+			return
+		btn.text = _BRAND.SAVE_OK
+		btn.disabled = true
+		_refresh_rp()
+	)
+	_vbox.add_child(btn)
+	_vbox.move_child(btn, _play_btn.get_parent().get_index())
+
+func _add_product_wordmark() -> void:
+	_product_name = Label.new()
+	_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_product_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vbox.add_child(_product_name)
+	_vbox.move_child(_product_name, _title.get_index())
+
+	_product_tagline = Label.new()
+	_product_tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_product_tagline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vbox.add_child(_product_tagline)
+	_vbox.move_child(_product_tagline, _title.get_index() + 1)
 
 func _add_title_rule() -> void:
 	_title_rule = ColorRect.new()

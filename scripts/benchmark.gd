@@ -42,9 +42,15 @@ func _init() -> void:
 	var now_ms: int = 0
 	var last_enemy_pos: Vector2 = Vector2.ZERO
 	var max_enemies: int = 0
+	var max_particles: int = 0
+	var max_projectiles: int = 0
 	for f in range(WARMUP_FRAMES + MEASURED_FRAMES):
 		if f == WARMUP_FRAMES:
 			samples.clear()
+		# Dismiss any wave-shop gate: it pauses the clock by design, which would
+		# measure an idle loop instead of a live wave (and stall the workload).
+		if state.wave_shop_pending:
+			state.apply_action({"type": "wave_shop_skip"}, now_ms)
 		var t0: int = Time.get_ticks_usec()
 		state.update_simulation(now_ms)
 		var dt: float = float(Time.get_ticks_usec() - t0)
@@ -52,6 +58,8 @@ func _init() -> void:
 			samples.append(dt)
 		now_ms += 16
 		max_enemies = maxi(max_enemies, state.enemies.size())
+		max_particles = maxi(max_particles, state.particles.size())
+		max_projectiles = maxi(max_projectiles, state.projectiles.size())
 		if not state.enemies.is_empty():
 			last_enemy_pos = state.enemies[0].pos
 
@@ -69,11 +77,26 @@ func _init() -> void:
 	print("Measured frames:   %d (after %d warm-up)" % [samples.size(), WARMUP_FRAMES])
 	print("Towers placed:     %d" % placed)
 	print("Peak enemies:      %d" % max_enemies)
+	print("Peak projectiles:  %d" % max_projectiles)
+	print("Peak particles:    %d" % max_particles)
 	print("Kills:             %d" % state.stat_enemies_killed)
-	print("Mean frame:        %.4f ms" % mean_ms)
-	print("p50 / p95 / p99:   %.4f / %.4f / %.4f ms" % [p50, p95, p99])
-	print("Max frame:         %.4f ms" % max_ms)
-	print("Theoretical FPS:   %.0f (mean)" % (1000.0 / maxf(0.000001, mean_ms)))
+	print("Sim-step mean:     %.4f ms" % mean_ms)
+	print("Sim-step p50/p95/p99: %.4f / %.4f / %.4f ms" % [p50, p95, p99])
+	print("Sim-step max:      %.4f ms" % max_ms)
+	print("Static memory:     %.2f MiB" % (float(Performance.get_monitor(Performance.MEMORY_STATIC)) / (1024.0 * 1024.0)))
+	print("NOTE: these are CPU simulation-step costs on this host. They are not rendered frame time, not GPU time, and not a phone or desktop FPS.")
+	# A short second pass at 3x checks that fast-forward does not explode step cost.
+	state.set_speed(3.0)
+	var fast_total: float = 0.0
+	var fast_n: int = 300
+	for _i in range(fast_n):
+		if state.wave_shop_pending:
+			state.apply_action({"type": "wave_shop_skip"}, now_ms)
+		var t0: int = Time.get_ticks_usec()
+		state.update_simulation(now_ms)
+		fast_total += float(Time.get_ticks_usec() - t0)
+		now_ms += 16
+	print("Sim-step mean at 3x (n=%d): %.4f ms" % [fast_n, fast_total / float(fast_n) / 1000.0])
 
 	var alive: bool = (
 		placed > 0

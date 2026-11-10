@@ -55,6 +55,7 @@ func _ready() -> void:
 
 	var profile: Dictionary = Progression.load_profile()
 	var banked_rp: int = profile.get("banked_rp", 0)
+	var save_failed: bool = bool(stats.get("save_failed", false)) or Progression.has_pending_run()
 
 	if won:
 		_title_lbl.text = "VICTORY!"
@@ -64,7 +65,11 @@ func _ready() -> void:
 		_title_lbl.add_theme_color_override("font_color", _THEME.RED)
 
 	var map_name: String = _MAPS_DATA.MAPS[map_id]["name"] if map_id < _MAPS_DATA.MAPS.size() else "Unknown"
-	if won:
+	if save_failed:
+		_sub_lbl.text = _BRAND.SAVE_FAILED_BODY
+		_sub_lbl.add_theme_color_override("font_color", _THEME.GOLD)
+		_add_retry_save_button()
+	elif won:
 		_sub_lbl.text = "All 15 waves cleared!  Map: %s" % map_name
 		_sub_lbl.add_theme_color_override("font_color", _THEME.GREEN)
 	else:
@@ -75,7 +80,10 @@ func _ready() -> void:
 	_add_stat("%s Earned" % _BRAND.CURRENCY_RUN, str(gold),             Color(1.0, 0.82, 0.2))
 	_add_stat("%s Remaining" % _BRAND.CORE_RESOURCE, str(lives),        Color.WHITE)
 	_add_stat("Perfect Waves",     "%d / %d" % [perfect_waves, waves],  Color(0.2, 0.8, 1.0))
-	_add_stat(_BRAND.CURRENCY_META, _BRAND.end_stat_shards(rp_earned, banked_rp), Color(0.47, 0.9, 1.0))
+	if save_failed:
+		_add_stat(_BRAND.CURRENCY_META, "Not saved", _THEME.GOLD)
+	else:
+		_add_stat(_BRAND.CURRENCY_META, _BRAND.end_stat_shards(rp_earned, banked_rp), Color(0.47, 0.9, 1.0))
 
 	var newly_unlocked: Array = stats.get("newly_unlocked_variants", [])
 	var milestone_deltas: Array = stats.get("milestone_deltas", [])
@@ -160,6 +168,30 @@ func _add_stat(label: String, value: String, val_color: Color) -> void:
 	val.add_theme_color_override("font_color", val_color)
 	row.add_child(val)
 	_stats_box.add_child(row)
+
+func _add_retry_save_button() -> void:
+	var retry_save := Button.new()
+	retry_save.name = "RetrySaveBtn"
+	retry_save.text = _BRAND.SAVE_RETRY
+	retry_save.custom_minimum_size = Vector2(150.0, _LAYOUT.TOUCH_HEIGHT)
+	_THEME.apply_button(retry_save, "primary")
+	retry_save.pressed.connect(_on_retry_save)
+	$Panel/VBox.add_child(retry_save)
+	$Panel/VBox.move_child(retry_save, _stats_box.get_index() + 1)
+
+func _on_retry_save() -> void:
+	var result: Dictionary = Progression.retry_pending_run()
+	var retry_save := $Panel/VBox.get_node_or_null("RetrySaveBtn")
+	if result.get("save_failed", true):
+		_sub_lbl.text = "Still not saved. Your earlier profile is unchanged."
+		return
+	_sub_lbl.text = _BRAND.SAVE_OK
+	_sub_lbl.add_theme_color_override("font_color", _THEME.GREEN)
+	Progression.pending_end_stats["save_failed"] = false
+	Progression.pending_end_stats["persisted"] = true
+	if retry_save is Button:
+		retry_save.text = _BRAND.SAVE_OK
+		retry_save.disabled = true
 
 func _on_retry() -> void:
 	var map_id: int = Progression.pending_end_stats.get("map_id", get_meta("map_id", 0))

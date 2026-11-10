@@ -4,22 +4,35 @@ extends Node
 # data shapes. Run with:
 #   godot --headless --path . res://tests/ui/UIRegressionTest.tscn
 #
-# Hermetic by design:
-# - EndScreen test uses only the in-memory pending_end_stats autoload var.
-# - Menu/GameScreen tests swap user://td_progression.json for a seeded profile,
-#   then restore the original bytes and verify restoration. A second copy of
-#   the original save is written to a separate (portable) harness path before
-#   anything is touched.
+# Isolation contract (P0 player-save safety):
+# - This harness never overwrites or deletes the real player profile at
+#   user://td_progression.json.
+# - tools/verify_game.py sets MANANET_PROFILE_PATH for this process, and as a
+#   second line of defence _ready() redirects the live autoload to a scratch
+#   profile before any screen is mounted.
+# - At the end it asserts the real profile bytes are unchanged (read-only peek)
+#   so a regression that reintroduces real-save writes fails loudly.
+#
+# Nothing here relies on restore-after-mutation: a hard kill mid-run can only
+# ever leave the scratch file behind, never a damaged player profile.
 
-const SAVE_PATH := "user://td_progression.json"
-const BACKUP_PATH := "user://td_progression.harness_backup.json"
-const EXT_BACKUP_PATH := "user://td_progression.harness_ext_backup.json"
+const REAL_SAVE_PATH := "user://td_progression.json"
+const SANDBOX_PATH := "user://td_progression.ui_harness.json"
 
 var _pass: int = 0
 var _fail: int = 0
+var _real_save_before: PackedByteArray = PackedByteArray()
+var _real_save_existed: bool = false
 
 func _ready() -> void:
 	await get_tree().process_frame
+	# Capture real-profile bytes read-only (never opened for writing anywhere).
+	_real_save_existed = FileAccess.file_exists(REAL_SAVE_PATH)
+	if _real_save_existed:
+		_real_save_before = FileAccess.get_file_as_bytes(REAL_SAVE_PATH)
+	# Redirect the live autoload to the scratch profile before mounting screens.
+	Progression.set_save_path(SANDBOX_PATH)
+	Progression.load_profile()
 	_run()
 
 func _check(condition: bool, message: String) -> void:
@@ -33,14 +46,11 @@ func _check(condition: bool, message: String) -> void:
 func _run() -> void:
 	print("--- UI REGRESSION CHECKS ---")
 	await _test_end_screen_milestones()
-	var sandbox_open := _open_save_sandbox()
-	if sandbox_open:
-		await _test_menu_with_seeded_history()
-		await _test_restart_with_clean_meta()
-		_close_save_sandbox_and_verify()
-	else:
-		_fail += 1
-		push_error("[FAIL] could not open save sandbox; skipping disk-dependent tests")
+	_prepare_sandbox_profile()
+	await _test_menu_with_seeded_history()
+	await _test_restart_with_clean_meta()
+	_test_accessibility_settings()
+	_verify_real_save_untouched()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass)
 	print("FAIL: %d" % _fail)
@@ -98,24 +108,10 @@ func _test_end_screen_milestones() -> void:
 	Progression.pending_end_stats = {}
 
 # ---------------------------------------------------------------------------
-# Save sandbox — swap real profile for a seeded one, restore afterwards
+# Sandbox profile — write a seeded profile to the scratch path only
 # ---------------------------------------------------------------------------
 
-var _had_save: bool = false
-var _original_bytes: PackedByteArray = PackedByteArray()
-
-func _open_save_sandbox() -> bool:
-	_had_save = FileAccess.file_exists(SAVE_PATH)
-	if _had_save:
-		_original_bytes = FileAccess.get_file_as_bytes(SAVE_PATH)
-		var ext := FileAccess.open(EXT_BACKUP_PATH, FileAccess.WRITE)
-		if ext:
-			ext.store_buffer(_original_bytes)
-			ext.close()
-	_write_seed_profile()
-	return FileAccess.file_exists(SAVE_PATH)
-
-func _write_seed_profile() -> void:
+func _prepare_sandbox_profile() -> void:
 	var zeros := {"archer": 0, "mage": 0, "cannon": 0, "sniper": 0, "frost": 0, "lightning": 0}
 	var av := {"archer": "", "mage": "", "cannon": "", "sniper": "", "frost": "", "lightning": ""}
 	var profile := {
@@ -135,25 +131,24 @@ func _write_seed_profile() -> void:
 				"gold_earned": 6000, "gold_spent": 5200, "rp_earned": 160, "won": false},
 		],
 	}
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	f.store_string(JSON.stringify(profile))
-	f.close()
+	var f := FileAccess.open(SANDBOX_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(profile))
+		f.close()
+	Progression.load_profile()
 
-func _close_save_sandbox_and_verify() -> void:
-	if _had_save:
-		var rf := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-		rf.store_buffer(_original_bytes)
-		rf.close()
-	else:
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
-	var now_bytes: PackedByteArray = (
-		FileAccess.get_file_as_bytes(SAVE_PATH) if FileAccess.file_exists(SAVE_PATH)
-		else PackedByteArray())
-	_check(now_bytes == _original_bytes, "real save file byte-identical after harness run")
-	if FileAccess.file_exists(BACKUP_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(BACKUP_PATH))
-	if FileAccess.file_exists(EXT_BACKUP_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(EXT_BACKUP_PATH))
+func _verify_real_save_untouched() -> void:
+	var now := PackedByteArray()
+	var exists_now: bool = FileAccess.file_exists(REAL_SAVE_PATH)
+	if exists_now:
+		now = FileAccess.get_file_as_bytes(REAL_SAVE_PATH)
+	_check(exists_now == _real_save_existed,
+		"real player profile existence unchanged by harness")
+	_check(now == _real_save_before, "real player profile byte-identical after harness run")
+	# Clean up the scratch artifacts.
+	for path in [SANDBOX_PATH, SANDBOX_PATH + ".tmp"]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 # ---------------------------------------------------------------------------
 # 2) MenuScreen — run-history driven labels (int AND float map_id entries)
@@ -207,4 +202,64 @@ func _test_restart_with_clean_meta() -> void:
 		"fresh ViewState created and confirm flag cleared")
 	_check(gs._prev_lives == gs.game_state.lives and gs._prev_wave == gs.game_state.wave,
 		"_prev_* edge trackers resynced after rebuild")
+	# Draw-order regression: combat call-outs (damage numbers, KO, banners) must
+	# render on the overlay layer, which must come AFTER every entity sprite pool
+	# and the baked terrain, so text is never buried by enemies/towers/path.
+	# (The selection ring and virtual cursor are added after it on purpose.)
+	var overlay_idx: int = -1
+	var last_sprite_idx: int = -1
+	var children: Array = gs.renderer.get_children()
+	for i in range(children.size()):
+		var child = children[i]
+		if child is MultiMeshInstance2D or child is SubViewport:
+			last_sprite_idx = i
+		if child is CanvasItem and str(child.name) == "Overlay":
+			overlay_idx = i
+	_check(overlay_idx >= 0, "renderer has an Overlay draw layer")
+	_check(overlay_idx > last_sprite_idx,
+		"Overlay paints after all sprite pools/terrain (overlay idx %d > last sprite idx %d)"
+			% [overlay_idx, last_sprite_idx])
+	_check(gs.renderer.TEXT_EFFECT_KINDS.has("dmg_num")
+			and gs.renderer.TEXT_EFFECT_KINDS.has("banner"),
+		"damage numbers and banners are classified as overlay text effects")
 	await _unmount(gs)
+
+# ---------------------------------------------------------------------------
+# 4) Accessibility settings persist AND change runtime behavior (F4)
+# ---------------------------------------------------------------------------
+
+func _test_accessibility_settings() -> void:
+	# Persistence: write through the isolated profile and read back from disk.
+	var path := SANDBOX_PATH
+	_check(Progression.set_setting("reduce_motion", true), "reduce_motion write persists")
+	_check(Progression.set_setting("audio_muted", true), "audio_muted write persists")
+	_check(Progression.set_setting("haptics_enabled", false), "haptics write persists")
+	var reloaded = load("res://autoloads/Progression.gd").new()
+	reloaded.initialize(path)
+	var s: Dictionary = reloaded.get_settings()
+	_check(s.get("reduce_motion") == true, "reduce_motion survives a profile reload")
+	_check(s.get("audio_muted") == true, "audio_muted survives a profile reload")
+	_check(s.get("haptics_enabled") == false, "haptics survives a profile reload")
+	reloaded.free()
+
+	# Runtime effect: reduce_motion must actually suppress screen shake.
+	# ViewState is a plain RefCounted class ("No Node" by design), so it is
+	# reference-counted and must simply be dropped — calling free()/queue_free()
+	# on it raises "Attempted to free a RefCounted object".
+	var vs = load("res://rendering/ViewState.gd").new()
+	vs.configure_from_settings({"reduce_motion": true})
+	vs.start_screen_shake(1000, 10.0, 500)
+	_check(vs.get_screen_shake_offset(1050) == Vector2.ZERO,
+		"reduce_motion suppresses screen shake entirely")
+	vs.configure_from_settings({"reduce_motion": false})
+	vs.start_screen_shake(2000, 10.0, 500)
+	_check(vs.get_screen_shake_offset(2050) != Vector2.ZERO,
+		"screen shake is active when reduce_motion is off")
+	vs = null
+
+	# Audio/haptics: JuiceManager must reflect the muted/haptic settings.
+	JuiceManager.configure_from_progression()
+	_check(JuiceManager._sfx_enabled == false, "mute setting disables SFX playback")
+	_check(JuiceManager._haptics_enabled == false, "haptics setting disables vibration")
+	# Restore defaults so later checks are unaffected.
+	Progression.reset_settings()

@@ -282,11 +282,22 @@ func _apply_layout() -> void:
 	var scroll_top: float = top + 66.0 + mod_strip_h
 	var content: Rect2 = _LAYOUT.centered_rect(viewport, scroll_top, _LAYOUT.bottom_margin(viewport), 1360.0)
 	_LAYOUT.apply_rect(_scroll, content)
+	# Only surface a scrollbar when the card row genuinely overflows. AUTO still
+	# reserves a track when three cards already fit, which read as a stray bar.
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.horizontal_scroll_mode = (
+		ScrollContainer.SCROLL_MODE_AUTO if content.size.x < 3.0 * 250.0 + 64.0
+		else ScrollContainer.SCROLL_MODE_DISABLED)
 	_card_container.alignment = BoxContainer.ALIGNMENT_CENTER
 	_card_container.add_theme_constant_override("separation", 32)
 	_card_container.custom_minimum_size = Vector2(content.size.x, content.size.y)
 
 	var card_w: float = clampf((content.size.x - 32.0) / 3.0, 250.0, 350.0)
+	# A 250px floor times three cards plus 32px separations overflowed a 900px
+	# viewport (measured: the third PLAY button clipped and a scrollbar appeared).
+	# On narrower screens let the cards shrink so all three stay visible.
+	var min_card_w: float = 190.0 if viewport.x < 1000.0 else 250.0
+	card_w = clampf((content.size.x - 66.0) / 3.0, min_card_w, 350.0)
 	var card_h: float = minf(maxf(390.0, content.size.y - 8.0), 460.0)
 	for child in _card_container.get_children():
 		if child is PanelContainer:

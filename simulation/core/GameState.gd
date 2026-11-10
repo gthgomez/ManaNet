@@ -6,7 +6,6 @@ class_name GameState
 const _TT   := preload("res://data/tower_types.gd")
 const _MAPS := preload("res://data/maps.gd")
 const _UP   := preload("res://data/upgrade_paths.gd")
-const _WAVE_CARDS := preload("res://data/wave_shop_cards.gd")
 
 # Simulation collections
 var towers: Array      # Array[Tower]
@@ -34,7 +33,16 @@ var last_message: String
 var wave_ready: bool
 var paused: bool
 var speed_multiplier: float
+## Wall-clock ms of the last tick (drives how much sim time to advance).
 var _last_sim_ms: int
+## Wall-clock ms of the current tick — presentation timestamps only.
+var _wall_ms: int
+## Authoritative simulation clock in milliseconds. All gameplay timestamps —
+## cooldowns, spawn gates, status durations, burn expiry, projectile age — are
+## expressed on this clock, which advances by wall_delta * speed_multiplier.
+## Presentation-only effects (screen shake, toasts, decorative animation) stay
+## on the wall clock. This single clock is what makes 1x/2x/3x inherently equal.
+var _sim_ms: float
 
 # Run-config modifiers
 var _run_config: Dictionary
@@ -55,10 +63,15 @@ var _default_target_mode: String
 const _SPATIAL_CELL_SIZE: float = 120.0
 const PROJECTILE_MAX_FLIGHT_MS: int = 2000
 
+# Wave-shop card catalogue. GameState owns offer generation and validation so it
+# is the authority; WaveShopModalController renders what GameState offers.
+const _WAVE_CARDS_DATA := preload("res://data/wave_shop_cards.gd")
+
 # Legacy entity speeds are px-per-frame at 60 fps (Kivy port units).
 const SIM_REFERENCE_FRAME_MS: float = 1000.0 / 60.0
-# Upper bound for one simulated step; pauses, hitches, and debugger stalls
+# Upper bound for one *wall-clock* step; pauses, hitches, and debugger stalls
 # larger than this advance the sim by at most this much instead of teleporting.
+# The value is scaled by speed_multiplier into simulation time.
 const MAX_SIM_STEP_MS: float = 50.0
 
 # Run stats
@@ -89,6 +102,29 @@ var _perm_kill_bonus: int = 0        # bounty contract stacks (flat g/kill)
 
 # Wave shop gate — set true when wave ends (non-final); cleared by player card pick
 var wave_shop_pending: bool = false
+
+# The authoritative set of cards offered for the pending wave shop. The UI
+# renders exactly these; apply_action only accepts one of them. Generating the
+# offer in the simulation (not the view) is what lets validation be strict and
+# lets headless full-run harnesses make the same choice a player would.
+var _wave_shop_offers: Array = []
+## Modifier ids active for this run, used to filter offers and validate picks.
+var _active_modifier_ids: Array = []
+
+## Gameplay RNG. Every roll that can change an outcome (spawn type, crits,
+## teleport/root procs, alchemy bonus, jitter) draws from here.
+var rng := RandomNumberGenerator.new()
+## Wave-shop offers. A dedicated stream so offer order does not consume gameplay
+## rolls and does not depend on how many particles the frame drew.
+var _offer_rng := RandomNumberGenerator.new()
+## Presentation RNG. Particle angles, speeds, and lifespans draw from here only.
+var _fx_rng := RandomNumberGenerator.new()
+## 0 hides combat particles, 1 is the shipped burst, higher values stress FX.
+## Scaling this must not change gameplay RNG consumption.
+var presentation_particle_scale: int = 1
+const SUPPORTED_SPEEDS: Array = [1.0, 2.0, 3.0]
+
+const WAVE_SHOP_OFFER_COUNT: int = 3
 
 # ---------------------------------------------------------------------------
 # Construction
@@ -141,7 +177,10 @@ func _init(p_path: Array = [], run_config: Dictionary = {}, p_map_id: int = 0) -
 	wave_ready = true
 	paused = false
 	_last_sim_ms = 0
-	speed_multiplier = float(cfg.get("default_speed", 1.0))
+	_wall_ms = 0
+	_sim_ms = 0.0
+	speed_multiplier = 1.0
+	set_speed(float(cfg.get("default_speed", 1.0)))
 
 	stat_towers_placed = 0
 	stat_enemies_killed = 0
@@ -167,6 +206,23 @@ func _init(p_path: Array = [], run_config: Dictionary = {}, p_map_id: int = 0) -
 	_perm_range_mult = 1.0
 	_perm_kill_bonus = 0
 	wave_shop_pending = false
+	_wave_shop_offers = []
+	# Seeding: a caller may pass rng_seed for a reproducible run (tests, harness,
+	# replays). Otherwise derive from the global stream, so the established
+	# seed(N)-then-construct test convention stays reproducible.
+	# One seed fans out into isolated streams. Cosmetic consumption cannot
+	# change combat rolls or the cards a wave offers.
+	var base_seed: int = int(cfg["rng_seed"]) if cfg.has("rng_seed") else randi()
+	rng.seed = base_seed
+	_offer_rng.seed = base_seed ^ 0x9E3779B9
+	_fx_rng.seed = base_seed ^ 0x85EBCA6B
+	# The run config carries the resolved modifier list when available; fall back
+	# to the single primary id for older callers.
+	var mod_ids = cfg.get("modifier_ids", [])
+	if mod_ids is Array and not mod_ids.is_empty():
+		_active_modifier_ids = mod_ids.duplicate()
+	elif cfg.get("modifier_id", "") != "":
+		_active_modifier_ids = [cfg.get("modifier_id", "")]
 
 # ---------------------------------------------------------------------------
 # Cleanup
@@ -215,14 +271,30 @@ func _current_spawn_interval_ms() -> int:
 func start_wave() -> void:
 	if wave_ready and game_state == "playing":
 		wave_ready = false
-		next_spawn_ms = 0
+		next_spawn_ms = sim_now()
+
+## Authoritative simulation time (ms). Advances by wall_delta * speed_multiplier.
+func sim_now() -> int:
+	return int(_sim_ms)
+
+## Wall-clock time (ms) of the most recent tick — presentation only.
+func wall_now() -> int:
+	return _wall_ms
 
 func toggle_pause() -> void:
 	if game_state == "playing":
 		paused = !paused
 
-func set_speed(multiplier: float) -> void:
-	speed_multiplier = multiplier
+## Accept only the speeds the HUD offers. Anything else leaves the current
+## speed unchanged so a bad payload cannot stop, reverse, or NaN the clock.
+func set_speed(multiplier: float) -> bool:
+	if not is_finite(multiplier):
+		return false
+	for allowed in SUPPORTED_SPEEDS:
+		if is_equal_approx(float(allowed), multiplier):
+			speed_multiplier = float(allowed)
+			return true
+	return false
 
 func enemies_alive() -> int:
 	return enemies.size()
@@ -350,9 +422,13 @@ func add_effect(kind: String, pos: Vector2, now_ms: int,
 				radius: int = 18, color: Color = Color.WHITE,
 				text: String = "", dy: float = 0.0,
 				target_pos: Vector2 = Vector2.ZERO) -> void:
-	var final_until: int = until_ms_override if until_ms_override >= 0 else (now_ms + duration)
+	# Effects are presentation-only. They are timestamped on the *wall* clock in
+	# the same frame the frame loop renders them, so visual durations do not
+	# shrink or balloon when the player selects fast-forward.
+	var wall_now: int = _wall_ms if _wall_ms != 0 else now_ms
+	var final_until: int = until_ms_override if until_ms_override >= 0 else (wall_now + duration)
 	var has_tp: bool = target_pos != Vector2.ZERO
-	effects.append(Effect.new(kind, pos, final_until, radius, color, text, now_ms, dy, target_pos, has_tp))
+	effects.append(Effect.new(kind, pos, final_until, radius, color, text, wall_now, dy, target_pos, has_tp))
 
 func emit_event(event: Dictionary) -> void:
 	pending_events.append(event.duplicate())
@@ -369,6 +445,10 @@ func drain_events() -> Array:
 func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 	if action.is_empty():
 		return {"success": false, "reason": "no_action"}
+	# `now_ms` is whatever the caller has — the UI passes wall time. Gameplay
+	# mutations below use the simulation clock only, so a promotion buff cannot
+	# be stamped in a different epoch from the combat checks that expire it.
+	var gameplay_ms: int = sim_now()
 	var action_type: String = action.get("type", "")
 	var result: Dictionary = {"success": true, "action": action_type}
 
@@ -404,7 +484,7 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		var tower: Tower = get_tower_by_id(action["tower_id"])
 		if tower == null:
 			return {"success": false, "reason": "tower_not_found"}
-		var res: Dictionary = tower.upgrade_base(gold, now_ms)
+		var res: Dictionary = tower.upgrade_base(gold, gameplay_ms)
 		if not res["success"]:
 			return res
 		gold -= res["cost"]
@@ -417,7 +497,7 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		var tower: Tower = get_tower_by_id(action["tower_id"])
 		if tower == null:
 			return {"success": false, "reason": "tower_not_found"}
-		var res: Dictionary = tower.try_path_upgrade(gold, action["path"], now_ms)
+		var res: Dictionary = tower.try_path_upgrade(gold, action["path"], gameplay_ms)
 		if not res["success"]:
 			return res
 		if res.get("preview_promotion", false):
@@ -432,7 +512,7 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		var tower: Tower = get_tower_by_id(action["tower_id"])
 		if tower == null:
 			return {"success": false, "reason": "tower_not_found"}
-		var res: Dictionary = tower.confirm_promotion(gold, now_ms)
+		var res: Dictionary = tower.confirm_promotion(gold, gameplay_ms)
 		if not res["success"]:
 			return res
 		gold -= res["cost"]
@@ -485,17 +565,29 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		return {"success": true, "message": "Paused" if paused else "Resumed"}
 
 	if action_type == "set_speed":
-		set_speed(action.get("multiplier", 1.0))
-		return {"success": true, "message": "Speed x%d" % int(speed_multiplier)}
+		var requested = action.get("multiplier", null)
+		if not (requested is float or requested is int) or not set_speed(float(requested)):
+			return {"success": false, "reason": "invalid_speed"}
+		return {
+			"success": true,
+			"message": "Speed x%d" % int(speed_multiplier),
+			"multiplier": speed_multiplier,
+		}
 
 	if action_type == "wave_shop_pick":
 		if not wave_shop_pending:
 			return {"success": false, "reason": "no_wave_shop_pending"}
 		var card_id: String = action.get("card_id", "")
-		if not _is_valid_wave_shop_card(card_id):
+		# Authoritative validation: the card must be one this wave actually
+		# offered. Generate the offer set now if nothing has asked for it yet, so
+		# a pick can never be rejected merely because no frame rendered the modal.
+		var offered_ids: Array = get_wave_shop_offers().map(
+			func(c): return str(c.get("id", "")))
+		if not offered_ids.has(card_id):
 			return {"success": false, "reason": "invalid_wave_shop_card", "card_id": card_id}
 		_apply_wave_shop_card(card_id, now_ms)
 		wave_shop_pending = false
+		_wave_shop_offers = []
 		wave_ready = true
 		return {"success": true, "card_id": card_id, "message": "Bonus applied!"}
 
@@ -503,16 +595,46 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		if not wave_shop_pending:
 			return {"success": false, "reason": "no_wave_shop_pending"}
 		wave_shop_pending = false
+		_wave_shop_offers = []
 		wave_ready = true
 		return {"success": true, "message": ""}
 
 	return {"success": false, "reason": "unknown_action:%s" % action_type}
 
+## Cards offered for the pending wave shop, in display order. Empty when no
+## shop is pending. The UI must render exactly these.
+func get_wave_shop_offers() -> Array:
+	if not wave_shop_pending:
+		return []
+	if _wave_shop_offers.is_empty():
+		_wave_shop_offers = _draw_wave_shop_offers()
+	return _wave_shop_offers
+
+## Build the offer list for the current wave. Milestone waves use the milestone
+## pool; otherwise the standard pool filtered by active modifiers. Healing is
+## excluded under Sudden Death from BOTH pools (see C2).
+func _draw_wave_shop_offers() -> Array:
+	var is_milestone: bool = wave in [5, 10, 15]
+	if is_milestone:
+		var pool: Array = _WAVE_CARDS_DATA.milestone_pool(_active_modifier_ids)
+		_shuffle_with(pool, _offer_rng)
+		return pool.slice(0, mini(WAVE_SHOP_OFFER_COUNT, pool.size()))
+	var filtered: Array = _WAVE_CARDS_DATA.filtered_pool(_active_modifier_ids)
+	_shuffle_with(filtered, _offer_rng)
+	return filtered.slice(0, mini(WAVE_SHOP_OFFER_COUNT, filtered.size()))
+
+func _shuffle_with(pool: Array, stream: RandomNumberGenerator) -> void:
+	for i in range(pool.size() - 1, 0, -1):
+		var j: int = stream.randi_range(0, i)
+		var tmp = pool[i]
+		pool[i] = pool[j]
+		pool[j] = tmp
+
 func _is_valid_wave_shop_card(card_id: String) -> bool:
-	for card in _WAVE_CARDS.CARDS:
+	for card in _WAVE_CARDS_DATA.CARDS:
 		if str(card.get("id", "")) == card_id:
 			return true
-	for card in _WAVE_CARDS.MILESTONE_CARDS:
+	for card in _WAVE_CARDS_DATA.MILESTONE_CARDS:
 		if str(card.get("id", "")) == card_id:
 			return true
 	return false
@@ -615,7 +737,7 @@ func spawn_enemy(now_ms: int) -> void:
 		else:
 			weights = [0.38, 0.16, 0.14, 0.12, 0.12, 0.08]
 
-		var roll: float = randf()
+		var roll: float = rng.randf()
 		var cumulative: float = 0.0
 		var chosen_idx: int = 0
 		for i in range(weights.size()):
@@ -643,7 +765,7 @@ func spawn_enemy(now_ms: int) -> void:
 		enemy.chilled_until = maxi(enemy.chilled_until, now_ms + 3000)
 		_ws_frost_vanguard_remaining -= 1
 
-	var jitter: int = randi_range(-5, 5)
+	var jitter: int = rng.randi_range(-5, 5)
 	enemy.pos.x += float(jitter)
 	enemy.pos.y += float(jitter)
 
@@ -652,13 +774,13 @@ func spawn_enemy(now_ms: int) -> void:
 	# Clear per-spawn speed mult once all enemies for this wave are queued
 	if enemies_spawned >= get_wave_spawn_total():
 		_ws_next_spawn_speed_mult = 1.0
-	# Spawn pacing must scale with the speed multiplier. Movement and fire rate
-	# already do; leaving spawns on wall-clock made 3x materially easier (fewer
-	# concurrent enemies per unit of fast-forwarded distance).
-	var speed_scale: float = maxf(0.25, speed_multiplier)
-	var interval: int = int(float(spawn_interval_ms) * _ws_spawn_interval_mult / speed_scale)
+	# Spawn pacing is expressed in simulation time, so it needs no speed
+	# correction at all: the sim clock itself runs faster at 2x/3x. This is what
+	# makes the number of concurrent enemies per unit of simulated distance
+	# identical at every speed.
+	var interval: int = int(float(spawn_interval_ms) * _ws_spawn_interval_mult)
 	if spawned_boss:
-		interval += int(float(BOSS_POST_SPAWN_EXTRA_MS) / speed_scale)
+		interval += BOSS_POST_SPAWN_EXTRA_MS
 	next_spawn_ms = now_ms + interval
 	wave_started = true
 
@@ -668,6 +790,27 @@ func spawn_enemy(now_ms: int) -> void:
 
 func apply_projectile_hit(projectile: Projectile, now_ms: int) -> void:
 	apply_hit(projectile.tower, projectile.target, projectile.damage, now_ms)
+
+## Apply damage from a secondary source (splash, chain, storm) owned by `tower`.
+## Attribution still belongs to that tower, so a splash kill credits the splash
+## tower rather than whichever tower happened to fire the triggering shot.
+func _apply_secondary_damage(tower: Tower, enemy: Enemy, damage: int) -> void:
+	if enemy == null or enemy.health <= 0:
+		return
+	enemy.last_damage_type = tower.ttype
+	var killed: bool = enemy.take_damage(damage)
+	if killed and not enemy.death_processed:
+		_credit_kill(enemy, tower.ttype)
+
+## Credit exactly one kill to `tower_type`. Idempotent via death_processed so a
+## burn tick, splash, and removal pass can never count the same death twice.
+func _credit_kill(enemy: Enemy, tower_type: String) -> void:
+	if enemy.death_processed:
+		return
+	enemy.death_processed = true
+	stat_enemies_killed += 1
+	if tower_type in stat_tower_kills_by_type:
+		stat_tower_kills_by_type[tower_type] += 1
 
 func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 	if target == null or target.health <= 0:
@@ -706,11 +849,19 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 
 	# Mage Vulnerability Exploit — debuff the target so ALL towers (including
 	# this mage's own hit) deal the advertised bonus while it is active.
+	#
+	# Stacking contract: a vulnerability is (multiplier, deadline). Re-applying
+	# takes the stronger multiplier and the later deadline *only while the
+	# current one is still live*. Once it has expired its multiplier must be
+	# discarded, otherwise a weaker follow-up application would silently revive
+	# the old, stronger value past its own expiry.
 	if tower.ttype == "mage":
 		var leak: float = tower.mana_leak_bonus()
 		if leak > 1.0:
-			target.vulnerable_until = maxi(target.vulnerable_until, now_ms + 2500)
+			if target.vulnerable_until <= now_ms:
+				target.vulnerable_mult = 1.0
 			target.vulnerable_mult = maxf(target.vulnerable_mult, leak)
+			target.vulnerable_until = maxi(target.vulnerable_until, now_ms + 2500)
 	if target.vulnerable_until > now_ms:
 		damage = int(round(float(damage) * target.vulnerable_mult))
 
@@ -738,7 +889,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 	if tower.ttype == "sniper":
 		if tower.tracker.path_levels["Top"] >= 1:
 			var crit_chance: float = 0.12 + 0.04 * float(tower.tracker.path_levels["Top"])
-			if randf() < crit_chance:
+			if rng.randf() < crit_chance:
 				damage = int(float(damage) * 2.5)
 				add_effect("banner", target.pos, now_ms, 420, -1, 24, Color(1.0, 0.157, 0.157), "CRIT!")
 				_add_particle_burst(target.pos, "spark", Color(1.0, 0.235, 0.157), 12, now_ms)
@@ -756,6 +907,9 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 		damage = int(round(float(damage) * 1.18))
 
 	var killed: bool = target.take_damage(damage)
+	target.last_damage_type = tower.ttype
+	if killed:
+		_credit_kill(target, tower.ttype)
 	target.last_damage_time = now_ms
 	target.flash_until = now_ms + 100
 	add_effect("hit_flash", target.pos, now_ms, 90, -1, target.radius + 3, Color.WHITE)
@@ -772,6 +926,8 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 			
 		var b_dps: int = tower.burn_dps(damage)
 		if b_dps > 0:
+			# Burn attribution: the mage that applied the burn owns its kills.
+			target.burn_source_type = tower.ttype
 			# Runic Mage — Resonance: reset burn timer on already-burning enemies
 			var is_resonance: bool = tower.variant_key == "mage_runic"
 			if is_resonance and target.burn_until > now_ms:
@@ -790,7 +946,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 			if e == target or e.health <= 0:
 				continue
 			if target.pos.distance_to(e.pos) <= float(r):
-				e.take_damage(maxi(1, int(float(damage) * 0.55)))
+				_apply_secondary_damage(tower, e, maxi(1, int(float(damage) * 0.55)))
 		add_effect("explosion", target.pos, now_ms, 320, -1, r, Color(0.392, 0.627, 1.0))
 
 	if tower.ttype == "cannon":
@@ -801,7 +957,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 				if e == target or e.health <= 0:
 					continue
 				if target.pos.distance_to(e.pos) <= float(aoe_r):
-					e.take_damage(maxi(1, int(float(damage) * 0.65)))
+					_apply_secondary_damage(tower, e, maxi(1, int(float(damage) * 0.65)))
 			var eff_kind: String = "siege_shockwave" if tower.variant_key == "cannon_siege_mk2" else "explosion"
 			add_effect(eff_kind, target.pos, now_ms, 420, -1, aoe_r, Color(1.0, 0.471, 0.157))
 		
@@ -826,7 +982,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 			target.frozen_until = maxi(target.frozen_until, now_ms + f_ms)
 		
 		var t_chance: float = tower.teleport_chance()
-		if t_chance > 0.0 and randf() < t_chance:
+		if t_chance > 0.0 and rng.randf() < t_chance:
 			target.rewind_by_distance(0.18, now_ms)
 			add_effect("vortex", target.pos, now_ms, 450, -1, 32, Color(0.0, 0.8, 1.0))
 			_add_particle_burst(target.pos, "spark", Color(0.2, 0.8, 1.0), 15, now_ms)
@@ -841,7 +997,7 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 				if e == target or e.health <= 0:
 					continue
 				if target.pos.distance_to(e.pos) <= float(spike_r):
-					e.take_damage(maxi(1, int(float(damage) * 0.45)))
+					_apply_secondary_damage(tower, e, maxi(1, int(float(damage) * 0.45)))
 			add_effect("ice_spikes", target.pos, now_ms, 420, -1, spike_r, Color(0.588, 0.902, 1.0))
 
 	# Lightning flare + EMP
@@ -863,12 +1019,12 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 				if e == target or e.health <= 0:
 					continue
 				if target.pos.distance_to(e.pos) <= float(storm_r):
-					e.take_damage(maxi(1, int(float(damage) * 0.35)))
+					_apply_secondary_damage(tower, e, maxi(1, int(float(damage) * 0.35)))
 			add_effect("ring", target.pos, now_ms, 180, -1, storm_r, Color(0.8, 1.0, 0.0))
 
 	# Archer Rooting
 	if tower.ttype == "archer" and tower.root_chance() > 0.0:
-		if randf() < tower.root_chance():
+		if rng.randf() < tower.root_chance():
 			target.rooted_until = maxi(target.rooted_until, now_ms + 1200)
 			add_effect("banner", target.pos, now_ms, 400, -1, 16, Color(0.4, 0.9, 0.4), "ROOTED")
 
@@ -889,55 +1045,67 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 				var dcolor: Color = tower.variant_tint if tower.variant_tint.a > 0.0 else tower.color
 				_add_particle_burst(target.pos, "debris", dcolor, 10, now_ms)
 				_add_particle_burst(target.pos, "smoke", Color(0.235, 0.235, 0.275), 8, now_ms)
-
-		if tower.ttype in stat_tower_kills_by_type:
-			stat_tower_kills_by_type[tower.ttype] += 1
+		# Kill credit happened exactly once, above, when take_damage returned
+		# true (or when a secondary source finished the enemy).
 
 # ---------------------------------------------------------------------------
 # Main simulation step  (mirrors update_simulation in core.py)
 # ---------------------------------------------------------------------------
 
 func update_simulation(now_ms: int) -> void:
+	_wall_ms = now_ms
+	if not is_finite(speed_multiplier) or speed_multiplier <= 0.0:
+		speed_multiplier = 1.0
 	if game_state != "playing":
 		effects = effects.filter(func(e): return e.until_ms > now_ms)
+		_last_sim_ms = now_ms
 		return
 
 	if paused or wave_ready or wave_shop_pending:
 		effects = effects.filter(func(e): return e.until_ms > now_ms)
+		# Idle, paused, and shop time must not become a catch-up step later.
+		_last_sim_ms = now_ms
 		return
 
-	# Unified simulation delta: one clamped, speed-scaled step per tick.
-	# Every per-tick motion (enemies, projectiles, burn DoT, boss regen,
-	# particles) derives from this value, keeping the sim frame-rate
-	# independent. Cooldowns/spawn gates stay on wall-clock ms and already
-	# divide by speed_multiplier (see Tower.can_shoot), so scaling the delta
-	# by speed_multiplier keeps both time models consistent at any tick rate.
+	# One authoritative clock. The wall delta is clamped (so a hitch cannot
+	# teleport entities) and multiplied by speed to obtain simulation time. Every
+	# gameplay timestamp below reads _sim_ms, so 1x/2x/3x differ only in how fast
+	# wall time passes — never in what happens per unit of simulated time.
 	if _last_sim_ms == 0:
 		_last_sim_ms = now_ms
 	var raw_step_ms: float = clampf(float(now_ms - _last_sim_ms), 0.0, MAX_SIM_STEP_MS)
 	var sim_dt_ms: float = raw_step_ms * speed_multiplier
+	if not is_finite(sim_dt_ms) or sim_dt_ms < 0.0:
+		sim_dt_ms = 0.0
 	_last_sim_ms = now_ms
+	_sim_ms += sim_dt_ms
+	var sim_ms: int = sim_now()
 
 	# Step 1: spawn
-	if enemies_spawned < get_wave_spawn_total() and now_ms >= next_spawn_ms:
-		spawn_enemy(now_ms)
+	if enemies_spawned < get_wave_spawn_total() and sim_ms >= next_spawn_ms:
+		spawn_enemy(sim_ms)
 
 	# Step 2: move enemies, detect leaks
 	var leaked_enemies: Array = []
 	for enemy in enemies:
 		# Apply DOT effects. Carry the fractional remainder on the enemy so the
 		# damage rate is identical at any tick size (no per-tick int() flooring).
-		if now_ms < enemy.burn_until:
+		if sim_ms < enemy.burn_until:
 			enemy.burn_accum += float(enemy.burn_dps) * sim_dt_ms / 1000.0
 			var dot: int = int(floor(enemy.burn_accum))
 			if dot > 0:
 				enemy.burn_accum -= float(dot)
 				enemy.health -= dot
-			# Timer-gated (not now_ms % 250): burst density no longer depends
-			# on wall-clock phase or frame quantization.
-			if now_ms - enemy.last_flame_burst_ms >= 250:
-				enemy.last_flame_burst_ms = now_ms
-				_add_particle_burst(enemy.pos, "flame", Color(1.0, 0.4, 0.2), 3, now_ms)
+				# A killing burn tick is still a mage kill, not an unattributed
+				# death picked up by whichever tower's attack ran later.
+				if enemy.health <= 0 and not enemy.death_processed:
+					_credit_kill(enemy, enemy.burn_source_type)
+					enemy.last_damage_type = enemy.burn_source_type
+			# Timer-gated (not sim_ms % 250): burst density no longer depends
+			# on clock phase or frame quantization.
+			if sim_ms - enemy.last_flame_burst_ms >= 250:
+				enemy.last_flame_burst_ms = sim_ms
+				_add_particle_burst(enemy.pos, "flame", Color(1.0, 0.4, 0.2), 3, sim_ms)
 		else:
 			enemy.burn_accum = 0.0
 
@@ -953,7 +1121,7 @@ func update_simulation(now_ms: int) -> void:
 		if enemy.health <= 0:
 			continue
 
-		var leaked: bool = enemy.move(now_ms, sim_dt_ms)
+		var leaked: bool = enemy.move(sim_ms, sim_dt_ms)
 		if leaked:
 			leaked_enemies.append(enemy)
 	for enemy in leaked_enemies:
@@ -975,10 +1143,10 @@ func update_simulation(now_ms: int) -> void:
 	for tower in towers:
 		# Query only when the tower can actually fire; most towers are on
 		# cooldown on any given frame (measured ~14% of total sim CPU).
-		if not tower.can_shoot(now_ms, speed_multiplier):
+		if not tower.can_shoot(sim_ms):
 			continue
 		var nearby_enemies: Array = _query_enemy_spatial_grid(enemy_grid, tower.pos, tower.effective_range() + 4.0)
-		tower.shoot(now_ms, nearby_enemies, projectiles, speed_multiplier)
+		tower.shoot(sim_ms, nearby_enemies, projectiles)
 
 	# Step 4: projectile movement + swept hit detection
 	var dead_projectiles: Array = []
@@ -987,7 +1155,7 @@ func update_simulation(now_ms: int) -> void:
 			dead_projectiles.append(projectile)
 			continue
 		# Bound lifetime so no projectile can orbit or drift forever.
-		if now_ms - projectile.created_ms > PROJECTILE_MAX_FLIGHT_MS:
+		if sim_ms - projectile.created_ms > PROJECTILE_MAX_FLIGHT_MS:
 			dead_projectiles.append(projectile)
 			continue
 		projectile.move(sim_dt_ms)
@@ -997,7 +1165,7 @@ func update_simulation(now_ms: int) -> void:
 		var swept_dist: float = _point_to_segment_distance(
 			projectile.target.pos, projectile.prev_pos, projectile.pos)
 		if swept_dist <= hit_dist:
-			apply_projectile_hit(projectile, now_ms)
+			apply_projectile_hit(projectile, sim_ms)
 			dead_projectiles.append(projectile)
 		elif projectile.out_of_bounds():
 			dead_projectiles.append(projectile)
@@ -1013,8 +1181,8 @@ func update_simulation(now_ms: int) -> void:
 		var reward: int = maxi(1, int(round(float(enemy.reward) * _kill_reward_mult)))
 
 		# Alchemy Bonus
-		if enemy.transmute_until > now_ms:
-			var bonus: int = randi_range(1, 3)
+		if enemy.transmute_until > sim_ms:
+			var bonus: int = rng.randi_range(1, 3)
 			reward += bonus
 			add_effect("banner", enemy.pos, now_ms, 350, -1, 24, Color(1.0, 1.0, 0.4), "GOLD++")
 
@@ -1023,7 +1191,12 @@ func update_simulation(now_ms: int) -> void:
 
 		gold += reward
 		stat_gold_earned += reward
-		stat_enemies_killed += 1
+		# Attribute the kill to whoever actually did the damage. Direct hits and
+		# splash already credited themselves; a burn/DOT death is credited here
+		# to the tower that applied the burn. Either way _credit_kill is
+		# idempotent, so this can never double-count.
+		if not enemy.death_processed:
+			_credit_kill(enemy, enemy.burn_source_type if enemy.burn_source_type != "" else enemy.last_damage_type)
 		enemies.erase(enemy)
 		add_effect("banner", enemy.pos, now_ms, 260, -1, 18, Color(1.0, 0.843, 0.0), "+%d" % reward)
 
@@ -1036,8 +1209,8 @@ func update_simulation(now_ms: int) -> void:
 				minion.health = maxi(1, int(float(minion.health) * _current_enemy_hp_multiplier() * _enemy_hp_mult))
 				minion.max_health = minion.health
 				minion.pos = Vector2(
-					enemy.pos.x + float(randi_range(-20, 20)),
-					enemy.pos.y + float(randi_range(-20, 20))
+					enemy.pos.x + float(rng.randi_range(-20, 20)),
+					enemy.pos.y + float(rng.randi_range(-20, 20))
 				)
 				minion.path_index = enemy.path_index
 				enemies.append(minion)
@@ -1047,12 +1220,14 @@ func update_simulation(now_ms: int) -> void:
 		effects = effects.filter(func(e): return e.until_ms > now_ms)
 
 	# Step 7: particle physics (frame-rate-independent exponential friction)
-	# Particle velocities are px/ms, so keep this delta in milliseconds.
+	# Particles live entirely on the simulation clock: they are stamped with
+	# sim_ms, advance by sim_dt, and expire against sim_ms. That keeps debris
+	# travelling with the action at whatever speed the player selected.
 	var dt: float = sim_dt_ms
 
 	var alive_particles: Array = []
 	for p in particles:
-		if now_ms >= p.start_ms + p.lifespan_ms:
+		if sim_ms >= p.start_ms + p.lifespan_ms:
 			continue
 		p.pos.x += p.vel.x * dt
 		p.pos.y += p.vel.y * dt
@@ -1086,7 +1261,7 @@ func update_simulation(now_ms: int) -> void:
 		var jump = 2 if wave <= 3 else 4
 		wave_enemy_total += jump
 		spawn_interval_ms = _current_spawn_interval_ms()
-		next_spawn_ms = now_ms + int(1200.0 / maxf(0.25, speed_multiplier))
+		next_spawn_ms = sim_ms + 1200
 		wave_started = false
 		wave_perfect = true
 		# Clear per-wave shop bonuses before offering next wave shop
@@ -1099,6 +1274,7 @@ func update_simulation(now_ms: int) -> void:
 		_ws_expose_active = false
 		# Show wave shop instead of immediately readying
 		wave_shop_pending = true
+		_wave_shop_offers = _draw_wave_shop_offers()
 		last_message = "Wave %d ready — choose a bonus!" % wave
 
 # ---------------------------------------------------------------------------
@@ -1109,12 +1285,20 @@ func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, n
 	# Hard cap: boss waves with full trash density can otherwise push 800+ live
 	# particles, which becomes both the sim and the mobile fill-rate spike.
 	const MAX_PARTICLES: int = 300
+	var scaled: int = count * maxi(0, presentation_particle_scale)
+	if scaled <= 0:
+		return
+	# Particles are simulation-time objects: stamp them on the sim clock so the
+	# expiry test in step 7 (sim_ms >= start_ms + lifespan_ms) is meaningful.
+	# Every random draw is the presentation stream — never the global RNG and
+	# never the gameplay RNG.
+	var stamp: int = sim_now() if _sim_ms > 0.0 else now_ms
 	var remaining: int = MAX_PARTICLES - particles.size()
 	if remaining <= 0:
 		return
-	count = mini(count, remaining)
-	for _i in range(count):
-		var angle: float = randf() * TAU
+	scaled = mini(scaled, remaining)
+	for _i in range(scaled):
+		var angle: float = _fx_rng.randf() * TAU
 		var spd: float
 		var lifespan: int
 		var size: float
@@ -1123,27 +1307,27 @@ func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, n
 
 		match kind:
 			"spark":
-				spd      = randf_range(0.12, 0.45)
-				lifespan = randi_range(150, 450)
-				size     = randf_range(1.2, 2.8)
+				spd      = _fx_rng.randf_range(0.12, 0.45)
+				lifespan = _fx_rng.randi_range(150, 450)
+				size     = _fx_rng.randf_range(1.2, 2.8)
 				gravity  = 0.004
 				friction = 0.94
 			"smoke":
-				spd      = randf_range(0.01, 0.06)
-				lifespan = randi_range(800, 1600)
-				size     = randf_range(4.0, 14.0)
+				spd      = _fx_rng.randf_range(0.01, 0.06)
+				lifespan = _fx_rng.randi_range(800, 1600)
+				size     = _fx_rng.randf_range(4.0, 14.0)
 				gravity  = -0.003
 				friction = 0.96
 			"flame":
-				spd      = randf_range(0.04, 0.12)
-				lifespan = randi_range(300, 700)
-				size     = randf_range(3.5, 7.0)
+				spd      = _fx_rng.randf_range(0.04, 0.12)
+				lifespan = _fx_rng.randi_range(300, 700)
+				size     = _fx_rng.randf_range(3.5, 7.0)
 				gravity  = -0.008 # Rises
 				friction = 0.95
 			_:  # debris
-				spd      = randf_range(0.08, 0.28)
-				lifespan = randi_range(500, 1000)
-				size     = randf_range(2.5, 5.0)
+				spd      = _fx_rng.randf_range(0.08, 0.28)
+				lifespan = _fx_rng.randi_range(500, 1000)
+				size     = _fx_rng.randf_range(2.5, 5.0)
 				gravity  = 0.014
 				friction = 0.95
 
@@ -1151,5 +1335,5 @@ func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, n
 			kind,
 			pos,
 			Vector2(cos(angle) * spd, sin(angle) * spd),
-			color, size, lifespan, now_ms, friction, gravity
+			color, size, lifespan, stamp, friction, gravity
 		))

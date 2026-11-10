@@ -6,6 +6,12 @@ extends RefCounted
 
 const FANTASY_SUBTITLE := "Hold the grid for 15 waves. Patch smart. Deploy wisely."
 
+## Product wordmark. The shipped title_logo.png still reads "Tactical Tower
+## Defense" and is asset-locked (AGES: no overwriting shipped sprites without a
+## human promote step), so the menu shows the real product name as text.
+const PRODUCT_NAME := "MANANET"
+const PRODUCT_TAGLINE := "CYBER-ARCANA NETWORK DEFENSE"
+
 const CURRENCY_RUN := "Credits"
 const CURRENCY_META := "Shards"
 const CORE_RESOURCE := "Integrity"
@@ -64,3 +70,8 @@ static func shards_mult(mult: float, stacked: bool = false) -> String:
 static func end_stat_shards(earned: int, total: int) -> String:
 	## `total` is the spendable banked balance, not lifetime earnings.
 	return "+%d earned  ·  %d available" % [earned, total]
+
+const SAVE_FAILED_BODY := "This run finished, but rewards were not saved. Your earlier profile is unchanged."
+const SAVE_RETRY := "Retry Save"
+const SAVE_OK := "Run saved."
+const UNSAVED_MENU := "Unsaved run rewards"

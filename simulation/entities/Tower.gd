@@ -267,9 +267,10 @@ func burn_duration_ms() -> int:
 # Shooting
 # ---------------------------------------------------------------------------
 
-func can_shoot(now_ms: int, speed_multiplier: float = 1.0) -> bool:
-	var scaled_cd: float = float(effective_cooldown()) / maxf(0.25, speed_multiplier)
-	return float(now_ms - last_shot_ms) >= scaled_cd
+## now_ms is the authoritative *simulation* clock, so cooldown comparisons need
+## no speed correction: 1x/2x/3x advance that clock at different wall rates.
+func can_shoot(now_ms: int) -> bool:
+	return float(now_ms - last_shot_ms) >= float(effective_cooldown())
 
 func select_target(enemies: Array, now_ms: int) -> Enemy:
 	var in_range: Array = []
@@ -327,8 +328,8 @@ func select_target(enemies: Array, now_ms: int) -> Enemy:
 			return best
 	return null
 
-func shoot(now_ms: int, enemies: Array, projectiles: Array, speed_multiplier: float = 1.0) -> void:
-	if not can_shoot(now_ms, speed_multiplier):
+func shoot(now_ms: int, enemies: Array, projectiles: Array) -> void:
+	if not can_shoot(now_ms):
 		return
 	var target: Enemy = select_target(enemies, now_ms)
 	if target == null:
@@ -349,7 +350,7 @@ func shoot(now_ms: int, enemies: Array, projectiles: Array, speed_multiplier: fl
 			game_state.add_effect(effect_kind, pos, now_ms, 100, -1, 18, color, "", 0.0, target.pos)
 			game_state.apply_hit(self, target, get_effective_damage(now_ms), now_ms)
 		else:
-			var proj := Projectile.new(pos, target, self, get_effective_damage(now_ms), now_ms, shot_index, speed_multiplier)
+			var proj := Projectile.new(pos, target, self, get_effective_damage(now_ms), now_ms, shot_index)
 			projectiles.append(proj)
 	last_shot_ms = now_ms
 	muzzle_flash_until = now_ms + 100
@@ -360,7 +361,7 @@ func shoot(now_ms: int, enemies: Array, projectiles: Array, speed_multiplier: fl
 		if volley_counter % 5 == 0:
 			var volley_dmg: int = get_effective_damage(now_ms)
 			for vi in range(3):
-				var vproj := Projectile.new(pos, target, self, volley_dmg, now_ms, shots + vi, speed_multiplier)
+				var vproj := Projectile.new(pos, target, self, volley_dmg, now_ms, shots + vi)
 				projectiles.append(vproj)
 			if game_state:
 				game_state.add_effect("burst", pos, now_ms, 450, -1, 32, color)

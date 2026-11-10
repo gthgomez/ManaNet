@@ -123,7 +123,9 @@ func open(tower: Tower, game_state: GameState) -> void:
 	vbox.add_child(sep)
 
 	# ── Current stats row ───────────────────────────────────────────────────
-	var now_ms: int = Time.get_ticks_msec()
+	# effective damage / burst buffs are keyed to the simulation clock, so this
+	# preview must read that clock too (wall time would under-report at 2x/3x).
+	var now_ms: int = game_state.sim_now()
 	var stats_lbl := Label.new()
 	stats_lbl.text = "DMG %d   Range %d   CD %dms" % [
 		tower.get_effective_damage(now_ms),
