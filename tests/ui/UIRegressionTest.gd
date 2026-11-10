@@ -49,6 +49,7 @@ func _run() -> void:
 	_prepare_sandbox_profile()
 	await _test_menu_with_seeded_history()
 	await _test_restart_with_clean_meta()
+	_test_accessibility_settings()
 	_verify_real_save_untouched()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass)
@@ -222,3 +223,40 @@ func _test_restart_with_clean_meta() -> void:
 			and gs.renderer.TEXT_EFFECT_KINDS.has("banner"),
 		"damage numbers and banners are classified as overlay text effects")
 	await _unmount(gs)
+
+# ---------------------------------------------------------------------------
+# 4) Accessibility settings persist AND change runtime behavior (F4)
+# ---------------------------------------------------------------------------
+
+func _test_accessibility_settings() -> void:
+	# Persistence: write through the isolated profile and read back from disk.
+	var path := SANDBOX_PATH
+	_check(Progression.set_setting("reduce_motion", true), "reduce_motion write persists")
+	_check(Progression.set_setting("audio_muted", true), "audio_muted write persists")
+	_check(Progression.set_setting("haptics_enabled", false), "haptics write persists")
+	var reloaded = load("res://autoloads/Progression.gd").new()
+	reloaded.initialize(path)
+	var s: Dictionary = reloaded.get_settings()
+	_check(s.get("reduce_motion") == true, "reduce_motion survives a profile reload")
+	_check(s.get("audio_muted") == true, "audio_muted survives a profile reload")
+	_check(s.get("haptics_enabled") == false, "haptics survives a profile reload")
+	reloaded.free()
+
+	# Runtime effect: reduce_motion must actually suppress screen shake.
+	var vs = load("res://rendering/ViewState.gd").new()
+	vs.configure_from_settings({"reduce_motion": true})
+	vs.start_screen_shake(1000, 10.0, 500)
+	_check(vs.get_screen_shake_offset(1050) == Vector2.ZERO,
+		"reduce_motion suppresses screen shake entirely")
+	vs.configure_from_settings({"reduce_motion": false})
+	vs.start_screen_shake(2000, 10.0, 500)
+	_check(vs.get_screen_shake_offset(2050) != Vector2.ZERO,
+		"screen shake is active when reduce_motion is off")
+	vs.free()
+
+	# Audio/haptics: JuiceManager must reflect the muted/haptic settings.
+	JuiceManager.configure_from_progression()
+	_check(JuiceManager._sfx_enabled == false, "mute setting disables SFX playback")
+	_check(JuiceManager._haptics_enabled == false, "haptics setting disables vibration")
+	# Restore defaults so later checks are unaffected.
+	Progression.reset_settings()
