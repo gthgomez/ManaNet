@@ -45,6 +45,10 @@ func _init() -> void:
 	for f in range(WARMUP_FRAMES + MEASURED_FRAMES):
 		if f == WARMUP_FRAMES:
 			samples.clear()
+		# Dismiss any wave-shop gate: it pauses the clock by design, which would
+		# measure an idle loop instead of a live wave (and stall the workload).
+		if state.wave_shop_pending:
+			state.apply_action({"type": "wave_shop_skip"}, now_ms)
 		var t0: int = Time.get_ticks_usec()
 		state.update_simulation(now_ms)
 		var dt: float = float(Time.get_ticks_usec() - t0)

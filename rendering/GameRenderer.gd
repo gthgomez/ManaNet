@@ -563,11 +563,51 @@ func _draw_range_circle(now_ms: int, shake: Vector2) -> void:
 
 # --- 4. Effects ---
 
+## Kinds that are combat CALL-OUTS (damage numbers, KO markers, banners). These
+## must read above sprites; ground/impact effects stay below them.
+const TEXT_EFFECT_KINDS: Array = ["dmg_num", "banner"]
+
 func _draw_effects(now_ms: int, shake: Vector2) -> void:
 	if game_state == null:
 		return
 	for effect in game_state.effects:
+		if effect.kind in TEXT_EFFECT_KINDS:
+			continue   # drawn by _draw_text_effects in the overlay pass
 		_draw_single_effect(effect, now_ms, shake)
+
+## Draw the call-out layer on the overlay canvas, which sits above enemy and
+## tower sprites. Previously damage numbers and KO text were drawn in the base
+## layer and were visually buried by enemy sprites.
+func _draw_text_effects(canvas: CanvasItem, now_ms: int, shake: Vector2) -> void:
+	if game_state == null:
+		return
+	for effect in game_state.effects:
+		if not effect.kind in TEXT_EFFECT_KINDS:
+			continue
+		_draw_text_effect(canvas, effect, now_ms, shake)
+
+func _draw_text_effect(canvas: CanvasItem, effect: Effect, now_ms: int, shake: Vector2) -> void:
+	var age: float = float(now_ms - effect.start_ms)
+	var duration: float = float(effect.until_ms - effect.start_ms)
+	var t: float = clampf(age / maxf(1.0, duration), 0.0, 1.0)
+	var alpha: float = clampf(1.0 - t, 0.0, 1.0)
+	var p: Vector2 = effect.pos + shake
+	if effect.text == "":
+		return
+	if effect.kind == "banner":
+		var drift: float = age * effect.dy
+		var text_pos: Vector2 = p + Vector2(0.0, -drift - 14.0)
+		_draw_text_centered(effect.text, text_pos,
+							Color(effect.color.r, effect.color.g, effect.color.b, alpha),
+							14, canvas)
+	elif effect.kind == "dmg_num":
+		var drift: float = age * effect.dy * 60.0
+		var text_pos: Vector2 = p + Vector2(0.0, -drift)
+		_draw_text_centered(effect.text, text_pos + Vector2(1.0, 1.0),
+							Color(0.0, 0.0, 0.0, alpha * 0.65), 13, canvas)
+		_draw_text_centered(effect.text, text_pos,
+							Color(effect.color.r, effect.color.g, effect.color.b, alpha),
+							13, canvas)
 
 func _draw_single_effect(effect: Effect, now_ms: int, shake: Vector2) -> void:
 	var age: float = float(now_ms - effect.start_ms)
@@ -656,25 +696,8 @@ func _draw_single_effect(effect: Effect, now_ms: int, shake: Vector2) -> void:
 			draw_arc(p, float(effect.radius) * (1.0 + t * 0.5), 0.0, TAU, 24,
 					 Color(0.6, 0.9, 1.0, alpha), 3.0)
 
-		"banner":
-			if effect.text != "":
-				var text_alpha: float = alpha
-				var drift: float = age * effect.dy
-				var text_pos: Vector2 = p + Vector2(0.0, -drift - 14.0)
-				_draw_text_centered(effect.text, text_pos,
-									Color(effect.color.r, effect.color.g, effect.color.b, text_alpha),
-									14)
-
-		"dmg_num":
-			if effect.text != "":
-				var drift: float = age * effect.dy * 60.0
-				var text_pos: Vector2 = p + Vector2(0.0, -drift)
-				_draw_text_centered(effect.text, text_pos + Vector2(1.0, 1.0),
-									Color(0.0, 0.0, 0.0, alpha * 0.65),
-									13)
-				_draw_text_centered(effect.text, text_pos,
-									Color(effect.color.r, effect.color.g, effect.color.b, alpha),
-									13)
+		# "banner" and "dmg_num" are drawn on the overlay layer (see
+		# _draw_text_effects) so combat text always reads above sprites.
 
 func _draw_lightning_bolt(a: Vector2, b: Vector2, color: Color, alpha: float, now_ms: int) -> void:
 	# Jittered multi-segment bolt
@@ -878,6 +901,8 @@ func _draw_overlay_on(canvas: CanvasItem) -> void:
 	_draw_boss_telegraphs(canvas, shake, sim_ms, wall_ms)
 	_draw_health_bars(canvas, shake)
 	_draw_tower_badges(canvas, sim_ms, shake)
+	# Combat call-outs last so they are never occluded by sprites or bars.
+	_draw_text_effects(canvas, wall_ms, shake)
 
 # --- 7. Tower badges (level dot + variant badge letter) ---
 
@@ -991,6 +1016,10 @@ func rebuild_path_for_map(map_path: Array) -> void:
 	path_node.maps_ref = _MAPS
 	_path_viewport.add_child(path_node)
 	add_child(_path_viewport)
+	# Insert the terrain directly after the base layer (index 0) so it stays
+	# behind entities — and behind the Overlay node, which must remain last so
+	# health bars, status pips and combat call-outs paint above everything.
+	move_child(_path_viewport, 1)
 	_path_texture = _path_viewport.get_texture()
 	_path_baked = true
 

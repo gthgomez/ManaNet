@@ -65,14 +65,34 @@ jobs:
           set -o pipefail
           godot --headless --path . -s res://tests/simulation/regression_checks.gd 2>&1 | tee regression.log
 
+      - name: Simulation speed parity (1x/2x/3x)
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/simulation/speed_parity.gd 2>&1 | tee speed_parity.log
+
+      - name: Save fault injection
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/simulation/save_faults.gd 2>&1 | tee save_faults.log
+
+      - name: Full-run qualification (all maps, all modifiers, all 15 waves)
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/simulation/full_run.gd 2>&1 | tee full_run.log
+
       - name: Early-run smoke test
         run: |
           set -o pipefail
           godot --headless --path . res://scenes/SimTest.tscn 2>&1 | tee simtest.log
 
       - name: UI regression harness
+        # Isolation: point the profile at a CI-scratch path so no job can read or
+        # write a developer's real save even if a harness regressed.
+        env:
+          MANANET_PROFILE_PATH: ${{ runner.temp }}/ci-profile/td_progression.json
         run: |
           set -o pipefail
+          mkdir -p "$(dirname "$MANANET_PROFILE_PATH")"
           godot --headless --path . res://tests/ui/UIRegressionTest.tscn 2>&1 | tee uiregression.log
 
       - name: Benchmark liveness and percentiles
@@ -90,10 +110,18 @@ jobs:
           set -o pipefail
           python3 tests/verifier_exit/test_verifier_exit.py 2>&1 | tee verifier_exit.log
 
-      - name: Fail on runtime script errors
+      - name: Fail on runtime script errors or leaked resources
         run: |
-          if grep -n "SCRIPT ERROR" regression.log simtest.log uiregression.log benchmark.log verify.log 2>/dev/null; then
+          # Deliberate classification: SCRIPT ERROR is always fatal. Resource
+          # leaks at exit are fatal for the harnesses that own their state, which
+          # is what caught the undisposed SimTest GameState.
+          LOGS="regression.log speed_parity.log save_faults.log full_run.log simtest.log uiregression.log benchmark.log verify.log"
+          if grep -n "SCRIPT ERROR" $LOGS 2>/dev/null; then
             echo "::error::A headless run reported SCRIPT ERROR; see logs."
+            exit 1
+          fi
+          if grep -n "ObjectDB instances leaked at exit\|resources still in use at exit" $LOGS 2>/dev/null; then
+            echo "::error::A harness leaked objects/resources at exit; see logs."
             exit 1
           fi
 

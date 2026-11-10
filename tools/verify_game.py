@@ -214,7 +214,7 @@ def main():
         ("UI regression",
          ["--headless", "--path", REPO_ROOT,
           "res://tests/ui/UIRegressionTest.tscn"]),
-        ("destination parity",
+        ("speed parity",
          ["--headless", "--path", REPO_ROOT, "--script",
           "tests/simulation/speed_parity.gd"]),
         ("save fault injection",

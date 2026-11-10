@@ -201,4 +201,24 @@ func _test_restart_with_clean_meta() -> void:
 		"fresh ViewState created and confirm flag cleared")
 	_check(gs._prev_lives == gs.game_state.lives and gs._prev_wave == gs.game_state.wave,
 		"_prev_* edge trackers resynced after rebuild")
+	# Draw-order regression: combat call-outs (damage numbers, KO, banners) must
+	# render on the overlay layer, which must come AFTER every entity sprite pool
+	# and the baked terrain, so text is never buried by enemies/towers/path.
+	# (The selection ring and virtual cursor are added after it on purpose.)
+	var overlay_idx: int = -1
+	var last_sprite_idx: int = -1
+	var children: Array = gs.renderer.get_children()
+	for i in range(children.size()):
+		var child = children[i]
+		if child is MultiMeshInstance2D or child is SubViewport:
+			last_sprite_idx = i
+		if child is CanvasItem and str(child.name) == "Overlay":
+			overlay_idx = i
+	_check(overlay_idx >= 0, "renderer has an Overlay draw layer")
+	_check(overlay_idx > last_sprite_idx,
+		"Overlay paints after all sprite pools/terrain (overlay idx %d > last sprite idx %d)"
+			% [overlay_idx, last_sprite_idx])
+	_check(gs.renderer.TEXT_EFFECT_KINDS.has("dmg_num")
+			and gs.renderer.TEXT_EFFECT_KINDS.has("banner"),
+		"damage numbers and banners are classified as overlay text effects")
 	await _unmount(gs)
