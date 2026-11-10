@@ -6,14 +6,16 @@ with the capture-only driver added in this branch. No game logic or shipped art
 was changed. ManaNet is the Godot port of the owner's
 [TowerDefenseKivy](https://github.com/gthgomez/TowerDefenseKivy), not an unrelated original implementation.
 
-> **Media currency (important):** the PNG screenshots were re-captured from the
-> current build and reflect the fixes in this branch (ManaNet wordmark, readable
-> towers, on-screen banner, fitting map cards). The `gameplay.mp4` and
-> `gameplay-preview.gif` still come from the older 2026-10-30 source above: this
-> environment has no FFmpeg, so the movie could not be re-encoded. Treat the
-> MP4/GIF as historical captures of the *previous* build, not as evidence for the
-> current UI. Regenerate them with `tools/showcase/capture.sh` on a machine with
-> FFmpeg before publishing them again.
+> **Media currency (important):** the PNG screenshots in this folder were
+> re-captured earlier on this branch. The `gameplay.mp4` and
+> `gameplay-preview.gif` still come from the older 2026-10-30 source above.
+> FFmpeg is present in some environments, but `tools/showcase/capture.gd` runs
+> as a `--script` SceneTree and therefore does not load autoloads; it was not
+> regenerated in the November 2026 corrective campaign. Treat the MP4/GIF as
+> historical scripted footage, not as evidence for the current menu or HUD.
+> Current menu captures from that campaign are the `menu_after_*.png` artifacts
+> on the pull request, taken from the live MenuScreen at 568×320, 640×360,
+> 800×600, 900×600, 1280×720, and 1440×900.
 
 ## What the media shows
 

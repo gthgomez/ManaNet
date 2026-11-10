@@ -80,6 +80,21 @@ jobs:
           set -o pipefail
           godot --headless --path . -s res://tests/simulation/full_run.gd 2>&1 | tee full_run.log
 
+      - name: Clock authority
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/simulation/clock_authority.gd 2>&1 | tee clock.log
+
+      - name: RNG isolation
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/simulation/rng_isolation.gd 2>&1 | tee rng.log
+
+      - name: Victory qualification
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/simulation/victory_qualification.gd 2>&1 | tee victory.log
+
       - name: Early-run smoke test
         run: |
           set -o pipefail
@@ -102,6 +117,14 @@ jobs:
           set -o pipefail
           mkdir -p "$(dirname "$MANANET_PROFILE_PATH")"
           godot --headless --path . res://tests/ui/PlayerJourneyTest.tscn 2>&1 | tee journey.log
+
+      - name: Input-driven player journey
+        env:
+          MANANET_PROFILE_PATH: ${{ runner.temp }}/ci-profile-input/td_progression.json
+        run: |
+          set -o pipefail
+          mkdir -p "$(dirname "$MANANET_PROFILE_PATH")"
+          godot --headless --path . res://tests/ui/InputJourneyTest.tscn 2>&1 | tee input_journey.log
 
       - name: Viewport geometry (desktop + mobile sizes)
         env:
@@ -131,7 +154,7 @@ jobs:
           # Deliberate classification: SCRIPT ERROR is always fatal. Resource
           # leaks at exit are fatal for the harnesses that own their state, which
           # is what caught the undisposed SimTest GameState.
-          LOGS="regression.log speed_parity.log save_faults.log full_run.log simtest.log uiregression.log journey.log geometry.log benchmark.log verify.log"
+          LOGS="regression.log speed_parity.log save_faults.log full_run.log clock.log rng.log victory.log simtest.log uiregression.log journey.log input_journey.log geometry.log benchmark.log verify.log"
           if grep -n "SCRIPT ERROR" $LOGS 2>/dev/null; then
             echo "::error::A headless run reported SCRIPT ERROR; see logs."
             exit 1

@@ -24,6 +24,7 @@ const MIN_TOUCH: float = 40.0
 const VIEWPORTS: Array = [
 	["mobile 568x320", 568, 320, true],
 	["mobile 640x360", 640, 360, true],
+	["desktop 900x600", 900, 600, true],
 	["tablet 800x600", 800, 600, true],
 	["desktop 1280x720", 1280, 720, true],
 	["desktop 1440x900", 1440, 900, true],
@@ -146,12 +147,40 @@ func _check_game_screen(label: String, w: int, h: int, supported: bool) -> void:
 	_check(gs._instruction_banner.size.y <= 60.0,
 		"%s: instruction banner is height-bounded (%.0f)" % [label, gs._instruction_banner.size.y])
 
-	# Tower panel must not overlap the shop strip.
+	# Tower panel must not overlap the shop strip when nothing is selected.
 	gs._layout_tower_panel(null)
 	var panel_bottom: float = gs._tower_panel.position.y + gs._tower_panel.size.y
 	_check(panel_bottom <= gs._shop_scroll.position.y + 1.0,
 		"%s: tower panel clears the shop strip (%.0f <= %.0f)"
 			% [label, panel_bottom, gs._shop_scroll.position.y])
+
+	if supported:
+		gs.game_state.gold = 5000
+		var placed: Dictionary = gs.game_state.apply_action(
+			{"type": "place_tower", "tower_type": "archer", "pos": Vector2(320, 220)},
+			gs.game_state.sim_now())
+		_check(placed.get("success", false), "%s: can place a tower for the upgrade-panel check" % label)
+		if placed.get("success", false):
+			gs.view_state.selected_tower_id = int(placed.get("tower_id", -1))
+			gs._update_hud(Time.get_ticks_msec())
+			await get_tree().process_frame
+			var upg: Button = gs._base_upg_btn
+			var sell: Button = gs._sell_btn
+			var upg_rect: Rect2 = upg.get_global_rect()
+			var sell_rect: Rect2 = sell.get_global_rect()
+			_check(gs._tower_panel.visible and upg.visible and not upg.disabled,
+				"%s: upgrade action stays available while a tower is selected" % label)
+			_check(sell.visible and not sell.disabled,
+				"%s: sell action stays available while a tower is selected" % label)
+			_check(upg_rect.size.y >= MIN_TOUCH - 8.0 and sell_rect.size.y >= MIN_TOUCH - 8.0,
+				"%s: upgrade and sell targets are touch-sized (%.0f / %.0f)"
+					% [label, upg_rect.size.y, sell_rect.size.y])
+			_check(upg_rect.position.y >= -1.0 and upg_rect.position.y + upg_rect.size.y <= vp.y + 1.0,
+				"%s: upgrade button is on-screen (y %.0f h %.0f)"
+					% [label, upg_rect.position.y, upg_rect.size.y])
+			_check(sell_rect.position.y >= -1.0 and sell_rect.position.y + sell_rect.size.y <= vp.y + 1.0,
+				"%s: sell button is on-screen (y %.0f h %.0f)"
+					% [label, sell_rect.position.y, sell_rect.size.y])
 
 	# Portrait is not a supported gameplay mode: record it honestly.
 	if not supported:

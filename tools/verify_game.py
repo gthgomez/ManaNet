@@ -100,7 +100,38 @@ def run(godot, args, timeout=TIMEOUT_SECONDS, env=None, must_exit_zero=False):
         return None
 
 
-def run_parse_gate(godot, env=None):
+def classify_import_result(returncode, output, timed_out=False, launch_error=""):
+    """Decide the parse-gate result from a process outcome.
+
+    Success requires exit 0 and no recognized script/parse diagnostic.
+    A nonzero exit is a failure even when the output is empty. A zero exit
+    that still printed a script error is a failure. Timeouts and launch
+    errors are setup failures (exit 2). This does not scan for a bare
+    ``ERROR`` token, so fault-injection tests that print expected errors
+    are not judged here.
+    """
+    if launch_error:
+        return 2, "import failed to start: %s" % launch_error
+    if timed_out or returncode is None:
+        return 2, "import timed out"
+    text = output or ""
+    bad = []
+    for line in text.splitlines():
+        if "android/" in line:
+            continue  # nested Android plugin fixture project
+        if ("Parse Error" in line or "Failed to load script" in line
+                or line.startswith("SCRIPT ERROR")):
+            bad.append(line.strip())
+    if returncode != 0:
+        detail = bad[0] if bad else "no diagnostic text"
+        code = returncode if returncode > 0 else 1
+        return code, "import exited %s (%s)" % (returncode, detail)
+    if bad:
+        return 1, "parse/load errors in import despite exit 0"
+    return 0, None
+
+
+def run_parse_gate(godot, env=None, timeout=None):
     """Import the project and fail on fatal parse/load errors.
 
     A per-file GDScript loader cannot be used here: running with --script does
@@ -108,25 +139,28 @@ def run_parse_gate(godot, env=None):
     FocusManager report false compilation failures. The editor import resolves
     the real project context (this mirrors the CI import gate).
     """
+    limit = TIMEOUT_SECONDS if timeout is None else timeout
     try:
         proc = subprocess.run(
             [godot, "--headless", "--path", REPO_ROOT, "--import"],
-            capture_output=True, text=True, timeout=TIMEOUT_SECONDS, env=env,
+            capture_output=True, text=True, timeout=limit, env=env,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return 2, "import timed out or failed to start"
+    except OSError as exc:
+        return classify_import_result(None, "", launch_error=str(exc))
+    except subprocess.TimeoutExpired as exc:
+        output = ""
+        if exc.stdout or exc.stderr:
+            output = (exc.stdout or "") + (exc.stderr or "")
+            if not isinstance(output, str):
+                output = output.decode("utf-8", "replace")
+        return classify_import_result(None, output, timed_out=True)
     output = proc.stdout + proc.stderr
-    bad = []
-    for line in output.splitlines():
-        if "android/" in line:
-            continue  # nested Android plugin fixture project
-        if "Parse Error" in line or "Failed to load script" in line:
-            bad.append(line.strip())
-    if bad:
-        for line in bad[:20]:
-            print("verify_game: PARSE: %s" % line, file=sys.stderr)
-        return 1, "parse/load errors in import"
-    return 0, None
+    code, msg = classify_import_result(proc.returncode, output)
+    if code != 0 and msg and "parse/load errors" in msg:
+        for line in output.splitlines():
+            if "Parse Error" in line or "Failed to load script" in line or line.startswith("SCRIPT ERROR"):
+                print("verify_game: PARSE: %s" % line.strip(), file=sys.stderr)
+    return code, msg
 
 
 def main():
@@ -229,6 +263,18 @@ def main():
         ("full-run qualification",
          ["--headless", "--path", REPO_ROOT, "--script",
           "tests/simulation/full_run.gd"]),
+        ("clock authority",
+         ["--headless", "--path", REPO_ROOT, "--script",
+          "tests/simulation/clock_authority.gd"]),
+        ("rng isolation",
+         ["--headless", "--path", REPO_ROOT, "--script",
+          "tests/simulation/rng_isolation.gd"]),
+        ("victory qualification",
+         ["--headless", "--path", REPO_ROOT, "--script",
+          "tests/simulation/victory_qualification.gd"]),
+        ("input journey",
+         ["--headless", "--path", REPO_ROOT,
+          "res://tests/ui/InputJourneyTest.tscn"]),
         ("verifier exit contract", None),
         ("early-run smoke",
          ["--headless", "--path", REPO_ROOT, "scenes/SimTest.tscn"]),
@@ -263,9 +309,12 @@ def main():
             print(output, file=sys.stderr)
             print("verify_game: FAIL %s exited %d" % (name, code), file=sys.stderr)
             return code
-        # Same error classification CI applies. Without this the local "all
-        # gates pass" claim can miss a runtime error that CI correctly rejects
-        # (a RefCounted free() in a test once shipped through that gap).
+        # Godot harnesses only. The Python contract test prints SCRIPT ERROR
+        # on purpose while classifying a fake import, and CI excludes that log
+        # from the same scan.
+        if args is None:
+            print("verify_game: PASS %s (exit 0)" % name)
+            continue
         problems = [ln for ln in output.splitlines()
                     if "SCRIPT ERROR" in ln
                     or "ObjectDB instances leaked at exit" in ln

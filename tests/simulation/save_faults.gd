@@ -32,6 +32,13 @@ func _init() -> void:
 	_test_settings_persist_across_reload()
 	_test_purchase_persists_across_reload()
 	_test_run_record_persists_for_all_outcomes()
+	_test_future_save_blocks_later_writes()
+	_test_failed_quarantine_blocks_overwrite()
+	_test_unreadable_profile_blocks_overwrite()
+	_test_path_switch_does_not_contaminate()
+	_test_old_save_migrates_without_data_loss()
+	_test_current_save_keeps_bytes_until_explicit_write()
+	_test_recovery_then_retry_awards_once()
 	_test_environment_override_isolates_autoload()
 	_clean_scratch()
 	print("--- RESULTS ---")
@@ -66,6 +73,14 @@ func _write_text(path: String, text: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string(text)
 	f.close()
+
+func _bytes(path: String) -> PackedByteArray:
+	if not FileAccess.file_exists(path):
+		return PackedByteArray()
+	return FileAccess.get_file_as_bytes(path)
+
+func _chmod(path: String, mode: String) -> void:
+	OS.execute("chmod", [mode, ProjectSettings.globalize_path(path)])
 
 func _read_text(path: String) -> String:
 	if not FileAccess.file_exists(path):
@@ -322,6 +337,172 @@ func _test_run_record_persists_for_all_outcomes() -> void:
 # ---------------------------------------------------------------------------
 # A1 — environment override protects the autoload path
 # ---------------------------------------------------------------------------
+
+func _test_future_save_blocks_later_writes() -> void:
+	var path := _path("future_writes.json")
+	var payload := JSON.stringify({"version": 99, "banked_rp": 777, "mystery": true})
+	_write_text(path, payload)
+	var before := _bytes(path)
+	var p = ProgressionScript.new()
+	p.initialize(path)
+	var status: Dictionary = p.persistence_status()
+	_check(status.get("state") == "unsupported_future",
+		"future save reports unsupported_future (got %s)" % str(status.get("state")))
+	_check(status.get("writes_blocked") == true, "future save blocks writes")
+	_check(status.get("loaded_player_data") == false,
+		"future save is not reported as a loaded player profile")
+	_check(p.save_profile() == false, "save_profile refuses a future-version file")
+	p._profile["banked_rp"] = 500
+	var purchase: Dictionary = p.purchase_upgrade("start_archer")
+	_check(purchase.get("success", true) == false, "purchase after a blocked load does not succeed")
+	_check(p.set_setting("sfx_enabled", false) == false,
+		"settings change after a blocked load is not committed")
+	var gs := _make_run_state("won")
+	var run: Dictionary = p.record_run(gs, 1, false)
+	gs.dispose()
+	_check(run.get("save_failed", false), "run completion after a blocked load reports save_failed")
+	_check(p.has_pending_run(), "the unsaved run is retained for retry")
+	_check(_bytes(path) == before, "no later write replaced the future-version bytes")
+	var again := ProgressionScript.new()
+	again.initialize(path)
+	_check(_bytes(path) == before, "reloading the future save still does not rewrite it")
+	again.free()
+	p.free()
+
+func _test_failed_quarantine_blocks_overwrite() -> void:
+	var folder := _path("locked_dir")
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(folder))
+	var path := "%s/profile.json" % folder
+	var payload := "{ not json"
+	_write_text(path, payload)
+	var before := _bytes(path)
+	_chmod(folder, "555")
+	var p = ProgressionScript.new()
+	p.initialize(path)
+	var status: Dictionary = p.persistence_status()
+	_check(status.get("state") == "failed_quarantine",
+		"unmovable corrupt save reports failed_quarantine (got %s)" % str(status.get("state")))
+	_check(p.save_profile() == false, "failed quarantine refuses a follow-up save")
+	var gs := _make_run_state("game_over")
+	var run: Dictionary = p.record_run(gs, 0, false)
+	gs.dispose()
+	_check(run.get("save_failed", false), "run record after failed quarantine does not persist")
+	_chmod(folder, "755")
+	_check(_bytes(path) == before, "failed quarantine left the original bytes in place")
+	p.free()
+
+func _test_unreadable_profile_blocks_overwrite() -> void:
+	var path := _path("unreadable.json")
+	var payload := JSON.stringify({"version": 1, "banked_rp": 321, "engine": "godot"})
+	_write_text(path, payload)
+	var before := _bytes(path)
+	_chmod(path, "000")
+	var p = ProgressionScript.new()
+	p.initialize(path)
+	_check(p.persistence_status().get("state") == "unreadable",
+		"unreadable save reports unreadable (got %s)" % str(p.persistence_status().get("state")))
+	_check(p.save_profile() == false, "unreadable save is not replaced with defaults")
+	var recovery: Dictionary = p.recover_blocked_profile()
+	_check(recovery.get("success", true) == false,
+		"recovery refuses when the original bytes cannot be preserved")
+	_chmod(path, "644")
+	_check(_bytes(path) == before, "unreadable save bytes survive the blocked load")
+	p.free()
+
+func _test_path_switch_does_not_contaminate() -> void:
+	var path_a := _path("profile_a.json")
+	var path_b := _path("profile_b.json")
+	var a = ProgressionScript.new()
+	a.initialize(path_a)
+	a._profile["banked_rp"] = 111
+	_check(a.save_profile(), "profile A commits")
+	var bytes_a := _bytes(path_a)
+	# Unsaved edit on A must not be flushed when the destination changes.
+	a._profile["banked_rp"] = 999
+	a.initialize(path_b)
+	_check(not FileAccess.file_exists(path_b) or _read_text(path_b).find("999") < 0,
+		"switching to B does not create B from A's unsaved memory")
+	_check(_bytes(path_a) == bytes_a, "switching away from A does not rewrite A")
+	a._profile["banked_rp"] = 222
+	_check(a.save_profile(), "profile B commits its own data")
+	a.free()
+	var reload_a = ProgressionScript.new()
+	reload_a.initialize(path_a)
+	_check(reload_a.get_banked_rp() == 111, "profile A still has 111 after B was saved (got %d)"
+		% reload_a.get_banked_rp())
+	var reload_b = ProgressionScript.new()
+	reload_b.initialize(path_b)
+	_check(reload_b.get_banked_rp() == 222, "profile B has its own balance (got %d)"
+		% reload_b.get_banked_rp())
+	reload_a.free()
+	reload_b.free()
+
+func _test_old_save_migrates_without_data_loss() -> void:
+	var path := _path("legacy_v0.json")
+	var original := JSON.stringify({"banked_rp": 42, "total_rp": 42})
+	_write_text(path, original)
+	var before := _bytes(path)
+	var p = ProgressionScript.new()
+	p.initialize(path)
+	_check(p.persistence_status().get("state") == "migrated",
+		"a versionless save is migrated (got %s)" % str(p.persistence_status().get("state")))
+	_check(p.get_banked_rp() == 42, "migrated save keeps banked shards")
+	_check(_bytes(path) == before, "loading an old save does not rewrite it")
+	_check(p.save_profile(), "explicit save commits the migrated profile")
+	p.free()
+	var p2 = ProgressionScript.new()
+	p2.initialize(path)
+	_check(p2.get_banked_rp() == 42, "migrated shards survive a reload")
+	_check(int(p2.get_profile().get("version", 0)) == 1, "committed save is the current version")
+	_check(p2.persistence_status().get("loaded_player_data") == true,
+		"reloaded current save is player data, not fresh defaults")
+	p2.free()
+
+func _test_current_save_keeps_bytes_until_explicit_write() -> void:
+	var path := _path("current.json")
+	var p1 = ProgressionScript.new()
+	p1.initialize(path)
+	_check(p1.set_setting("reduce_motion", true), "current profile accepts a setting")
+	var committed := _bytes(path)
+	p1.free()
+	var p2 = ProgressionScript.new()
+	p2.initialize(path)
+	_check(_bytes(path) == committed, "loading a current save does not rewrite its bytes")
+	_check(p2.get_settings().get("reduce_motion") == true, "the loaded setting matches the file")
+	p2.free()
+
+func _test_recovery_then_retry_awards_once() -> void:
+	var path := _path("recover.json")
+	var payload := JSON.stringify({"version": 7, "banked_rp": 50})
+	_write_text(path, payload)
+	var original := _bytes(path)
+	var p = ProgressionScript.new()
+	p.initialize(path)
+	var gs := _make_run_state("won")
+	var failed: Dictionary = p.record_run(gs, 2, false)
+	gs.dispose()
+	_check(failed.get("save_failed", false), "run against a future save is unsaved")
+	var recovery: Dictionary = p.recover_blocked_profile()
+	_check(recovery.get("success", false), "explicit recovery succeeds after a verified backup")
+	var backup := str(recovery.get("backup", ""))
+	_check(backup != "" and _bytes(backup) == original,
+		"recovery backup matches the original future-version bytes")
+	var retried: Dictionary = p.retry_pending_run()
+	_check(retried.get("persisted", false) and not retried.get("save_failed", true),
+		"retry commits the pending run once")
+	var banked_after: int = p.get_banked_rp()
+	var gs_again := _make_run_state("won")
+	var second: Dictionary = p.record_run(gs_again, 2, false)
+	gs_again.dispose()
+	_check(second.get("duplicate", false), "a second record of the same run does not award again")
+	_check(p.get_banked_rp() == banked_after, "duplicate record leaves the balance unchanged")
+	p.free()
+	var reloaded = ProgressionScript.new()
+	reloaded.initialize(path)
+	_check(reloaded.get_profile()["run_history"].size() == 1,
+		"reloaded profile contains the retried run exactly once")
+	_check(reloaded.get_banked_rp() == banked_after, "reloaded balance matches the single award")
+	reloaded.free()
 
 func _test_environment_override_isolates_autoload() -> void:
 	var p = ProgressionScript.new()
