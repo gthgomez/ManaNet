@@ -44,6 +44,10 @@ func _init() -> void:
 	_test_wave_shop_duplicate_action_rejected()
 	_test_sudden_death_excludes_healing_everywhere()
 	_test_card_effects_match_descriptions()
+	_test_buy_sell_has_no_profit_loop()
+	_test_early_sell_refunds_paid_not_list_price()
+	_test_restart_does_not_bank_progress()
+	_test_sell_disabled_is_enforced_authoritatively()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass_count)
 	print("FAIL: %d" % _fail_count)
@@ -764,3 +768,67 @@ func _test_card_effects_match_descriptions() -> void:
 	_check(s3.lives - lives_before == 2,
 		"Emergency Protocol grants exactly +2 Integrity (got %d)" % (s3.lives - lives_before))
 	s3.dispose()
+
+# --- Progression reward exploits (Workstream C3) ----------------------------
+
+func _test_buy_sell_has_no_profit_loop() -> void:
+	var state := _make_state()
+	state.gold = 1000
+	var start_gold: int = state.gold
+	var cycles: int = 0
+	for i in range(40):
+		var placed: Dictionary = state.apply_action(
+			{"type": "place_tower", "tower_type": "archer", "pos": Vector2(300, 200)}, 1000)
+		if not placed.get("success", false):
+			break
+		state.apply_action({"type": "sell_tower", "tower_id": placed.get("tower_id", -1)}, 1000)
+		cycles += 1
+	_check(cycles > 0, "buy/sell cycles actually executed (%d)" % cycles)
+	_check(state.gold <= start_gold,
+		"repeated buy/sell never creates credits (%d -> %d)" % [start_gold, state.gold])
+	state.dispose()
+
+func _test_early_sell_refunds_paid_not_list_price() -> void:
+	# On wave 1-3 the sell rate is 90%. Refund must be 90% of what was paid, not
+	# of the list price, or a discount card would let a buy/sell cycle profit.
+	var state := _make_state()
+	state.wave = 2
+	state.gold = 500
+	state._ws_cost_discount = 0.75
+	var placed: Dictionary = state.apply_action(
+		{"type": "place_tower", "tower_type": "archer", "pos": Vector2(300, 200)}, 1000)
+	var cost_paid: int = 500 - state.gold
+	var sold: Dictionary = state.apply_action(
+		{"type": "sell_tower", "tower_id": placed.get("tower_id", -1)}, 1000)
+	_check(sold.get("success", false), "discounted tower can be sold")
+	_check(int(sold.get("value", 0)) <= cost_paid,
+		"sell refund (%.0f) never exceeds discounted cost paid (%d)"
+			% [float(sold.get("value", 0)), cost_paid])
+	state.dispose()
+
+func _test_restart_does_not_bank_progress() -> void:
+	var state := _make_state()
+	state.gold = 8000
+	state.lives = 1
+	state.wave = 9
+	state.stat_waves_survived = 8
+	var r: Dictionary = state.apply_action({"type": "restart_game"}, 1000)
+	_check(r.get("success", false), "restart_game succeeds mid-run")
+	_check(state.gold == 300 and state.lives == 10 and state.wave == 1,
+		"restart resets credits/integrity/wave")
+	_check(state.stat_waves_survived == 0, "restart clears the waves-survived counter")
+	_check(state.towers.is_empty() and state.enemies.is_empty(),
+		"restart clears entities")
+	state.dispose()
+
+func _test_sell_disabled_is_enforced_authoritatively() -> void:
+	var state := GameStateScript.new(_MAPS.MAPS[0]["path"], {"sell_disabled": true}, 0)
+	state.gold = 500
+	var placed: Dictionary = state.apply_action(
+		{"type": "place_tower", "tower_type": "archer", "pos": Vector2(300, 200)}, 1000)
+	var sold: Dictionary = state.apply_action(
+		{"type": "sell_tower", "tower_id": placed.get("tower_id", -1)}, 1000)
+	_check(not sold.get("success", true), "sell is rejected when sell_disabled is set")
+	_check(sold.get("reason", "") == "sell_disabled", "rejection reason is sell_disabled")
+	_check(state.towers.size() == 1, "rejected sell leaves the tower in place")
+	state.dispose()
