@@ -70,3 +70,5 @@ export_presets.cfg
 .agent-game/runs/
 .agent-game/evidence/
 .agent-game/quarantine/
+
+docs/qa/captures/

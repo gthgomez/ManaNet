@@ -114,7 +114,7 @@ func open(tower: Tower, game_state: GameState) -> void:
 
 	var close_btn := Button.new()
 	close_btn.text = "✕"
-	close_btn.custom_minimum_size = Vector2(44.0, 44.0)
+	close_btn.custom_minimum_size = Vector2(48.0, 48.0)
 	_THEME.apply_button(close_btn, "secondary")
 	close_btn.pressed.connect(_close_via_resolver)
 	header.add_child(close_btn)

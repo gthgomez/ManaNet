@@ -129,6 +129,38 @@ func _journey_play_and_end_screen() -> void:
 	_check(up.get("success", false), "base upgrade succeeds with credits")
 	_check(gs.get_tower_by_id(placed_id).level >= 2, "tower level increases after upgrade")
 
+	# Real interaction path: selecting a tower in the world, cycling targeting,
+	# and the two-tap sell confirmation.
+	var tower_before = gs.get_tower_by_id(placed_id)
+	var select_action: Dictionary = gs_screen.input_ctrl.handle_press(
+		tower_before.pos, Time.get_ticks_msec())
+	_check(str(select_action.get("type", "")) == "select_tower",
+		"world tap selects a placed tower")
+	_check(gs_screen.view_state.selected_tower_id == placed_id,
+		"selected tower id matches the world tap target")
+	var mode_before: String = tower_before.target_mode
+	var tgt: Dictionary = gs.apply_action(
+		{"type": "cycle_target_mode", "tower_id": placed_id}, Time.get_ticks_msec())
+	_check(tgt.get("success", false) and tower_before.target_mode != mode_before,
+		"target mode cycles and changes the tower's targeting (%s -> %s)"
+			% [mode_before, tower_before.target_mode])
+	var towers_before: int = gs.towers.size()
+	gs_screen._on_sell_pressed()
+	_check(gs.towers.size() == towers_before,
+		"first sell tap arms confirmation without selling")
+	gs_screen._on_sell_pressed()
+	_check(gs.towers.size() == towers_before - 1,
+		"second sell tap sells the selected tower")
+	# Replace the sold tower so the wave test still has a defender.
+	var replacement_id: int = -1
+	for pos in [Vector2(300, 240), Vector2(400, 240), Vector2(500, 300), Vector2(250, 300)]:
+		var res2: Dictionary = gs.apply_action(
+			{"type": "place_tower", "tower_type": "archer", "pos": pos}, Time.get_ticks_msec())
+		if res2.get("success", false):
+			replacement_id = int(res2.get("tower_id", -1))
+			break
+	_check(replacement_id >= 0, "a replacement tower can be placed after selling")
+
 	# Start and finish a wave, then confirm the wave-shop gate appears and the
 	# modal is what the UI shows.
 	gs.wave_enemy_total = 6

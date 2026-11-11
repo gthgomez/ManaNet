@@ -13,10 +13,11 @@ const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
 @onready var _panel: PanelContainer = $Panel
 @onready var _title_lbl: Label     = $Panel/VBox/TitleLabel
 @onready var _sub_lbl: Label       = $Panel/VBox/SubLabel
-@onready var _stats_box: VBoxContainer = $Panel/VBox/StatsBox
+@onready var _stats_box: VBoxContainer = $Panel/VBox/StatsScroll/StatsBox
 @onready var _retry_btn: Button    = $Panel/VBox/BtnRow/RetryBtn
 @onready var _map_btn: Button      = $Panel/VBox/BtnRow/MapBtn
 @onready var _menu_btn: Button     = $Panel/VBox/MenuBtn
+var _reward_lbl: Label = null
 
 func _ready() -> void:
 	_add_backdrop()
@@ -75,6 +76,17 @@ func _ready() -> void:
 	else:
 		_sub_lbl.text = "Survived %d of 15 waves  |  Map: %s" % [waves, map_name]
 
+	if not save_failed:
+		# Fixed reward line: visible even when the stats region scrolls on a
+		# 320px-tall result screen.
+		_reward_lbl = Label.new()
+		_reward_lbl.text = _BRAND.end_stat_shards(rp_earned, banked_rp)
+		_reward_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_reward_lbl.add_theme_color_override("font_color", _THEME.GOLD)
+		_reward_lbl.add_theme_font_size_override("font_size", 13)
+		$Panel/VBox.add_child(_reward_lbl)
+		$Panel/VBox.move_child(_reward_lbl, _sub_lbl.get_index() + 1)
+
 	_add_stat("Defenders Built",   str(towers),                         Color.WHITE)
 	_add_stat("Intrusions Cleared", str(kills),                         Color.WHITE)
 	_add_stat("%s Earned" % _BRAND.CURRENCY_RUN, str(gold),             Color(1.0, 0.82, 0.2))
@@ -82,8 +94,6 @@ func _ready() -> void:
 	_add_stat("Perfect Waves",     "%d / %d" % [perfect_waves, waves],  Color(0.2, 0.8, 1.0))
 	if save_failed:
 		_add_stat(_BRAND.CURRENCY_META, "Not saved", _THEME.GOLD)
-	else:
-		_add_stat(_BRAND.CURRENCY_META, _BRAND.end_stat_shards(rp_earned, banked_rp), Color(0.47, 0.9, 1.0))
 
 	var newly_unlocked: Array = stats.get("newly_unlocked_variants", [])
 	var milestone_deltas: Array = stats.get("milestone_deltas", [])
@@ -104,6 +114,10 @@ func _ready() -> void:
 		_stats_box.add_child(prog_hdr)
 		for delta in milestone_deltas:
 			_add_milestone_row(delta)
+
+	# Stats rows are built above; re-run layout so compact font sizes apply and
+	# the scroll region is measured with real content.
+	call_deferred("_apply_layout")
 
 func _add_milestone_row(delta: Dictionary) -> void:
 	var row := HBoxContainer.new()
@@ -143,17 +157,28 @@ func _apply_visuals() -> void:
 
 func _apply_layout() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	var v_margin: float = maxf(_LAYOUT.top_margin(viewport), 28.0)
+	var compact: bool = viewport.y < 480.0 or viewport.x < 700.0
+	var v_margin: float = maxf(_LAYOUT.top_margin(viewport), 20.0)
 	var desired := Vector2(
 		minf(600.0, viewport.x - _LAYOUT.edge_margin(viewport) * 2.0),
 		minf(520.0, viewport.y - v_margin * 2.0)
 	)
 	var rect: Rect2 = _LAYOUT.modal_rect(viewport, desired)
-	_LAYOUT.apply_rect(_panel, rect)
-	_title_lbl.add_theme_font_size_override("font_size", 50 if viewport.x >= 1050.0 else 44)
+	_LAYOUT.apply_modal(_panel, rect)
+	_title_lbl.add_theme_font_size_override("font_size", 30 if compact else (50 if viewport.x >= 1050.0 else 44))
+	_sub_lbl.add_theme_font_size_override("font_size", 12 if compact else 14)
+	if _reward_lbl:
+		_reward_lbl.add_theme_font_size_override("font_size", 11 if compact else 13)
 	_retry_btn.custom_minimum_size = Vector2(150.0, _LAYOUT.TOUCH_HEIGHT)
 	_map_btn.custom_minimum_size = Vector2(150.0, _LAYOUT.TOUCH_HEIGHT)
 	_menu_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.TOUCH_HEIGHT)
+	_stats_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var font_size: int = 12 if compact else 14
+	for child in _stats_box.get_children():
+		if child is HBoxContainer:
+			for lbl in child.get_children():
+				if lbl is Label:
+					lbl.add_theme_font_size_override("font_size", font_size)
 
 func _add_stat(label: String, value: String, val_color: Color) -> void:
 	var row := HBoxContainer.new()

@@ -21,6 +21,7 @@ offset_left = -260.0
 offset_top = -290.0
 offset_right = 260.0
 offset_bottom = 290.0
+clip_contents = true
 
 [node name="VBox" type="VBoxContainer" parent="Panel"]
 add_theme_constant_override/separation = 8
@@ -37,7 +38,16 @@ theme_override_colors/font_color = Color(0.75, 0.78, 0.85, 1)
 
 [node name="Sep" type="HSeparator" parent="Panel/VBox"]
 
-[node name="StatsBox" type="VBoxContainer" parent="Panel/VBox"]
+[node name="StatsScroll" type="ScrollContainer" parent="Panel/VBox"]
+custom_minimum_size = Vector2(0, 64)
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 2
+scroll_deadzone = 12
+follow_focus = true
+
+[node name="StatsBox" type="VBoxContainer" parent="Panel/VBox/StatsScroll"]
+size_flags_horizontal = 3
 add_theme_constant_override/separation = 4
 
 [node name="Sep2" type="HSeparator" parent="Panel/VBox"]

@@ -134,6 +134,19 @@ jobs:
           mkdir -p "$(dirname "$MANANET_PROFILE_PATH")"
           godot --headless --path . res://tests/ui/ViewportGeometryTest.tscn 2>&1 | tee geometry.log
 
+      - name: Audio asset gate (presence, decode, length)
+        run: |
+          set -o pipefail
+          godot --headless --path . -s res://tests/audio/sfx_assets.gd 2>&1 | tee audio.log
+
+      - name: Interaction clicks (real hitboxes)
+        env:
+          MANANET_PROFILE_PATH: ${{ runner.temp }}/ci-profile-interaction/td_progression.json
+        run: |
+          set -o pipefail
+          mkdir -p "$(dirname "$MANANET_PROFILE_PATH")"
+          godot --headless --path . res://tests/ui/InteractionTest.tscn 2>&1 | tee interaction.log
+
       - name: Benchmark liveness and percentiles
         run: |
           set -o pipefail
@@ -154,7 +167,7 @@ jobs:
           # Deliberate classification: SCRIPT ERROR is always fatal. Resource
           # leaks at exit are fatal for the harnesses that own their state, which
           # is what caught the undisposed SimTest GameState.
-          LOGS="regression.log speed_parity.log save_faults.log full_run.log clock.log rng.log victory.log simtest.log uiregression.log journey.log input_journey.log geometry.log benchmark.log verify.log"
+          LOGS="regression.log speed_parity.log save_faults.log full_run.log clock.log rng.log victory.log simtest.log uiregression.log journey.log input_journey.log geometry.log interaction.log audio.log benchmark.log verify.log"
           if grep -n "SCRIPT ERROR" $LOGS 2>/dev/null; then
             echo "::error::A headless run reported SCRIPT ERROR; see logs."
             exit 1

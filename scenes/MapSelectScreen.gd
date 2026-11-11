@@ -23,6 +23,7 @@ const _DIFFICULTY_COLORS: Array[Color] = [
 @onready var _title: Label                  = $TopBar/Title
 @onready var _scroll: ScrollContainer       = $Scroll
 var _right_spacer: Control = null
+var _mod_scroll: ScrollContainer = null
 var _mod_strip: HBoxContainer = null
 var _mod_rp_lbl: Label = null
 var _mod_btns: Dictionary = {}   # mod_id -> Button
@@ -37,15 +38,25 @@ func _ready() -> void:
 	_apply_visuals()
 	_apply_layout()
 	_scroll.scroll_deadzone = 12
+	_scroll.follow_focus = true
 
 	FocusManager.register_initial_focus(_back_btn)
 
 var _play_btns: Array[Button] = []
 
 func _build_modifier_strip() -> void:
+	# A row of five unlocked modifiers does not fit a phone landscape. Wrap it
+	# in a horizontal scroller so every modifier remains reachable.
+	_mod_scroll = ScrollContainer.new()
+	_mod_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_mod_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_mod_scroll.scroll_deadzone = 12
+	_mod_scroll.follow_focus = true
+	add_child(_mod_scroll)
 	_mod_strip = HBoxContainer.new()
 	_mod_strip.add_theme_constant_override("separation", 6)
-	add_child(_mod_strip)
+	_mod_strip.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_mod_scroll.add_child(_mod_strip)
 
 	var strip_lbl := Label.new()
 	strip_lbl.text = "MODIFIERS:"
@@ -62,7 +73,7 @@ func _build_modifier_strip() -> void:
 		var btn := Button.new()
 		btn.text = entry[2]
 		btn.toggle_mode = true
-		btn.custom_minimum_size = Vector2(0, 36)
+		btn.custom_minimum_size = Vector2(0, _LAYOUT.MIN_TOUCH_HEIGHT)
 		_THEME.apply_button(btn, "tab")
 		btn.add_theme_font_size_override("font_size", 12)
 		btn.pressed.connect(_on_mod_toggled.bind(mid))
@@ -77,7 +88,7 @@ func _build_modifier_strip() -> void:
 
 	_refresh_mod_strip()
 	# Do not render an orphan "MODIFIERS:" heading when nothing is owned yet.
-	_mod_strip.visible = not _mod_btns.is_empty()
+	_mod_scroll.visible = not _mod_btns.is_empty()
 
 func _on_mod_toggled(mod_id: String) -> void:
 	var active: Array = Progression.get_active_modifier_ids()
@@ -214,6 +225,8 @@ func _make_card(map_def: Dictionary) -> PanelContainer:
 	var desc_lbl := Label.new()
 	desc_lbl.text = map_def["desc"]
 	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.max_lines_visible = 3
+	desc_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	desc_lbl.add_theme_color_override("font_color", Color(0.75, 0.78, 0.85))
 	desc_lbl.add_theme_font_size_override("font_size", 13)
 	_THEME.apply_label(desc_lbl, "muted")
@@ -276,8 +289,8 @@ func _apply_layout() -> void:
 
 	var mod_strip_h: float = 0.0
 	if _mod_strip != null and not _mod_btns.is_empty():
-		_LAYOUT.apply_rect(_mod_strip, Rect2(Vector2(margin, top + 58.0), Vector2(maxf(0.0, viewport.x - margin * 2.0), 40.0)))
-		mod_strip_h = 46.0
+		_LAYOUT.apply_rect(_mod_scroll, Rect2(Vector2(margin, top + 58.0), Vector2(maxf(0.0, viewport.x - margin * 2.0), _LAYOUT.MIN_TOUCH_HEIGHT + 4.0)))
+		mod_strip_h = _LAYOUT.MIN_TOUCH_HEIGHT + 10.0
 
 	var scroll_top: float = top + 66.0 + mod_strip_h
 	var content: Rect2 = _LAYOUT.centered_rect(viewport, scroll_top, _LAYOUT.bottom_margin(viewport), 1360.0)
@@ -285,26 +298,63 @@ func _apply_layout() -> void:
 	# Only surface a scrollbar when the card row genuinely overflows. AUTO still
 	# reserves a track when three cards already fit, which read as a stray bar.
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_scroll.horizontal_scroll_mode = (
-		ScrollContainer.SCROLL_MODE_AUTO if content.size.x < 3.0 * 250.0 + 64.0
-		else ScrollContainer.SCROLL_MODE_DISABLED)
 	_card_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	_card_container.add_theme_constant_override("separation", 32)
 	_card_container.custom_minimum_size = Vector2(content.size.x, content.size.y)
 
-	var card_w: float = clampf((content.size.x - 32.0) / 3.0, 250.0, 350.0)
-	# A 250px floor times three cards plus 32px separations overflowed a 900px
-	# viewport (measured: the third PLAY button clipped and a scrollbar appeared).
-	# On narrower screens let the cards shrink so all three stay visible.
-	var min_card_w: float = 190.0 if viewport.x < 1000.0 else 250.0
-	card_w = clampf((content.size.x - 66.0) / 3.0, min_card_w, 350.0)
-	var card_h: float = minf(maxf(390.0, content.size.y - 8.0), 460.0)
+	# Fit the cards to the height that actually exists. The old 390px minimum
+	# clipped every PLAY button below a 320px landscape viewport, and vertical
+	# scrolling was disabled, so the primary action was unreachable.
+	var compact_cards: bool = content.size.y < 340.0
+	var card_sep: float = 10.0 if compact_cards else 32.0
+	_card_container.add_theme_constant_override("separation", int(card_sep))
+	var min_card_w: float = 140.0 if viewport.x < 1000.0 else 250.0
+	var card_w: float = clampf((content.size.x - card_sep * 2.0) / 3.0, min_card_w, 350.0)
+	_scroll.horizontal_scroll_mode = (
+		ScrollContainer.SCROLL_MODE_DISABLED
+		if card_w * 3.0 + card_sep * 2.0 <= content.size.x + 1.0
+		else ScrollContainer.SCROLL_MODE_AUTO)
+	var card_h: float = clampf(content.size.y, 140.0, 460.0)
+	var ultra_compact: bool = card_h < 300.0
+	var card_margin: int = 8 if ultra_compact else 14
+	var card_vsep: int = 4 if ultra_compact else 8
+	var play_h: float = _LAYOUT.MIN_TOUCH_HEIGHT if ultra_compact else _LAYOUT.TOUCH_HEIGHT
 	for child in _card_container.get_children():
 		if child is PanelContainer:
 			child.custom_minimum_size = Vector2(card_w, card_h)
-			var thumb = child.get_meta("thumb", null)
-			if thumb is Control:
-				thumb.custom_minimum_size = Vector2(maxf(180.0, card_w - 28.0), clampf(card_h * 0.40, 154.0, 188.0))
+			# Keep the hover/focus scale anchored to the card centre at every
+			# size; the fixed (150,210) pivot drifted outside compact cards.
+			child.pivot_offset = Vector2(card_w, card_h) * 0.5
+			var card_margin_node: Node = child.get_child(0)
+			if card_margin_node is MarginContainer:
+				card_margin_node.add_theme_constant_override("margin_left", card_margin)
+				card_margin_node.add_theme_constant_override("margin_top", card_margin)
+				card_margin_node.add_theme_constant_override("margin_right", card_margin)
+				card_margin_node.add_theme_constant_override("margin_bottom", card_margin)
+				var card_vbox: Node = card_margin_node.get_child(0)
+				if card_vbox is VBoxContainer:
+					card_vbox.add_theme_constant_override("separation", card_vsep)
+					# Keep every essential row inside the card; only the thumbnail
+					# and description absorb the available height.
+					var show_desc: bool = card_h >= 260.0
+					var sep_count: int = 4 if show_desc else 3
+					var chrome_h: float = float(card_margin * 2) + float(card_vsep * sep_count) \
+						+ (18.0 if ultra_compact else 24.0) \
+						+ (27.0 if ultra_compact else 31.0) + play_h
+					var thumb_h: float = clampf(card_h - chrome_h - (34.0 if show_desc else 0.0), 40.0, 188.0)
+					var thumb = child.get_meta("thumb", null)
+					if thumb is Control:
+						thumb.custom_minimum_size = Vector2(maxf(110.0, card_w - float(card_margin * 2)), thumb_h)
+					if card_vbox.get_child_count() >= 5:
+						var name_lbl: Label = card_vbox.get_child(1)
+						var diff_lbl: Label = card_vbox.get_child(2)
+						var desc_lbl: Label = card_vbox.get_child(3)
+						var play_btn: Button = card_vbox.get_child(4)
+						name_lbl.add_theme_font_size_override("font_size", 15 if ultra_compact else (17 if compact_cards else 20))
+						diff_lbl.add_theme_font_size_override("font_size", 11 if ultra_compact else 13)
+						desc_lbl.add_theme_font_size_override("font_size", 10 if ultra_compact else 12)
+						desc_lbl.visible = show_desc
+						play_btn.custom_minimum_size = Vector2(0.0, play_h)
+						play_btn.add_theme_font_size_override("font_size", 14 if ultra_compact else 16)
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):

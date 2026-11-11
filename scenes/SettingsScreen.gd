@@ -63,6 +63,7 @@ func _ready() -> void:
 	_apply_visuals()
 	_apply_layout()
 	_scroll.scroll_deadzone = 12
+	_scroll.follow_focus = true
 	_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
 	_content.mouse_filter = Control.MOUSE_FILTER_PASS
 	_rows_box.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -130,8 +131,6 @@ func _apply_layout() -> void:
 	var content_rect: Rect2 = _LAYOUT.centered_rect(viewport, top + 66.0, _LAYOUT.bottom_margin(viewport), 1320.0)
 	_ensure_glass()
 	_LAYOUT.apply_rect(_glass, content_rect)
-	if _glass.material is ShaderMaterial:
-		_glass.material.set_shader_parameter("panel_size", content_rect.size)
 	_LAYOUT.apply_rect(_scroll, content_rect)
 	_content.custom_minimum_size = Vector2(maxf(0.0, content_rect.size.x - 42.0), 0.0)
 	_rows_box.custom_minimum_size = Vector2(maxf(0.0, content_rect.size.x - 42.0), 0.0)
@@ -142,6 +141,13 @@ func _build() -> void:
 		child.queue_free()
 
 	var settings: Dictionary = Progression.get_settings()
+
+	# Breathing room at the top of the scroll; the first row's ascenders were
+	# flush with the scroll clip and looked cut.
+	var top_pad := Control.new()
+	top_pad.custom_minimum_size = Vector2(0.0, 8.0)
+	top_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rows_box.add_child(top_pad)
 
 	for row_def in _SETTING_ROWS:
 		var key: String   = row_def[0]
@@ -216,7 +222,7 @@ func _build() -> void:
 	var res_set_btn := Button.new()
 	res_set_btn.text = "Reset Settings"
 	_THEME.apply_button(res_set_btn, "danger")
-	res_set_btn.custom_minimum_size = Vector2(160, 42)
+	res_set_btn.custom_minimum_size = Vector2(160, _LAYOUT.MIN_TOUCH_HEIGHT)
 	res_set_btn.pressed.connect(_on_reset_settings)
 	btn_vbox.add_child(res_set_btn)
 	

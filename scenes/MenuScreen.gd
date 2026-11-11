@@ -6,6 +6,8 @@ const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
+const _COLOR_SFX := Color(0.55, 0.80, 0.95, 0.90)
+const _COLOR_MUTED := Color(0.70, 0.38, 0.42, 0.90)
 
 @onready var _vbox: VBoxContainer   = $VBox
 @onready var _title: TextureRect      = $VBox/Title
@@ -199,8 +201,8 @@ func _apply_layout() -> void:
 	# The legacy logo is hidden, so the column no longer reserves a title plate.
 	var title_h: float = 0.0
 	var sep: int = 6 if compact else 32
-	var play_h: float = 46.0 if compact else 64.0
-	var row2_h: float = 34.0 if compact else _LAYOUT.TOUCH_HEIGHT
+	var play_h: float = 52.0 if compact else 64.0
+	var row2_h: float = _LAYOUT.MIN_TOUCH_HEIGHT
 
 	# Height must also respect the viewport and the real content minimum. The
 	# minimum must include the wordmark + tagline rows that now sit above the
@@ -269,6 +271,8 @@ func _apply_layout() -> void:
 
 	# Gap 3 — version label — bottom-left corner
 	if _version_lbl:
+		# The footer overlapped the Cyber-Deck/Settings row on phones.
+		_version_lbl.visible = not compact
 		_version_lbl.position = Vector2(margin + 4.0, viewport.y - bottom - 18.0)
 
 	# Tower showcase — centered row just below VBox
@@ -355,23 +359,29 @@ func _add_version_label() -> void:
 
 func _add_mute_toggle() -> void:
 	_mute_btn = Button.new()
-	_mute_btn.custom_minimum_size = Vector2(42.0, 34.0)
+	_mute_btn.custom_minimum_size = Vector2(_LAYOUT.MIN_TOUCH_HEIGHT, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_mute_btn.focus_mode          = Control.FOCUS_ALL
 	_mute_btn.tooltip_text        = "Toggle audio mute"
-	_mute_btn.add_theme_font_size_override("font_size", 18)
+	_mute_btn.add_theme_font_size_override("font_size", 11)
 	_mute_btn.add_theme_color_override("font_color",
 			Color(_THEME.MUTED.r, _THEME.MUTED.g, _THEME.MUTED.b, 0.72))
 	_mute_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 0.92))
-	# Icon-only style — transparent fill, subtle hover tint
-	var sb_empty := StyleBoxEmpty.new()
+	# Quiet but unmistakably a button: a low-alpha navy pill, not bare text.
+	var sb_normal := _THEME.style_box(Color(0.05, 0.08, 0.15, 0.72),
+			Color(0.29, 0.565, 0.851, 0.42), 1, 8, 0, 2)
 	var sb_hover := StyleBoxFlat.new()
-	sb_hover.bg_color = Color(1.0, 1.0, 1.0, 0.06)
+	sb_hover.bg_color = Color(0.09, 0.14, 0.24, 0.90)
+	sb_hover.border_color = Color(0.29, 0.565, 0.851, 0.8)
+	sb_hover.set_border_width_all(1)
 	sb_hover.set_corner_radius_all(8)
-	_mute_btn.add_theme_stylebox_override("normal",   sb_empty)
-	_mute_btn.add_theme_stylebox_override("pressed",  sb_empty)
-	_mute_btn.add_theme_stylebox_override("focus",    sb_empty)
+	var sb_press := StyleBoxFlat.new()
+	sb_press.bg_color = Color(0.03, 0.05, 0.10, 0.95)
+	sb_press.set_corner_radius_all(8)
+	_mute_btn.add_theme_stylebox_override("normal",   sb_normal)
+	_mute_btn.add_theme_stylebox_override("pressed",  sb_press)
+	_mute_btn.add_theme_stylebox_override("focus",    sb_normal)
 	_mute_btn.add_theme_stylebox_override("hover",    sb_hover)
-	_mute_btn.add_theme_stylebox_override("disabled", sb_empty)
+	_mute_btn.add_theme_stylebox_override("disabled", sb_normal)
 	_mute_btn.pressed.connect(_on_mute_toggle)
 	add_child(_mute_btn)
 	_refresh_mute_btn()
@@ -380,7 +390,10 @@ func _refresh_mute_btn() -> void:
 	if _mute_btn == null:
 		return
 	var is_muted: bool = Progression.get_settings().get("audio_muted", false)
-	_mute_btn.text = "🔇" if is_muted else "🔊"
+	# The project font has no emoji glyphs; text states are unambiguous.
+	_mute_btn.text = "MUTED" if is_muted else "SFX"
+	_mute_btn.add_theme_color_override("font_color",
+			_COLOR_MUTED if is_muted else _COLOR_SFX)
 	var bus_idx := AudioServer.get_bus_index("Master")
 	if bus_idx >= 0:
 		AudioServer.set_bus_mute(bus_idx, is_muted)
@@ -403,7 +416,7 @@ func _add_pending_save_button() -> void:
 	btn.name = "RetrySaveBtn"
 	btn.text = _BRAND.SAVE_RETRY
 	btn.tooltip_text = _BRAND.UNSAVED_MENU
-	btn.custom_minimum_size = Vector2(0.0, 44.0)
+	btn.custom_minimum_size = Vector2(0.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	btn.focus_mode = Control.FOCUS_ALL
 	_THEME.apply_button(btn, "primary")
 	btn.pressed.connect(func() -> void:

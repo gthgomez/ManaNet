@@ -88,8 +88,13 @@ Run from the repository root.
 - Input-driven player journey: `godot --headless tests/ui/InputJourneyTest.tscn`
 - Economy probe (prints wave-by-wave resource curves): `godot --headless -s tests/simulation/economy_probe.gd`
 - UI regression harness: `godot --headless tests/ui/UIRegressionTest.tscn`
+- Audio SFX regeneration: `python3 tools/audio/generate_sfx.py` (requires numpy + soundfile)
 - Player journey through real scenes: `godot --headless tests/ui/PlayerJourneyTest.tscn`
 - Viewport geometry across desktop/mobile sizes: `godot --headless tests/ui/ViewportGeometryTest.tscn`
+- Interaction clicks (real mouse events at real control rects): `godot --headless tests/ui/InteractionTest.tscn`
+- Audio asset gate (presence, decode, length): `godot --headless -s tests/audio/sfx_assets.gd`
+- Rendered screenshot matrix (Xvfb/desktop): `QA_SIZES="568x320 900x600 1280x720" xvfb-run -a tools/qa/capture_matrix.sh docs/qa/captures`
+  (see `docs/qa/README.md`; captures are gitignored evidence, not a pixel-equality gate)
 - Early-run smoke test (exits after wave 3; not a 15-wave balance test): `godot --headless scenes/SimTest.tscn`
 - Verifier exit-status contract: `python3 tests/verifier_exit/test_verifier_exit.py`
 - Run locally: Godot 4.6 editor playback
