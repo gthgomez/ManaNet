@@ -94,6 +94,10 @@ Additional measurements:
 - `godot --headless -s scripts/benchmark.gd`: 3000 frames after warm-up,
   p50/p95/p99 = 0.608/0.768/0.849 ms, max 0.984 ms, theoretical 1619 FPS
   (simulation/CPU only; not rendered GPU evidence).
+- Rendered loop under Xvfb/llvmpipe (`tools/qa/measure_render_fps.gd`,
+  wave active, 240 frames): 900×600 = 60.0 avg / 60.0 min FPS, static
+  36.3 MB; 1280×720 = 60.0 avg / 60.0 min FPS, static 36.1 MB. This is a
+  desktop software-GL ceiling check, not Android GPU evidence.
 - `godot --headless -s tests/simulation/strategy_benchmark.gd`:
   11/30 wins, winning-run ending credits min 1936 / max 6310 / avg 4298.
   This reproduces the documented economy-first outcome (prior baseline 13/30,
