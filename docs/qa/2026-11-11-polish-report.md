@@ -43,6 +43,7 @@ No simulation/economy/tower stat/card-effect file was modified.
 ## Implemented changes (files)
 
 - `scenes/GameScreen.gd` — responsive HUD/banner/confirm bar, tower sheet,
+  explicit unaffordable-shop feedback,
   pause/promotion touch sizes and scroll widths, modal backdrop, live wave
   count, boss banner, readable labels, warning colors, shop click semantics,
   per-frame restyle caches.
@@ -78,7 +79,7 @@ python3 tools/verify_game.py --all
   PASS UI regression (36)
   PASS player journey (34)
   PASS viewport geometry (328)
-  PASS interaction clicks (28)
+  PASS interaction clicks (29)
   PASS speed parity
   PASS save fault injection
   PASS full-run qualification

@@ -101,6 +101,11 @@ func _test_game_screen_clicks() -> void:
 	var game: Node = await _mount("res://scenes/GameScreen.tscn")
 	await get_tree().process_frame
 	var gs: GameState = game.game_state
+	gs.gold = 0
+	await _click_control(game._shop_btns["archer"])
+	_check(not game.view_state.placement_active
+			and game.view_state.get_toast(Time.get_ticks_msec()).contains("Need"),
+		"clicking an unaffordable shop card explains the shortfall")
 	gs.gold = 1000
 
 	# Shop click enters placement.

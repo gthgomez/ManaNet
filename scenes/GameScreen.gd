@@ -1862,6 +1862,8 @@ func _on_shop_pressed(ttype: String) -> void:
 	# function treats a repeat of the same type as a toggle), so a normal click
 	# never started placement. Only switch when the type actually changes.
 	if not _shop_affordable(ttype):
+		view_state.show_toast("Need %d more %s" % [
+			_shop_cost(ttype) - game_state.gold, _BRAND.CURRENCY_RUN], Time.get_ticks_msec(), 1200)
 		return
 	if _shop_click_was_cancel:
 		_shop_click_was_cancel = false
