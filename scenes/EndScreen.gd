@@ -56,6 +56,7 @@ func _ready() -> void:
 
 	var profile: Dictionary = Progression.load_profile()
 	var banked_rp: int = profile.get("banked_rp", 0)
+	var save_failed: bool = bool(stats.get("save_failed", false)) or Progression.has_pending_run()
 
 	if won:
 		_title_lbl.text = "VICTORY!"
@@ -65,40 +66,34 @@ func _ready() -> void:
 		_title_lbl.add_theme_color_override("font_color", _THEME.RED)
 
 	var map_name: String = _MAPS_DATA.MAPS[map_id]["name"] if map_id < _MAPS_DATA.MAPS.size() else "Unknown"
-	if won:
+	if save_failed:
+		_sub_lbl.text = _BRAND.SAVE_FAILED_BODY
+		_sub_lbl.add_theme_color_override("font_color", _THEME.GOLD)
+		_add_retry_save_button()
+	elif won:
 		_sub_lbl.text = "All 15 waves cleared!  Map: %s" % map_name
 		_sub_lbl.add_theme_color_override("font_color", _THEME.GREEN)
 	else:
 		_sub_lbl.text = "Survived %d of 15 waves  |  Map: %s" % [waves, map_name]
 
-	# Reward line stays outside the scroll so the reason to visit the Cyber-Deck
-	# is visible even on a 320px-tall result screen.
-	_reward_lbl = Label.new()
-	_reward_lbl.text = _BRAND.end_stat_shards(rp_earned, banked_rp)
-	_reward_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_reward_lbl.add_theme_color_override("font_color", _THEME.GOLD)
-	_reward_lbl.add_theme_font_size_override("font_size", 13)
-	$Panel/VBox.add_child(_reward_lbl)
-	$Panel/VBox.move_child(_reward_lbl, _sub_lbl.get_index() + 1)
-
-	var save_failed: bool = bool(stats.get("save_failed", false))
-	if save_failed:
-		var warn := Label.new()
-		warn.text = "PROGRESS NOT SAVED — this run's Shards were not banked. Check storage access before the next run."
-		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		warn.add_theme_color_override("font_color", _THEME.RED)
-		warn.add_theme_font_size_override("font_size", 12)
-		# Inside the stats scroll: it stays visible first and cannot starve the
-		# stats region of height on small screens.
-		_stats_box.add_child(warn)
+	if not save_failed:
+		# Fixed reward line: visible even when the stats region scrolls on a
+		# 320px-tall result screen.
+		_reward_lbl = Label.new()
+		_reward_lbl.text = _BRAND.end_stat_shards(rp_earned, banked_rp)
+		_reward_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_reward_lbl.add_theme_color_override("font_color", _THEME.GOLD)
+		_reward_lbl.add_theme_font_size_override("font_size", 13)
+		$Panel/VBox.add_child(_reward_lbl)
+		$Panel/VBox.move_child(_reward_lbl, _sub_lbl.get_index() + 1)
 
 	_add_stat("Defenders Built",   str(towers),                         Color.WHITE)
 	_add_stat("Intrusions Cleared", str(kills),                         Color.WHITE)
 	_add_stat("%s Earned" % _BRAND.CURRENCY_RUN, str(gold),             Color(1.0, 0.82, 0.2))
 	_add_stat("%s Remaining" % _BRAND.CORE_RESOURCE, str(lives),        Color.WHITE)
 	_add_stat("Perfect Waves",     "%d / %d" % [perfect_waves, waves],  Color(0.2, 0.8, 1.0))
-	# Reward is shown as a fixed line above the scroll (see _reward_lbl).
+	if save_failed:
+		_add_stat(_BRAND.CURRENCY_META, "Not saved", _THEME.GOLD)
 
 	var newly_unlocked: Array = stats.get("newly_unlocked_variants", [])
 	var milestone_deltas: Array = stats.get("milestone_deltas", [])
@@ -170,8 +165,7 @@ func _apply_layout() -> void:
 	)
 	var rect: Rect2 = _LAYOUT.modal_rect(viewport, desired)
 	_LAYOUT.apply_modal(_panel, rect)
-	var title_font: int = 30 if compact else (50 if viewport.x >= 1050.0 else 44)
-	_title_lbl.add_theme_font_size_override("font_size", title_font)
+	_title_lbl.add_theme_font_size_override("font_size", 30 if compact else (50 if viewport.x >= 1050.0 else 44))
 	_sub_lbl.add_theme_font_size_override("font_size", 12 if compact else 14)
 	if _reward_lbl:
 		_reward_lbl.add_theme_font_size_override("font_size", 11 if compact else 13)
@@ -199,6 +193,30 @@ func _add_stat(label: String, value: String, val_color: Color) -> void:
 	val.add_theme_color_override("font_color", val_color)
 	row.add_child(val)
 	_stats_box.add_child(row)
+
+func _add_retry_save_button() -> void:
+	var retry_save := Button.new()
+	retry_save.name = "RetrySaveBtn"
+	retry_save.text = _BRAND.SAVE_RETRY
+	retry_save.custom_minimum_size = Vector2(150.0, _LAYOUT.TOUCH_HEIGHT)
+	_THEME.apply_button(retry_save, "primary")
+	retry_save.pressed.connect(_on_retry_save)
+	$Panel/VBox.add_child(retry_save)
+	$Panel/VBox.move_child(retry_save, _stats_box.get_index() + 1)
+
+func _on_retry_save() -> void:
+	var result: Dictionary = Progression.retry_pending_run()
+	var retry_save := $Panel/VBox.get_node_or_null("RetrySaveBtn")
+	if result.get("save_failed", true):
+		_sub_lbl.text = "Still not saved. Your earlier profile is unchanged."
+		return
+	_sub_lbl.text = _BRAND.SAVE_OK
+	_sub_lbl.add_theme_color_override("font_color", _THEME.GREEN)
+	Progression.pending_end_stats["save_failed"] = false
+	Progression.pending_end_stats["persisted"] = true
+	if retry_save is Button:
+		retry_save.text = _BRAND.SAVE_OK
+		retry_save.disabled = true
 
 func _on_retry() -> void:
 	var map_id: int = Progression.pending_end_stats.get("map_id", get_meta("map_id", 0))

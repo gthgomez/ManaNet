@@ -116,8 +116,10 @@ func _test_end_screen_milestones() -> void:
 	}
 	var failed_screen: Node = await _mount("res://scenes/EndScreen.tscn")
 	var failed_text := _collect_labels(failed_screen)
-	_check(failed_text.contains("PROGRESS NOT SAVED"),
-		"EndScreen surfaces an explicit save-failure warning")
+	_check(failed_text.contains("rewards were not saved") or failed_text.contains("Not saved"),
+		"EndScreen surfaces an explicit save-failure message")
+	var retry_save: Node = failed_screen.find_child("RetrySaveBtn", true, false)
+	_check(retry_save is Button, "EndScreen offers a Retry Save action after a save failure")
 	await _unmount(failed_screen)
 	Progression.pending_end_stats = {}
 

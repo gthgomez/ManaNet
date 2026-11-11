@@ -48,6 +48,7 @@ var _haptics_enabled: bool = true
 var _loaded_streams: Dictionary = {}   # SFX -> AudioStream cache
 
 func _ready() -> void:
+	tree_exiting.connect(_release_audio)
 	_ensure_sfx_bus()
 	for _i in _POOL_SIZE:
 		var p := AudioStreamPlayer.new()
@@ -65,6 +66,21 @@ func _ensure_sfx_bus() -> void:
 	var idx := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(idx, "SFX")
 	AudioServer.set_bus_send(idx, "Master")
+
+func stop_all() -> void:
+	_release_audio()
+
+func _release_audio() -> void:
+	# Stop while the audio server is still running. Doing this only inside
+	# tree_exiting is too late: Godot has already detached the Ogg playback.
+	# Leave the SFX bus in place. Removing it during shutdown races the
+	# playback and shows up as a leaked Ogg stream.
+	for p in _pool:
+		if not is_instance_valid(p):
+			continue
+		p.stop()
+		p.stream = null
+	_loaded_streams.clear()
 
 func configure_from_progression() -> void:
 	# Autoloads are absent during headless --script tooling; never crash there.
@@ -126,12 +142,6 @@ func vibrate(duration_ms: int = 50) -> void:
 func play_and_vibrate(sfx: SFX, vibrate_ms: int = 40) -> void:
 	play(sfx)
 	vibrate(vibrate_ms)
-
-## Stop every active cue (used by capture harnesses and hard shutdown paths).
-func stop_all() -> void:
-	for p in _pool:
-		if is_instance_valid(p):
-			p.stop()
 
 func _get_free_player() -> AudioStreamPlayer:
 	for p in _pool:

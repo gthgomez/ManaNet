@@ -69,4 +69,15 @@ python tests/verifier_exit/test_verifier_exit.py
 ```
 
 A failing check always produces a nonzero exit status; a printed PASS
-summary is never treated as success.
+summary is never treated as success. `python3 tools/verify_game.py --all`
+runs the same gates on an isolated profile. That Linux result does not
+qualify Android, Windows, or a physical device, and a simulation-step
+benchmark is not a rendered frame rate.
+
+Android export is not configured: there is no `export_presets.cfg`, CI does
+not install export templates, and this tree has not been packaged or run on
+a device. A device build needs Godot 4.6.2 export templates, the Android
+SDK/NDK, and a debug keystore created outside the repo. The project is
+landscape-only; portrait sizes load but are not a playable target. The
+checked-in gameplay MP4/GIF are an older scripted capture, not proof of the
+current UI. See `docs/verification/2026-11-10-corrective-campaign.md`.

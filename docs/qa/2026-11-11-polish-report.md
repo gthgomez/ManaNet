@@ -29,7 +29,7 @@ UI/state logic.
 | P1 | Wave-shop titles rendered missing emoji as a close-looking box; descriptions clipped | 568/900 captures | Fixed: label + textual category chip; four description lines |
 | P1 | Modifier strip overflowed when 5 modifiers unlocked | 568 capture with all modifiers | Fixed: horizontally scrollable strip; all chips reachable |
 | P1 | 60ms, −34dBFS SFX were effectively inaudible placeholders | `soundfile` measurement | Replaced with 15 original synthesized, peak-normalized cues; dedicated integrity/error/purchase cues |
-| P1 | Save failure showed as "+0 Shards" with no explanation | code review + new capture | Fixed: explicit red "PROGRESS NOT SAVED" warning; reward line fixed above scroll |
+| P1 | Save failure showed as "+0 Shards" with no explanation | code review + new capture | Fixed: main's Retry Save flow retained; fixed reward line above the scroll; save-failure state covered by UI test |
 | P1 | Test assertions measured size but not reachability (false passes) | independent review | Fixed: scroll-into-view assertions for pause/tower/settings/Cyber-Deck, lower-half tower branch, no-overlap checks, 48px tolerance |
 | P2 | Trap: `follow_focus` absent, so D-pad focus could target off-screen controls | review | Added to all scroll surfaces |
 | P2 | Map card hover pivot fixed at (150,210) outside compact cards | review | Pivot follows actual card size |
@@ -76,9 +76,9 @@ python3 tools/verify_game.py --all
   PASS script parse gate
   PASS full audit (84/84)
   PASS simulation regression
-  PASS UI regression (36)
+  PASS UI regression (37)
   PASS player journey (34)
-  PASS viewport geometry (328)
+  PASS viewport geometry (378)
   PASS interaction clicks (29)
   PASS speed parity
   PASS save fault injection

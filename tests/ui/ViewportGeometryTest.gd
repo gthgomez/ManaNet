@@ -25,6 +25,7 @@ const VIEWPORTS: Array = [
 	["mobile 568x320", 568, 320, true],
 	["mobile 640x360", 640, 360, true],
 	["tablet 800x600", 800, 600, true],
+	["desktop 900x600", 900, 600, true],
 	["desktop 1280x720", 1280, 720, true],
 	["desktop 1440x900", 1440, 900, true],
 	["portrait 320x568", 320, 568, false],

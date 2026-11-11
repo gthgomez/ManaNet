@@ -114,10 +114,15 @@ var _active_modifier_ids: Array = []
 ## Gameplay RNG. Every roll that can change an outcome (spawn type, crits,
 ## teleport/root procs, alchemy bonus, jitter) draws from here.
 var rng := RandomNumberGenerator.new()
-## Presentation RNG. Particle angles/lifespans draw from a SEPARATE stream so
-## visual load can never perturb gameplay rolls — otherwise a busier screen (or
-## a different tick count at 3x) would change crits and enemy composition.
+## Wave-shop offers. A dedicated stream so offer order does not consume gameplay
+## rolls and does not depend on how many particles the frame drew.
+var _offer_rng := RandomNumberGenerator.new()
+## Presentation RNG. Particle angles, speeds, and lifespans draw from here only.
 var _fx_rng := RandomNumberGenerator.new()
+## 0 hides combat particles, 1 is the shipped burst, higher values stress FX.
+## Scaling this must not change gameplay RNG consumption.
+var presentation_particle_scale: int = 1
+const SUPPORTED_SPEEDS: Array = [1.0, 2.0, 3.0]
 
 const WAVE_SHOP_OFFER_COUNT: int = 3
 
@@ -174,7 +179,8 @@ func _init(p_path: Array = [], run_config: Dictionary = {}, p_map_id: int = 0) -
 	_last_sim_ms = 0
 	_wall_ms = 0
 	_sim_ms = 0.0
-	speed_multiplier = float(cfg.get("default_speed", 1.0))
+	speed_multiplier = 1.0
+	set_speed(float(cfg.get("default_speed", 1.0)))
 
 	stat_towers_placed = 0
 	stat_enemies_killed = 0
@@ -204,11 +210,12 @@ func _init(p_path: Array = [], run_config: Dictionary = {}, p_map_id: int = 0) -
 	# Seeding: a caller may pass rng_seed for a reproducible run (tests, harness,
 	# replays). Otherwise derive from the global stream, so the established
 	# seed(N)-then-construct test convention stays reproducible.
-	_fx_rng.randomize()
-	if cfg.has("rng_seed"):
-		rng.seed = int(cfg["rng_seed"])
-	else:
-		rng.seed = randi()
+	# One seed fans out into isolated streams. Cosmetic consumption cannot
+	# change combat rolls or the cards a wave offers.
+	var base_seed: int = int(cfg["rng_seed"]) if cfg.has("rng_seed") else randi()
+	rng.seed = base_seed
+	_offer_rng.seed = base_seed ^ 0x9E3779B9
+	_fx_rng.seed = base_seed ^ 0x85EBCA6B
 	# The run config carries the resolved modifier list when available; fall back
 	# to the single primary id for older callers.
 	var mod_ids = cfg.get("modifier_ids", [])
@@ -278,8 +285,16 @@ func toggle_pause() -> void:
 	if game_state == "playing":
 		paused = !paused
 
-func set_speed(multiplier: float) -> void:
-	speed_multiplier = multiplier
+## Accept only the speeds the HUD offers. Anything else leaves the current
+## speed unchanged so a bad payload cannot stop, reverse, or NaN the clock.
+func set_speed(multiplier: float) -> bool:
+	if not is_finite(multiplier):
+		return false
+	for allowed in SUPPORTED_SPEEDS:
+		if is_equal_approx(float(allowed), multiplier):
+			speed_multiplier = float(allowed)
+			return true
+	return false
 
 func enemies_alive() -> int:
 	return enemies.size()
@@ -430,6 +445,10 @@ func drain_events() -> Array:
 func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 	if action.is_empty():
 		return {"success": false, "reason": "no_action"}
+	# `now_ms` is whatever the caller has — the UI passes wall time. Gameplay
+	# mutations below use the simulation clock only, so a promotion buff cannot
+	# be stamped in a different epoch from the combat checks that expire it.
+	var gameplay_ms: int = sim_now()
 	var action_type: String = action.get("type", "")
 	var result: Dictionary = {"success": true, "action": action_type}
 
@@ -465,7 +484,7 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		var tower: Tower = get_tower_by_id(action["tower_id"])
 		if tower == null:
 			return {"success": false, "reason": "tower_not_found"}
-		var res: Dictionary = tower.upgrade_base(gold, now_ms)
+		var res: Dictionary = tower.upgrade_base(gold, gameplay_ms)
 		if not res["success"]:
 			return res
 		gold -= res["cost"]
@@ -478,7 +497,7 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		var tower: Tower = get_tower_by_id(action["tower_id"])
 		if tower == null:
 			return {"success": false, "reason": "tower_not_found"}
-		var res: Dictionary = tower.try_path_upgrade(gold, action["path"], now_ms)
+		var res: Dictionary = tower.try_path_upgrade(gold, action["path"], gameplay_ms)
 		if not res["success"]:
 			return res
 		if res.get("preview_promotion", false):
@@ -493,7 +512,7 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		var tower: Tower = get_tower_by_id(action["tower_id"])
 		if tower == null:
 			return {"success": false, "reason": "tower_not_found"}
-		var res: Dictionary = tower.confirm_promotion(gold, now_ms)
+		var res: Dictionary = tower.confirm_promotion(gold, gameplay_ms)
 		if not res["success"]:
 			return res
 		gold -= res["cost"]
@@ -546,8 +565,14 @@ func apply_action(action: Dictionary, now_ms: int) -> Dictionary:
 		return {"success": true, "message": "Paused" if paused else "Resumed"}
 
 	if action_type == "set_speed":
-		set_speed(action.get("multiplier", 1.0))
-		return {"success": true, "message": "Speed x%d" % int(speed_multiplier)}
+		var requested = action.get("multiplier", null)
+		if not (requested is float or requested is int) or not set_speed(float(requested)):
+			return {"success": false, "reason": "invalid_speed"}
+		return {
+			"success": true,
+			"message": "Speed x%d" % int(speed_multiplier),
+			"multiplier": speed_multiplier,
+		}
 
 	if action_type == "wave_shop_pick":
 		if not wave_shop_pending:
@@ -592,11 +617,18 @@ func _draw_wave_shop_offers() -> Array:
 	var is_milestone: bool = wave in [5, 10, 15]
 	if is_milestone:
 		var pool: Array = _WAVE_CARDS_DATA.milestone_pool(_active_modifier_ids)
-		pool.shuffle()
+		_shuffle_with(pool, _offer_rng)
 		return pool.slice(0, mini(WAVE_SHOP_OFFER_COUNT, pool.size()))
 	var filtered: Array = _WAVE_CARDS_DATA.filtered_pool(_active_modifier_ids)
-	filtered.shuffle()
+	_shuffle_with(filtered, _offer_rng)
 	return filtered.slice(0, mini(WAVE_SHOP_OFFER_COUNT, filtered.size()))
+
+func _shuffle_with(pool: Array, stream: RandomNumberGenerator) -> void:
+	for i in range(pool.size() - 1, 0, -1):
+		var j: int = stream.randi_range(0, i)
+		var tmp = pool[i]
+		pool[i] = pool[j]
+		pool[j] = tmp
 
 func _is_valid_wave_shop_card(card_id: String) -> bool:
 	for card in _WAVE_CARDS_DATA.CARDS:
@@ -1022,12 +1054,17 @@ func apply_hit(tower: Tower, target: Enemy, damage: int, now_ms: int) -> void:
 
 func update_simulation(now_ms: int) -> void:
 	_wall_ms = now_ms
+	if not is_finite(speed_multiplier) or speed_multiplier <= 0.0:
+		speed_multiplier = 1.0
 	if game_state != "playing":
 		effects = effects.filter(func(e): return e.until_ms > now_ms)
+		_last_sim_ms = now_ms
 		return
 
 	if paused or wave_ready or wave_shop_pending:
 		effects = effects.filter(func(e): return e.until_ms > now_ms)
+		# Idle, paused, and shop time must not become a catch-up step later.
+		_last_sim_ms = now_ms
 		return
 
 	# One authoritative clock. The wall delta is clamped (so a hitch cannot
@@ -1038,6 +1075,8 @@ func update_simulation(now_ms: int) -> void:
 		_last_sim_ms = now_ms
 	var raw_step_ms: float = clampf(float(now_ms - _last_sim_ms), 0.0, MAX_SIM_STEP_MS)
 	var sim_dt_ms: float = raw_step_ms * speed_multiplier
+	if not is_finite(sim_dt_ms) or sim_dt_ms < 0.0:
+		sim_dt_ms = 0.0
 	_last_sim_ms = now_ms
 	_sim_ms += sim_dt_ms
 	var sim_ms: int = sim_now()
@@ -1246,14 +1285,19 @@ func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, n
 	# Hard cap: boss waves with full trash density can otherwise push 800+ live
 	# particles, which becomes both the sim and the mobile fill-rate spike.
 	const MAX_PARTICLES: int = 300
+	var scaled: int = count * maxi(0, presentation_particle_scale)
+	if scaled <= 0:
+		return
 	# Particles are simulation-time objects: stamp them on the sim clock so the
 	# expiry test in step 7 (sim_ms >= start_ms + lifespan_ms) is meaningful.
+	# Every random draw is the presentation stream — never the global RNG and
+	# never the gameplay RNG.
 	var stamp: int = sim_now() if _sim_ms > 0.0 else now_ms
 	var remaining: int = MAX_PARTICLES - particles.size()
 	if remaining <= 0:
 		return
-	count = mini(count, remaining)
-	for _i in range(count):
+	scaled = mini(scaled, remaining)
+	for _i in range(scaled):
 		var angle: float = _fx_rng.randf() * TAU
 		var spd: float
 		var lifespan: int
@@ -1263,27 +1307,27 @@ func _add_particle_burst(pos: Vector2, kind: String, color: Color, count: int, n
 
 		match kind:
 			"spark":
-				spd      = randf_range(0.12, 0.45)
+				spd      = _fx_rng.randf_range(0.12, 0.45)
 				lifespan = _fx_rng.randi_range(150, 450)
-				size     = randf_range(1.2, 2.8)
+				size     = _fx_rng.randf_range(1.2, 2.8)
 				gravity  = 0.004
 				friction = 0.94
 			"smoke":
-				spd      = randf_range(0.01, 0.06)
+				spd      = _fx_rng.randf_range(0.01, 0.06)
 				lifespan = _fx_rng.randi_range(800, 1600)
-				size     = randf_range(4.0, 14.0)
+				size     = _fx_rng.randf_range(4.0, 14.0)
 				gravity  = -0.003
 				friction = 0.96
 			"flame":
-				spd      = randf_range(0.04, 0.12)
+				spd      = _fx_rng.randf_range(0.04, 0.12)
 				lifespan = _fx_rng.randi_range(300, 700)
-				size     = randf_range(3.5, 7.0)
+				size     = _fx_rng.randf_range(3.5, 7.0)
 				gravity  = -0.008 # Rises
 				friction = 0.95
 			_:  # debris
-				spd      = randf_range(0.08, 0.28)
+				spd      = _fx_rng.randf_range(0.08, 0.28)
 				lifespan = _fx_rng.randi_range(500, 1000)
-				size     = randf_range(2.5, 5.0)
+				size     = _fx_rng.randf_range(2.5, 5.0)
 				gravity  = 0.014
 				friction = 0.95
 

@@ -36,7 +36,6 @@ var _rp_pill: PanelContainer = null
 var _rp_pill_label: Label = null
 var _version_lbl: Label = null
 var _last_run_lbl: Label = null
-var _decor: TextureRect = null
 
 # Tower showcase (sine float in _process)
 var _tower_showcase: Array = []
@@ -56,11 +55,9 @@ func _ready() -> void:
 	add_child(backdrop)
 	move_child(backdrop, 0)
 
-	# Decor mage — the SVG ships with a baked #05070d square, which read as a
-	# large dark block behind the title. The PNG tower art has a transparent
-	# background and keeps the same silhouette.
-	if ResourceLoader.exists("res://assets/sprites/towers/mage.png", "Texture2D"):
-		_add_decor_icon(load("res://assets/sprites/towers/mage.png"))
+	# The 96px mage SVG carries an opaque plate and reads as a dark rectangle when
+	# scaled up. The tower showcase below is the cyber-arcana decoration instead.
+	# The SVG asset itself stays on disk; it is just not composed into the menu.
 
 	# Background elements (low z in tree) — must be added before overlays
 	_add_particles()        # Gap 1
@@ -76,10 +73,15 @@ func _ready() -> void:
 	_add_rp_pill()
 	_add_mute_toggle()      # Gap 4
 	_add_version_label()    # Gap 3 (dynamic)
+	_add_pending_save_button()
 
-	self.modulate.a = 0.0
-	var fade_tween := create_tween()
-	fade_tween.tween_property(self, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
+	var reduce_motion: bool = bool(Progression.get_settings().get("reduce_motion", false))
+	if reduce_motion:
+		self.modulate.a = 1.0
+	else:
+		self.modulate.a = 0.0
+		var fade_tween := create_tween()
+		fade_tween.tween_property(self, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
 
 	_play_btn.pressed.connect(_on_play)
 	_base_btn.pressed.connect(_on_cyberdeck)
@@ -106,6 +108,8 @@ func _ready() -> void:
 	FocusManager.back_pressed.connect(_on_back_pressed)
 
 func _process(delta: float) -> void:
+	if bool(Progression.get_settings().get("reduce_motion", false)):
+		return
 	_time += delta
 	for i in _tower_showcase.size():
 		if i < _tower_base_y.size() and _tower_base_y[i] > 0.0:
@@ -124,16 +128,18 @@ func _apply_visuals() -> void:
 
 	_THEME.apply_label(_subtitle, "muted")
 	_subtitle.text = _BRAND.FANTASY_SUBTITLE
-	# The shipped logo asset still reads "Tactical Tower Defense" and is locked.
-	# Show the real product wordmark above it so the first impression is ManaNet.
+	# The shipped title texture still reads "Tactical Tower Defense". It stays
+	# in the project, but it is not part of the menu composition.
+	_title.visible = false
+	_title.custom_minimum_size = Vector2.ZERO
 	if _product_name != null:
 		_product_name.text = _BRAND.PRODUCT_NAME
 		_THEME.apply_label(_product_name, "heading")
-		_product_name.add_theme_font_size_override("font_size", 24 if viewport_is_compact() else 40)
-		_product_name.add_theme_color_override("font_color", _THEME.CYAN)
+		_product_name.add_theme_font_size_override("font_size", 28 if viewport_is_compact() else 56)
+		_product_name.add_theme_color_override("font_color", Color(0.72, 0.96, 1.0))
 		_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_product_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_product_name.custom_minimum_size = Vector2(0.0, 34.0 if viewport_is_compact() else 46.0)
+		_product_name.custom_minimum_size = Vector2(0.0, 34.0 if viewport_is_compact() else 64.0)
 	if _product_tagline != null:
 		_product_tagline.text = _BRAND.PRODUCT_TAGLINE
 		_THEME.apply_label(_product_tagline, "muted")
@@ -156,22 +162,19 @@ func _apply_visuals() -> void:
 	_base_btn.focus_mode     = Control.FOCUS_ALL
 	_settings_btn.focus_mode = Control.FOCUS_ALL
 
-	# Title tilt loop
-	_title.pivot_offset = _title.size * 0.5
-	var tt := create_tween().set_loops()
-	tt.tween_property(_title, "rotation", deg_to_rad(1.0),  4.0).set_trans(Tween.TRANS_SINE)
-	tt.tween_property(_title, "rotation", deg_to_rad(-1.0), 4.0).set_trans(Tween.TRANS_SINE)
-
-	# Play glint loop
-	var pt := create_tween().set_loops()
-	pt.tween_callback(func(): _THEME.trigger_glint(_play_btn)).set_delay(3.5)
+	var reduce_motion: bool = bool(Progression.get_settings().get("reduce_motion", false))
+	if not reduce_motion:
+		# Play glint loop
+		var pt := create_tween().set_loops()
+		pt.tween_callback(func(): _THEME.trigger_glint(_play_btn)).set_delay(3.5)
 
 	# Cyber-Deck glows when unspent Shards are available (not just on just_won)
 	var profile: Dictionary = Progression.load_profile()
 	if Progression.just_won() or profile.get("banked_rp", 0) > 0:
 		_THEME.set_button_glow(_base_btn, true)
-		var t := create_tween().set_loops()
-		t.tween_callback(func(): _THEME.trigger_glint(_base_btn)).set_delay(2.0)
+		if not reduce_motion:
+			var t := create_tween().set_loops()
+			t.tween_callback(func(): _THEME.trigger_glint(_base_btn)).set_delay(2.0)
 
 	_refresh_mute_btn()
 
@@ -195,12 +198,8 @@ func _apply_layout() -> void:
 	# an 84px title + 32px separations + 64px play button (measured bottom 348 in
 	# a 320px viewport), so the whole column must shrink, not just its box.
 	var compact: bool = viewport_is_compact()
-	# On short screens the locked legacy logo is illegible and its baked title
-	# conflicts with the ManaNet wordmark; drop it (and the redundant tagline)
-	# instead of shrinking everything around it.
-	var show_logo: bool = not compact
-	var show_tagline: bool = not compact
-	var title_h: float = (84.0 if viewport.x < 1200.0 else 110.0) if show_logo else 0.0
+	# The legacy logo is hidden, so the column no longer reserves a title plate.
+	var title_h: float = 0.0
 	var sep: int = 6 if compact else 32
 	var play_h: float = 52.0 if compact else 64.0
 	var row2_h: float = _LAYOUT.MIN_TOUCH_HEIGHT
@@ -208,8 +207,8 @@ func _apply_layout() -> void:
 	# Height must also respect the viewport and the real content minimum. The
 	# minimum must include the wordmark + tagline rows that now sit above the
 	# logo; omitting them let the column overflow and overlap the showcase.
-	var wordmark_h: float = 30.0 if compact else 46.0
-	var tagline_h: float = 14.0 if show_tagline else 0.0
+	var wordmark_h: float = 34.0 if compact else 64.0
+	var tagline_h: float = 12.0 if compact else 18.0
 	var content_min: float = wordmark_h + tagline_h + title_h + 24.0 + float(sep * 4) + play_h + row2_h
 	var avail_h: float = viewport.y - _LAYOUT.top_margin(viewport) - _LAYOUT.bottom_margin(viewport) - 12.0
 	# Clamp the column to what the viewport can actually show. If even the
@@ -236,15 +235,7 @@ func _apply_layout() -> void:
 	_LAYOUT.apply_rect(_vbox, Rect2(Vector2(x, y), Vector2(width, height)))
 
 	_vbox.add_theme_constant_override("separation", sep)
-	_title.visible = show_logo
 	_title.custom_minimum_size = Vector2(0.0, title_h)
-	if _product_tagline:
-		_product_tagline.visible = show_tagline
-	if _version_lbl:
-		# The version footer sat behind the Cyber-Deck/Settings row on phones.
-		_version_lbl.visible = not compact
-	if _decor:
-		_decor.visible = not compact
 	# A TextureRect defaults to KEEP_SIZE, so the logo texture's pixel width became
 	# the column's hard minimum and inflated it to 422px inside a 320px phone.
 	# Scale the logo to the column instead of letting it dictate the width.
@@ -261,6 +252,8 @@ func _apply_layout() -> void:
 			Vector2(x - 20.0, y - 12.0),
 			Vector2(width + 40.0, height + 24.0))
 	_LAYOUT.apply_rect(_glass, glass_rect)
+	if _glass.material is ShaderMaterial:
+		_glass.material.set_shader_parameter("panel_size", glass_rect.size)
 	for tr in _tower_showcase:
 		move_child(tr, _vbox.get_index())
 
@@ -278,6 +271,8 @@ func _apply_layout() -> void:
 
 	# Gap 3 — version label — bottom-left corner
 	if _version_lbl:
+		# The footer overlapped the Cyber-Deck/Settings row on phones.
+		_version_lbl.visible = not compact
 		_version_lbl.position = Vector2(margin + 4.0, viewport.y - bottom - 18.0)
 
 	# Tower showcase — centered row just below VBox
@@ -395,8 +390,7 @@ func _refresh_mute_btn() -> void:
 	if _mute_btn == null:
 		return
 	var is_muted: bool = Progression.get_settings().get("audio_muted", false)
-	# The default project font has no emoji glyphs; a missing glyph rendered as
-	# a tofu box in the top-left corner. Text states are unambiguous.
+	# The project font has no emoji glyphs; text states are unambiguous.
 	_mute_btn.text = "MUTED" if is_muted else "SFX"
 	_mute_btn.add_theme_color_override("font_color",
 			_COLOR_MUTED if is_muted else _COLOR_SFX)
@@ -415,6 +409,28 @@ func _on_mute_toggle() -> void:
 # ── Product wordmark ──────────────────────────────────────────────────────────
 # The shipped title_logo.png still reads "Tactical Tower Defense" and is
 # asset-locked, so the menu presents the real product name as text above it.
+func _add_pending_save_button() -> void:
+	if not Progression.has_pending_run():
+		return
+	var btn := Button.new()
+	btn.name = "RetrySaveBtn"
+	btn.text = _BRAND.SAVE_RETRY
+	btn.tooltip_text = _BRAND.UNSAVED_MENU
+	btn.custom_minimum_size = Vector2(0.0, _LAYOUT.MIN_TOUCH_HEIGHT)
+	btn.focus_mode = Control.FOCUS_ALL
+	_THEME.apply_button(btn, "primary")
+	btn.pressed.connect(func() -> void:
+		var result: Dictionary = Progression.retry_pending_run()
+		if result.get("save_failed", true):
+			btn.text = "Retry Save — still not saved"
+			return
+		btn.text = _BRAND.SAVE_OK
+		btn.disabled = true
+		_refresh_rp()
+	)
+	_vbox.add_child(btn)
+	_vbox.move_child(btn, _play_btn.get_parent().get_index())
+
 func _add_product_wordmark() -> void:
 	_product_name = Label.new()
 	_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -584,11 +600,10 @@ func _add_decor_icon(texture: Texture2D) -> void:
 	decor.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
 	decor.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	decor.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	decor.size         = Vector2(260, 260)
-	decor.position     = Vector2(-12, -12)
-	decor.modulate     = Color(1.0, 1.0, 1.0, 0.0)
+	decor.modulate.a   = 0.0
+	decor.size         = Vector2(300, 300)
+	decor.position     = Vector2(-20, -20)
 	add_child(decor)
-	_decor = decor
 	# +1 over BG so the ghost actually renders (original move_child(1) hid it behind BG)
 	move_child(decor, _bg.get_index() + 1)
 

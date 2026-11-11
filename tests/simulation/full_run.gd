@@ -297,13 +297,16 @@ func _test_strategies_are_viable() -> void:
 		_check(result["outcome"] in ["won", "lost"],
 			"strategy '%s' reaches a terminal outcome (%s, wave %d, cleared %d)"
 				% [strategy_name, result["outcome"], result["wave"], result["waves_cleared"]])
-	# Variety is healthy, but not every strategy winning every time is required.
+	# Liveness only. A loss is a measured outcome, not a pass-by-default victory.
+	# Known-good 15-wave clears live in victory_qualification.gd.
 	var wins: int = 0
 	for k in outcomes:
 		if outcomes[k] == "won":
 			wins += 1
-	_check(wins >= 0, "strategy outcome distribution recorded (%d/%d wins)"
-		% [wins, outcomes.size()])
+	print("STRATEGY DISTRIBUTION wins=%d/%d %s" % [wins, outcomes.size(), str(outcomes)])
+	_check(outcomes.size() == STRATEGIES.size(),
+		"every strategy produced a measured terminal row (%d/%d wins)"
+			% [wins, outcomes.size()])
 
 func _test_speed_does_not_change_outcome() -> void:
 	# The same strategic setup must not flip outcome merely from fast-forward.
