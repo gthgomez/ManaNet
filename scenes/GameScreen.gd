@@ -49,6 +49,9 @@ var _gold_label: Label  = null
 var _lives_label: Label = null
 var _wave_label: Label  = null
 var _tower_panel: PanelContainer = null
+var _tower_panel_box: VBoxContainer = null
+var _tower_panel_margin: MarginContainer = null
+var _tower_panel_scroll: ScrollContainer = null
 var _tower_name_label: Label = null
 var _base_upg_btn: Button = null
 var _path_upg_btns: Array = []   # [Button x3]
@@ -62,6 +65,7 @@ var _promotion_confirm_btn: Button = null
 var _promotion_cancel_btn: Button = null
 var _pause_modal: PanelContainer = null
 var _pause_title: Label = null
+var _pause_status_lbl: Label = null
 var _resume_btn: Button = null
 var _restart_btn: Button = null
 var _quit_btn: Button = null
@@ -81,6 +85,9 @@ var _placement_confirm_bar: HBoxContainer = null
 var _confirm_placement_btn: Button = null
 var _cancel_placement_btn: Button = null
 var _info_btn: Button = null
+var _close_panel_btn: Button = null
+var _modal_backdrop: ColorRect = null
+var _pause_body: VBoxContainer = null
 var _instruction_banner: PanelContainer = null
 var _instruction_label: Label = null
 var _details = null   # TowerDetailsOverlayController
@@ -228,6 +235,8 @@ func _build_hud() -> void:
 	_msg_label = Label.new()
 	_msg_label.text = ""
 	_msg_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_msg_label.clip_text = true
+	_msg_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_THEME.apply_label(_msg_label, "muted")
 	_top_bar.add_child(_msg_label)
 
@@ -270,10 +279,11 @@ func _build_hud() -> void:
 	_tower_panel.custom_minimum_size = Vector2(430.0, 178.0)
 	_tower_panel.visible = false
 	_tower_panel.z_index = _Z_TOWER_PANEL
-	_THEME.apply_panel(_tower_panel, "default")
+	_THEME.apply_glass_panel(_tower_panel)
 	hud_layer.add_child(_tower_panel)
 
 	var panel_margin := MarginContainer.new()
+	_tower_panel_margin = panel_margin
 	panel_margin.add_theme_constant_override("margin_left", 12)
 	panel_margin.add_theme_constant_override("margin_top", 10)
 	panel_margin.add_theme_constant_override("margin_right", 12)
@@ -281,11 +291,15 @@ func _build_hud() -> void:
 	_tower_panel.add_child(panel_margin)
 
 	var panel_vbox := VBoxContainer.new()
+	_tower_panel_box = panel_vbox
+	panel_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel_vbox.add_theme_constant_override("separation", 8)
 	# Scroll the panel content inside its reserved 220px slot. Growing the panel
 	# to its 294px content minimum pushed the bottom off-screen and under the
 	# shop strip, so upgrade/sell/target became unreachable.
 	var panel_scroll := ScrollContainer.new()
+	_tower_panel_scroll = panel_scroll
+	panel_scroll.follow_focus = true
 	panel_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	panel_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	panel_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -302,15 +316,30 @@ func _build_hud() -> void:
 
 	var name_hbox := HBoxContainer.new()
 	name_hbox.add_child(_tower_name_label)
+	var name_spacer := Control.new()
+	name_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_hbox.add_child(name_spacer)
 
 	_info_btn = Button.new()
 	_info_btn.text = "i"
 	_info_btn.icon = _ui_icon("cyber_deck")
 	_info_btn.add_theme_constant_override("icon_max_width", 20)
-	_info_btn.custom_minimum_size = Vector2(44.0, 44.0)
+	_info_btn.custom_minimum_size = Vector2(_LAYOUT.MIN_TOUCH_HEIGHT, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_THEME.apply_button(_info_btn, "tab")
+	_info_btn.tooltip_text = "Show all upgrade paths"
 	_info_btn.pressed.connect(_on_info_pressed)
 	name_hbox.add_child(_info_btn)
+
+	# On short landscapes the tower panel becomes a bottom sheet and covers the
+	# wave/shop strip, so it needs an explicit close affordance.
+	_close_panel_btn = Button.new()
+	_close_panel_btn.text = "X"
+	_close_panel_btn.custom_minimum_size = Vector2(_LAYOUT.MIN_TOUCH_HEIGHT, _LAYOUT.MIN_TOUCH_HEIGHT)
+	_THEME.apply_button(_close_panel_btn, "secondary")
+	_close_panel_btn.tooltip_text = "Close tower panel"
+	_close_panel_btn.pressed.connect(_on_close_panel_pressed)
+	name_hbox.add_child(_close_panel_btn)
 
 	panel_vbox.add_child(name_hbox)
 
@@ -365,6 +394,7 @@ func _build_hud() -> void:
 	_shop_scroll = ScrollContainer.new()
 	_shop_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_shop_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_shop_scroll.follow_focus = true
 	_shop_scroll.z_index = _Z_SHOP_BAR
 	hud_layer.add_child(_shop_scroll)
 
@@ -396,6 +426,8 @@ func _build_hud() -> void:
 		var name_lbl := Label.new()
 		name_lbl.text = info["name"]
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		name_lbl.max_lines_visible = 2
 		name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_THEME.apply_label(name_lbl, "body")
 		name_lbl.add_theme_font_size_override("font_size", 13)
@@ -423,15 +455,15 @@ func _build_hud() -> void:
 	hud_layer.add_child(_placement_confirm_bar)
 
 	_confirm_placement_btn = Button.new()
-	_confirm_placement_btn.text = "✓"
-	_confirm_placement_btn.custom_minimum_size = Vector2(68.0, _LAYOUT.min_touch_height(true))
+	_confirm_placement_btn.text = "Place"
+	_confirm_placement_btn.custom_minimum_size = Vector2(108.0, _LAYOUT.min_touch_height(true))
 	_THEME.apply_button(_confirm_placement_btn, "primary")
 	_confirm_placement_btn.pressed.connect(_on_confirm_placement)
 	_placement_confirm_bar.add_child(_confirm_placement_btn)
 
 	_cancel_placement_btn = Button.new()
-	_cancel_placement_btn.text = "X"
-	_cancel_placement_btn.custom_minimum_size = Vector2(68.0, _LAYOUT.min_touch_height(true))
+	_cancel_placement_btn.text = "Cancel"
+	_cancel_placement_btn.custom_minimum_size = Vector2(108.0, _LAYOUT.min_touch_height(true))
 	_THEME.apply_button(_cancel_placement_btn, "danger")
 	_cancel_placement_btn.pressed.connect(_on_cancel_placement)
 	_placement_confirm_bar.add_child(_cancel_placement_btn)
@@ -483,6 +515,15 @@ func _build_hud() -> void:
 	_apply_wave_progress_style(1.0)
 	hud_layer.add_child(_wave_progress_bar)
 
+	# One dim layer behind every blocking modal. Without it the HUD stayed
+	# fully lit behind wave-shop/pause dialogs and still looked interactive.
+	_modal_backdrop = ColorRect.new()
+	_modal_backdrop.color = Color(0.0, 0.0, 0.0, 0.55)
+	_modal_backdrop.visible = false
+	_modal_backdrop.z_index = 90
+	_modal_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	_modal_backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hud_layer.add_child(_modal_backdrop)
 	_build_promotion_modal()
 	_build_pause_modal()
 	_build_placement_confirm_modal()
@@ -514,6 +555,7 @@ func _build_promotion_modal() -> void:
 	_promotion_title.text = "Confirm path promotion?"
 	_promotion_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_promotion_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_promotion_title.custom_minimum_size = Vector2(260.0, 0.0)
 	_promotion_title.add_theme_color_override("font_color", _PANEL_TEXT)
 	vbox.add_child(_promotion_title)
 
@@ -524,7 +566,7 @@ func _build_promotion_modal() -> void:
 	_promotion_confirm_btn = Button.new()
 	_promotion_confirm_btn.text = "Confirm"
 	_promotion_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_promotion_confirm_btn.custom_minimum_size = Vector2(0.0, 44.0)
+	_promotion_confirm_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_apply_button_readability(_promotion_confirm_btn)
 	_promotion_confirm_btn.pressed.connect(_on_promotion_confirm_pressed)
 	row.add_child(_promotion_confirm_btn)
@@ -532,7 +574,7 @@ func _build_promotion_modal() -> void:
 	_promotion_cancel_btn = Button.new()
 	_promotion_cancel_btn.text = "Cancel"
 	_promotion_cancel_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_promotion_cancel_btn.custom_minimum_size = Vector2(0.0, 44.0)
+	_promotion_cancel_btn.custom_minimum_size = Vector2(0.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_apply_button_readability(_promotion_cancel_btn)
 	_promotion_cancel_btn.pressed.connect(_on_promotion_cancel_pressed)
 	row.add_child(_promotion_cancel_btn)
@@ -548,10 +590,11 @@ func _build_pause_modal() -> void:
 	hud_layer.add_child(_pause_modal)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", 6)
 	# Scroll the pause body inside the modal's capped rect; the content minimum was
 	# 560px, which can exceed a short landscape viewport as more rows are added.
 	var pause_scroll := ScrollContainer.new()
+	pause_scroll.follow_focus = true
 	pause_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	pause_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	pause_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -559,6 +602,9 @@ func _build_pause_modal() -> void:
 	pause_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
 	_pause_modal.add_child(pause_scroll)
 	pause_scroll.add_child(vbox)
+	_pause_body = vbox
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.custom_minimum_size = Vector2(280.0, 0.0)
 
 	_pause_title = Label.new()
 	_pause_title.text = "Paused"
@@ -568,16 +614,23 @@ func _build_pause_modal() -> void:
 	_pause_title.add_theme_font_size_override("font_size", 24)
 	vbox.add_child(_pause_title)
 
+	_pause_status_lbl = Label.new()
+	_pause_status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pause_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pause_status_lbl.add_theme_font_size_override("font_size", 13)
+	_pause_status_lbl.add_theme_color_override("font_color", _PANEL_MUTED)
+	vbox.add_child(_pause_status_lbl)
+
 	_resume_btn = Button.new()
 	_resume_btn.text = "Resume"
-	_resume_btn.custom_minimum_size = Vector2(0, 44)
+	_resume_btn.custom_minimum_size = Vector2(0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_apply_button_readability(_resume_btn)
 	_resume_btn.pressed.connect(_on_resume_pressed)
 	vbox.add_child(_resume_btn)
 
 	_restart_btn = Button.new()
 	_restart_btn.text = "Restart Run"
-	_restart_btn.custom_minimum_size = Vector2(0, 44)
+	_restart_btn.custom_minimum_size = Vector2(0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_apply_button_readability(_restart_btn)
 	_restart_btn.pressed.connect(_on_restart_pressed)
 	vbox.add_child(_restart_btn)
@@ -602,7 +655,7 @@ func _build_pause_modal() -> void:
 
 	_quit_btn = Button.new()
 	_quit_btn.text = "Quit to Menu"
-	_quit_btn.custom_minimum_size = Vector2(0, 44)
+	_quit_btn.custom_minimum_size = Vector2(0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_apply_button_readability(_quit_btn)
 	_quit_btn.pressed.connect(_on_quit_pressed)
 	vbox.add_child(_quit_btn)
@@ -611,13 +664,13 @@ func _build_pause_modal() -> void:
 	vbox.add_child(sep)
 
 	_placement_mode_btn = Button.new()
-	_placement_mode_btn.custom_minimum_size = Vector2(0, 44)
+	_placement_mode_btn.custom_minimum_size = Vector2(0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_apply_button_readability(_placement_mode_btn)
 	_placement_mode_btn.pressed.connect(_on_placement_mode_toggle)
 	vbox.add_child(_placement_mode_btn)
 
 	_placement_confirm_toggle_btn = Button.new()
-	_placement_confirm_toggle_btn.custom_minimum_size = Vector2(0, 44)
+	_placement_confirm_toggle_btn.custom_minimum_size = Vector2(0, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_apply_button_readability(_placement_confirm_toggle_btn)
 	_placement_confirm_toggle_btn.pressed.connect(_on_placement_confirm_toggle)
 	vbox.add_child(_placement_confirm_toggle_btn)
@@ -720,6 +773,12 @@ func _wire_hud_dpad() -> void:
 	# Placement confirm bar (floating): horizontal pair
 	FocusManager.setup_dpad_neighbors([_confirm_placement_btn, _cancel_placement_btn], false)
 
+	# Tower panel header: info and close are a horizontal pair; close drops into
+	# the upgrade controls so keyboard/controller users are never trapped.
+	if _close_panel_btn != null:
+		FocusManager.setup_dpad_neighbors([_info_btn, _close_panel_btn], false)
+		FocusManager.set_neighbor(_close_panel_btn, "bottom", _base_upg_btn)
+
 func _dpad_return_focus() -> void:
 	# Called after a modal closes — return focus to the most logical HUD button.
 	if _wave_btn.is_visible_in_tree():
@@ -782,7 +841,6 @@ func _apply_responsive_layout() -> void:
 	var margin_r: float = float(margins["right"])
 	var top: float = float(margins["top"])
 	var bottom: float = float(margins["bottom"])
-	var margin: float = maxf(margin_l, margin_r)
 	var top_bar_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.074)
 	if _LAYOUT.is_short_height(viewport):
 		top_bar_h = maxf(_LAYOUT.min_touch_height(false), minf(top_bar_h, 44.0))
@@ -794,6 +852,10 @@ func _apply_responsive_layout() -> void:
 	for lbl in [_wave_label, _lives_label, _gold_label, _msg_label]:
 		if lbl:
 			lbl.add_theme_font_size_override("font_size", top_font)
+	# A 58-character contextual line cannot fit beside three resource readouts
+	# on a phone landscape; it rendered clipped mid-word. Small layouts surface
+	# toasts in the full-width instruction banner instead.
+	_msg_label.visible = not (viewport.x < 700.0 or viewport.y < 430.0)
 
 	# Shop strip: fit within viewport; horizontal scroll when 6 towers exceed width
 	var tower_count: int = max(1, _shop_btns.size())
@@ -802,8 +864,12 @@ func _apply_responsive_layout() -> void:
 	var compact_shop: bool = viewport.y < 620.0 or _LAYOUT.shop_strip_needs_compaction(viewport, tower_count)
 	var preferred_card_w: float = 100.0 if compact_shop else 120.0
 	var min_card_w: float = 72.0 if compact_shop else 88.0
-	var shop_h: float = 104.0 if compact_shop else 124.0
-	var shop_max_w: float = minf(viewport.x - margin_l - margin_r, _world_rect.size.x - margin * 2.0)
+	# Short landscapes need every vertical pixel for the playfield and the tower
+	# panel. The cards still fit icon + two-line name + cost at 88px.
+	var shop_h: float = 88.0 if viewport.y < 430.0 else (104.0 if compact_shop else 124.0)
+	# The shop is HUD, not world geometry: on wide/short displays it can use the
+	# full viewport width instead of being boxed into the 4:3 playfield.
+	var shop_max_w: float = maxf(0.0, viewport.x - margin_l - margin_r)
 	var preferred_content_w: float = float(tower_count) * preferred_card_w + float(gap_count) * shop_sep
 	var min_content_w: float = float(tower_count) * min_card_w + float(gap_count) * shop_sep
 	var needs_scroll: bool = min_content_w > shop_max_w + 1.0
@@ -843,7 +909,8 @@ func _apply_responsive_layout() -> void:
 		_LAYOUT.apply_rect(_shop_bar, Rect2(Vector2(shop_x, shop_y), Vector2(shop_w, shop_h)))
 
 	# Wave button: docked flush to top of shop strip, visually grouped
-	var wave_size: Vector2 = Vector2(clampf(viewport.x * 0.23, 180.0, 240.0), _LAYOUT.min_touch_height(true))
+	var wave_h: float = _LAYOUT.MIN_TOUCH_HEIGHT if viewport.y < 430.0 else _LAYOUT.min_touch_height(true)
+	var wave_size: Vector2 = Vector2(clampf(viewport.x * 0.23, 180.0, 240.0), wave_h)
 	var wave_y: float = shop_y - wave_size.y - (12.0 if compact_shop else 10.0)
 	_LAYOUT.apply_rect(_wave_btn, Rect2(Vector2((viewport.x - wave_size.x) * 0.5, wave_y), wave_size))
 
@@ -857,29 +924,34 @@ func _apply_responsive_layout() -> void:
 		var badge_y: float = top + top_bar_h + 9.0
 		_modifier_badge.position = Vector2(badge_x, badge_y)
 
-	# Instruction banner: centered below top bar
+	# Instruction banner: below the speed strip, never on top of it. The old
+	# placement put the banner over x1/x2/x3 at every short landscape size.
 	if _instruction_banner != null:
 		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin_l - margin_r))
-		var banner_h: float = _LAYOUT.min_touch_height(true) if _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport) else 52.0
-		# The banner must never grow past its reserved band. On narrow portrait
-		# screens the text wraps, so scale the font down until it fits in at most
-		# two lines and clamp the box. (Do NOT use clip_text: it clips vertically
-		# too and collapses the label to 1px.)
-		var banner_font: int = int(clampf(viewport.y * 0.032, 14.0, 20.0))
-		if banner_w < 340.0:
-			banner_font = 12
-		elif banner_w < 420.0:
-			banner_font = 13
-		banner_h = minf(banner_h, 60.0)
+		var short_ui: bool = _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport)
+		var banner_h: float = 46.0 if short_ui else 52.0
+		var banner_font: int = 12 if short_ui else int(clampf(viewport.y * 0.032, 14.0, 20.0))
+		if not short_ui:
+			if banner_w < 340.0:
+				banner_font = 12
+			elif banner_w < 420.0:
+				banner_font = 13
+		var speed_bottom: float = top + top_bar_h + 6.0 + _LAYOUT.min_touch_height(false)
+		var banner_y: float = minf(speed_bottom + 8.0, wave_y - banner_h - 4.0)
+		banner_y = maxf(banner_y, speed_bottom + 2.0)
 		_instruction_label.add_theme_font_size_override("font_size", banner_font)
 		_instruction_label.custom_minimum_size = Vector2(maxf(80.0, banner_w - 28.0), 0)
 		_instruction_banner.custom_minimum_size = Vector2.ZERO
-		_LAYOUT.apply_modal(_instruction_banner, Rect2(Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, top + top_bar_h + 12.0), Vector2(banner_w, banner_h)))
+		_LAYOUT.apply_modal(_instruction_banner, Rect2(
+			Vector2(margin_l + (viewport.x - margin_l - margin_r - banner_w) * 0.5, banner_y),
+			Vector2(banner_w, banner_h)))
 
 	_layout_tower_panel(null)
 
 	_layout_modal(_promotion_modal, Vector2(360.0, 160.0))
-	_layout_modal(_pause_modal, Vector2(400.0, 360.0))
+	_layout_modal(_pause_modal, Vector2(400.0, 390.0))
+	if _pause_body != null:
+		_pause_body.custom_minimum_size.x = maxf(240.0, _pause_modal.size.x - 28.0)
 	# Placement confirm modal is intentionally not shown (floating bar only).
 	if _placement_confirm_modal != null:
 		_placement_confirm_modal.visible = false
@@ -945,51 +1017,69 @@ func _layout_tower_panel(selected: Tower) -> void:
 	var margin_r: float = float(margins["right"])
 	var top: float = float(margins["top"])
 	var bottom: float = float(margins["bottom"])
-	# Anchor to the real shop strip, not a hardcoded 92px guess (which was the
-	# wrong height and let upgrade/sell controls slide behind the shop cards).
-	var shop_y: float = viewport.y - bottom - 104.0
+	var shop_y: float = viewport.y - bottom - 88.0
 	if _shop_scroll != null and _shop_scroll.size.y > 0.0:
 		shop_y = _shop_scroll.position.y
-	var top_limit: float = top + 102.0
-	# Fit the panel into what is actually left between the top bar and the shop
-	# strip. A fixed 168px panel overlapped the shop strip on 320-360px-tall
-	# phone landscapes (measured panel bottom 292 vs shop top 204).
-	var hard_room: float = shop_y - top_limit - 12.0
-	if hard_room < 96.0:
-		# Not enough vertical room for a usable panel: hide it rather than
-		# drawing controls on top of the shop. Selection still works; the player
-		# can use the shop strip and the upgrade affordances there.
-		_tower_panel.visible = false
+	var top_bar_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.074)
+	if _LAYOUT.is_short_height(viewport):
+		top_bar_h = maxf(_LAYOUT.min_touch_height(false), minf(top_bar_h, 44.0))
+	var panel_top: float = top + top_bar_h + 6.0 + _LAYOUT.min_touch_height(false) + 8.0
+
+	if viewport.y < 430.0:
+		# Short landscape: a full-width bottom sheet is the only layout with
+		# room for name, stats, upgrade, three paths, sell and target. It covers
+		# the wave/shop strip while open (a close button dismisses it) instead of
+		# hiding the panel and leaving upgrades unreachable.
+		var sheet_top: float = top + top_bar_h + 2.0
+		var sheet_h: float = maxf(140.0, viewport.y - bottom - sheet_top)
+		var sheet_w: float = maxf(240.0, viewport.x - margin_l - margin_r)
+		_LAYOUT.apply_modal(_tower_panel, Rect2(
+			Vector2(margin_l, sheet_top), Vector2(sheet_w, sheet_h)))
+		if _tower_panel_margin:
+			_tower_panel_margin.add_theme_constant_override("margin_left", 6)
+			_tower_panel_margin.add_theme_constant_override("margin_top", 6)
+			_tower_panel_margin.add_theme_constant_override("margin_right", 6)
+			_tower_panel_margin.add_theme_constant_override("margin_bottom", 6)
+		if _tower_panel_box:
+			# Leave room for the inner vertical scrollbar (8px) so the panel's
+			# combined minimum cannot widen it past the computed rect.
+			_tower_panel_box.custom_minimum_size.x = maxf(208.0, sheet_w - 28.0)
+			_tower_panel_box.add_theme_constant_override("separation", 4)
 		return
-	_tower_panel.visible = true
-	var panel_h: float = 220.0
-	if _LAYOUT.is_short_height(viewport) or _LAYOUT.is_phone_ultrawide(viewport):
-		panel_h = 168.0
-	panel_h = minf(panel_h, hard_room)
+
+	var panel_h: float = 270.0
+	var hard_room: float = shop_y - panel_top - 8.0
+	panel_h = minf(panel_h, maxf(120.0, hard_room))
 	var panel_w: float = minf(460.0, maxf(300.0, viewport.x - margin_l - margin_r))
-	panel_w = minf(panel_w, maxf(240.0, viewport.x - margin_l - margin_r))
 	var size: Vector2 = Vector2(panel_w, panel_h)
-	var low_y: float = maxf(top_limit, shop_y - size.y - 12.0)
-	var high_y: float = top_limit
+	var low_y: float = maxf(panel_top, shop_y - size.y - 10.0)
 	var x: float = margin_l
 	var y: float = low_y
 
 	if selected != null:
 		var selected_screen: Vector2 = _world_to_screen(selected.pos)
 		x = margin_l if selected_screen.x > viewport.x * 0.5 else viewport.x - margin_r - size.x
-		y = high_y if selected_screen.y > viewport.y * 0.52 else low_y
-		y = clampf(y, top + 92.0, maxf(top + 92.0, shop_y - size.y - 8.0))
+		y = panel_top if selected_screen.y > viewport.y * 0.52 else low_y
 	else:
 		x = viewport.x - margin_r - size.x
 		y = low_y
 
-	# The panel's static content minimum (430x178) would otherwise override the
-	# fitted size and push it back over the shop strip. Clamp the minimum to the
-	# rect we just computed and clip, exactly like apply_modal does for modals.
+	# Never let the panel sit over the centered wave button. Move it to the top
+	# band instead; the instruction banner is hidden while a panel is open.
+	if _wave_btn.visible and Rect2(Vector2(x, y), size).intersects(
+			Rect2(_wave_btn.position, _wave_btn.size)):
+		y = panel_top
+	y = clampf(y, top, maxf(top, shop_y - size.y - 8.0))
+
 	_LAYOUT.apply_modal(_tower_panel, Rect2(Vector2(x, y), size))
-	_THEME.apply_glass_panel(_tower_panel)
-	if _tower_panel.material is ShaderMaterial:
-		_tower_panel.material.set_shader_parameter("panel_size", size)
+	if _tower_panel_margin:
+		_tower_panel_margin.add_theme_constant_override("margin_left", 12)
+		_tower_panel_margin.add_theme_constant_override("margin_top", 10)
+		_tower_panel_margin.add_theme_constant_override("margin_right", 12)
+		_tower_panel_margin.add_theme_constant_override("margin_bottom", 10)
+	if _tower_panel_box:
+		_tower_panel_box.custom_minimum_size.x = maxf(208.0, size.x - 28.0)
+		_tower_panel_box.add_theme_constant_override("separation", 8)
 
 func _register_hud_rects() -> void:
 	# Build Rect2 hit regions from the Control node global positions.
@@ -1031,6 +1121,9 @@ func _refresh_hud_rects() -> void:
 # ---------------------------------------------------------------------------
 
 var _hud_rects_ready: bool = false
+var _last_speed_mult: float = -1.0
+var _shop_click_was_cancel: bool = false
+var _shop_visual_state: Dictionary = {}
 
 func _process(_delta: float) -> void:
 	if not _hud_rects_ready:
@@ -1086,7 +1179,16 @@ func _update_hud(now_ms: int) -> void:
 		_show_wave_banner(game_state.wave)
 		_prev_wave = game_state.wave
 		
-	_wave_label.text  = "Wave %d / %d" % [game_state.wave, _MAPS.MAX_WAVE]
+	# While a wave is running, put the live clear count in the persistent top
+	# bar. Previously the only progress cue was a 5px bar near the shop.
+	var in_wave_now: bool = not game_state.wave_ready and not game_state.wave_shop_pending \
+		and game_state.get_wave_spawn_total() > 0
+	if in_wave_now:
+		var cleared: int = maxi(0, game_state.enemies_spawned - game_state.enemies.size())
+		_wave_label.text = "Wave %d/%d  ·  %d/%d" % [
+			game_state.wave, _MAPS.MAX_WAVE, cleared, game_state.get_wave_spawn_total()]
+	else:
+		_wave_label.text = "Wave %d / %d" % [game_state.wave, _MAPS.MAX_WAVE]
 	_wave_btn.icon = _ui_icon("boss_warning" if game_state.wave % 5 == 0 else "patch")
 
 	if _wave_progress_bar != null:
@@ -1118,12 +1220,23 @@ func _update_hud(now_ms: int) -> void:
 	var pause_visible: bool = game_state.paused and game_state.game_state == "playing" and not details_visible
 	var has_pending: bool = view_state.has_pending_placement()
 	var wave_shop_visible: bool = game_state.wave_shop_pending
-	var blocking_menu_visible: bool = wave_shop_visible or promo_visible or pause_visible or has_pending or details_visible
-	
-	# Instruction banner: persistent instructions have priority over contextual hints
+	var vp_now: Vector2 = _LAYOUT.viewport_size(self)
+	var short_sheet: bool = sel != null and vp_now.y < 430.0 and _tower_panel.visible
+	var blocking_menu_visible: bool = wave_shop_visible or promo_visible or pause_visible or has_pending or details_visible or short_sheet
+	var menu_overlay_visible: bool = wave_shop_visible or promo_visible or pause_visible or details_visible
+	var toast: String = view_state.get_toast(now_ms)
+	var compact_hud: bool = vp_now.x < 700.0 or vp_now.y < 430.0
+
+	# Instruction banner: persistent instructions have priority over contextual
+	# hints. Placement feedback stays visible while a placement is pending so an
+	# invalid ghost always explains itself. On compact HUDs the banner also
+	# carries toasts, which no longer fit in the top bar.
 	if _instruction_banner != null:
-		if blocking_menu_visible:
+		if menu_overlay_visible or (sel != null and _tower_panel.visible):
 			_instruction_banner.visible = false
+		elif compact_hud and toast != "":
+			_instruction_banner.visible = true
+			_instruction_label.text = toast
 		elif view_state.instruction_banner != "":
 			_instruction_banner.visible = true
 			_instruction_label.text = view_state.instruction_banner
@@ -1141,14 +1254,31 @@ func _update_hud(now_ms: int) -> void:
 
 	_update_placement_confirm_bar()
 
-	# Toast / message
-	var toast: String = view_state.get_toast(now_ms)
+	# Toast / message. Warning toasts (Integrity loss, unaffordable, invalid)
+	# read as warnings instead of the same muted grey as routine status.
 	_msg_label.text = toast if toast != "" else game_state.last_message
+	var warning_toast: bool = toast.begins_with("Integrity") or toast.contains("Need ") \
+		or toast.contains("Cannot") or toast.contains("INVALID") or toast.contains("failed")
+	_msg_label.add_theme_color_override("font_color",
+		_THEME.RED if warning_toast else _THEME.MUTED)
+	if _instruction_label != null:
+		var banner_text: String = _instruction_label.text
+		var banner_color: Color = _THEME.GOLD
+		if banner_text.begins_with("INVALID") or banner_text.begins_with("Integrity"):
+			banner_color = _THEME.RED
+		elif banner_text.begins_with("VALID"):
+			banner_color = _THEME.GREEN
+		elif compact_hud and warning_toast:
+			banner_color = _THEME.RED
+		_instruction_label.add_theme_color_override("font_color", banner_color)
 
 	if _shop_scroll != null:
 		_shop_scroll.visible = not blocking_menu_visible
 	elif _shop_bar != null:
 		_shop_bar.visible = not blocking_menu_visible
+	# On a short bottom sheet the panel already covers this strip; hiding it
+	# avoids translucent controls showing through the panel.
+	_speed_bar.visible = not short_sheet
 
 	# Wave button visibility
 	_wave_btn.visible = game_state.wave_ready and game_state.game_state == "playing" and not blocking_menu_visible
@@ -1156,11 +1286,14 @@ func _update_hud(now_ms: int) -> void:
 	# Pause button
 	_pause_btn.text = ">" if game_state.paused else "II"
 
-	# Speed button highlights
-	for i in _speed_btns.size():
-		var mult: float = [1.0, 2.0, 3.0][i]
-		_speed_btns[i].button_pressed = (game_state.speed_multiplier == mult)
-		_THEME.apply_button(_speed_btns[i], "primary" if game_state.speed_multiplier == mult else "tab")
+	# Speed button highlights (restyle only when the selection changes; this used
+	# to allocate nine styleboxes per frame).
+	if game_state.speed_multiplier != _last_speed_mult:
+		_last_speed_mult = game_state.speed_multiplier
+		for i in _speed_btns.size():
+			var mult: float = [1.0, 2.0, 3.0][i]
+			_speed_btns[i].button_pressed = (game_state.speed_multiplier == mult)
+			_THEME.apply_button(_speed_btns[i], "primary" if game_state.speed_multiplier == mult else "tab")
 
 	# Tower panel
 	var was_panel_hidden: bool = not _tower_panel.visible
@@ -1171,7 +1304,10 @@ func _update_hud(now_ms: int) -> void:
 		_layout_tower_panel(sel)
 		var pnames := ["Top","Middle","Bottom"]
 		_tower_name_label.text = "%s  Lv.%d" % [sel.tower_name, sel.level]
-		_tower_stats_label.text = "⚔ %d  ◎ %d  ⏱ %dms" % [sel.get_effective_damage(now_ms), int(sel.effective_range()), sel.effective_cooldown()]
+		# The default font has no emoji glyphs; symbolic stat rows rendered as
+		# tofu boxes. Plain labels are unambiguous at every size.
+		_tower_stats_label.text = "DMG %d   RNG %d   CD %dms" % [
+			sel.get_effective_damage(now_ms), int(sel.effective_range()), sel.effective_cooldown()]
 
 		# Base Upgrade Delta
 		if sel.level < 5:
@@ -1179,7 +1315,7 @@ func _update_hud(now_ms: int) -> void:
 			var cur_dmg := sel.get_effective_damage(now_ms)
 			var next_dmg := int(float(sel.base_damage) * pow(1.15, float(sel.level)))
 			var d_dmg := next_dmg - int(float(sel.base_damage) * pow(1.15, float(sel.level-1)))
-			_base_upg_btn.text = "UPGRADE (%s) [ ⚔️ +%d ]" % [_BRAND.credits_amount_suffix(base_cost), d_dmg]
+			_base_upg_btn.text = "UPGRADE (%s)   DMG +%d" % [_BRAND.credits_amount_suffix(base_cost), d_dmg]
 			_base_upg_btn.disabled = game_state.gold < base_cost
 		else:
 			_base_upg_btn.text = "MAX LEVEL"
@@ -1196,12 +1332,19 @@ func _update_hud(now_ms: int) -> void:
 				var next_mult: float = p_data["tiers"][lvl]
 				var cur_mult: float = p_data["tiers"][lvl-1] if lvl > 0 else 1.0
 				var d_pct := int((next_mult - cur_mult) * 100.0)
+				# Use the branch position (Top/Middle/Bottom) instead of truncating
+				# the thematic name to 7 characters: the branch is the choice, and
+				# "Vulnerability Exploit" became an unreadable "Vulner".
 				_path_upg_btns[i].text = "%s +%d%% · %s" % [
-					p_data["name"].left(7), d_pct, _BRAND.credits_amount_suffix(pcost)]
+					path, d_pct, _BRAND.credits_amount_suffix(pcost)]
+				_path_upg_btns[i].tooltip_text = "%s — %s" % [p_data["name"], p_data["desc"]]
 				_path_upg_btns[i].disabled = game_state.gold < pcost
 			else:
-				_path_upg_btns[i].text = p_data["name"] + " (LOCKED)" if lvl == 0 else "MAX"
+				_path_upg_btns[i].text = ("%s · LOCKED" % path) if lvl == 0 else ("%s · MAX" % path)
+				_path_upg_btns[i].tooltip_text = p_data["name"]
 				_path_upg_btns[i].disabled = true
+			_path_upg_btns[i].add_theme_font_size_override(
+				"font_size", 10 if _tower_panel.size.x < 380.0 else 12)
 				
 		_target_btn.text = "Target: %s" % sel.target_mode.capitalize()
 		var sell_val: int = sel.sell_value(game_state.wave)
@@ -1222,7 +1365,10 @@ func _update_hud(now_ms: int) -> void:
 	if _pause_modal:
 		_pause_modal.visible = pause_visible
 		if pause_visible:
-			_pause_title.text = _BRAND.pause_status(game_state.wave, game_state.lives, game_state.gold)
+			_pause_title.text = "Paused"
+			_pause_status_lbl.text = "Wave %d    %s %d    %s %d" % [
+				game_state.wave, _BRAND.CORE_RESOURCE, game_state.lives,
+				_BRAND.CURRENCY_RUN, game_state.gold]
 			if view_state.confirm_restart:
 				var elapsed_ms: int = now_ms - _restart_confirm_start_ms
 				var remaining_s: int = maxi(0, 4 - elapsed_ms / 1000)
@@ -1266,19 +1412,17 @@ func _update_hud(now_ms: int) -> void:
 		var cost: int = game_state._tower_purchase_cost(ttype)
 		var can_afford: bool = game_state.gold >= cost
 		var hard_disabled: bool = blocking_menu_visible or game_state.paused or ttype in game_state._disabled_towers
-		_shop_btns[ttype].disabled = hard_disabled
-		if hard_disabled:
-			_shop_btns[ttype].modulate.a = 0.4
-			_THEME.set_button_glow(_shop_btns[ttype], false)
-		elif not can_afford:
-			_shop_btns[ttype].modulate.a = 0.55
-			_THEME.set_button_glow(_shop_btns[ttype], false)
-		else:
-			_shop_btns[ttype].modulate.a = 1.0
-			_THEME.set_button_glow(_shop_btns[ttype], true)
+		var visual_state: String = "disabled" if hard_disabled else ("dim" if not can_afford else "glow")
+		if str(_shop_visual_state.get(ttype, "")) != visual_state:
+			_shop_visual_state[ttype] = visual_state
+			_shop_btns[ttype].disabled = hard_disabled
+			_shop_btns[ttype].modulate.a = 0.4 if hard_disabled else (0.55 if not can_afford else 1.0)
+			_THEME.set_button_glow(_shop_btns[ttype], visual_state == "glow")
 		if ttype in _shop_cost_labels:
 			var cost_lbl: Label = _shop_cost_labels[ttype]
-			cost_lbl.text = _BRAND.credits_amount_suffix(cost)
+			var cost_text: String = _BRAND.credits_amount_suffix(cost)
+			if cost_lbl.text != cost_text:
+				cost_lbl.text = cost_text
 			cost_lbl.add_theme_color_override(
 				"font_color",
 				_SHOP_COST_AFFORD if can_afford and not hard_disabled else _SHOP_COST_DENY
@@ -1287,6 +1431,8 @@ func _update_hud(now_ms: int) -> void:
 	# Wave shop: open modal when simulation signals shop is pending
 	if game_state.wave_shop_pending and _wave_shop_modal != null and not _wave_shop_modal.visible:
 		_show_wave_shop(now_ms)
+	if _modal_backdrop != null:
+		_modal_backdrop.visible = menu_overlay_visible
 	if blocking_menu_visible:
 		_raise_visible_modal_controls()
 
@@ -1337,7 +1483,10 @@ func _juice_label(label: Label) -> void:
 func _show_wave_banner(wave_num: int) -> void:
 	var banner := preload("res://ui/widgets/WaveBanner.gd").new()
 	hud_layer.add_child(banner)
-	banner.display("WAVE %d INBOUND" % wave_num)
+	if wave_num in [5, 10, 15]:
+		banner.display("BOSS WAVE %d INBOUND" % wave_num)
+	else:
+		banner.display("WAVE %d INBOUND" % wave_num)
 	var sfx := JuiceManager.SFX.BOSS_APPEAR if wave_num in [5, 10, 15] else JuiceManager.SFX.WAVE_START
 	JuiceManager.play(sfx)
 
@@ -1362,19 +1511,19 @@ func _update_placement_confirm_bar() -> void:
 		return
 	if view_state.has_pending_placement():
 		_placement_confirm_bar.visible = true
-		var pos: Vector2 = _world_to_screen(view_state.pending_placement_pos)
-		var bar_size: Vector2 = _placement_confirm_bar.size
-		if bar_size.x <= 1.0 or bar_size.y <= 1.0:
-			bar_size = _placement_confirm_bar.get_combined_minimum_size()
+		# The bar used to follow the ghost and landed on top of the speed strip.
+		# The wave and shop strips are hidden during pending placement, so the
+		# bottom band is free and unambiguous.
+		_placement_confirm_bar.reset_size()
+		var bar_size: Vector2 = _placement_confirm_bar.get_combined_minimum_size()
+		_placement_confirm_bar.size = bar_size
 		var viewport: Vector2 = _LAYOUT.viewport_size(self)
-		var margins: Dictionary = _LAYOUT.content_margins(viewport, self)
-		var margin_l: float = float(margins["left"])
-		var margin_r: float = float(margins["right"])
-		var margin_t: float = float(margins["top"])
-		var margin_b: float = float(margins["bottom"])
-		var next_pos: Vector2 = pos + Vector2(-bar_size.x * 0.5, 40.0)
-		next_pos.x = clampf(next_pos.x, margin_l, maxf(margin_l, viewport.x - bar_size.x - margin_r))
-		next_pos.y = clampf(next_pos.y, margin_t, maxf(margin_t, viewport.y - bar_size.y - margin_b))
+		var margin_l: float = _LAYOUT.edge_margin(viewport, self)
+		var margin_b: float = _LAYOUT.bottom_margin(viewport, self)
+		var next_pos: Vector2 = Vector2(
+			(viewport.x - bar_size.x) * 0.5,
+			viewport.y - margin_b - bar_size.y - 10.0)
+		next_pos.x = clampf(next_pos.x, margin_l, maxf(margin_l, viewport.x - bar_size.x - margin_l))
 		_placement_confirm_bar.position = next_pos
 		_confirm_placement_btn.disabled = not view_state.pending_placement_valid
 	else:
@@ -1693,21 +1842,32 @@ func _shop_affordable(ttype: String) -> bool:
 	return false
 
 func _on_shop_btn_down(ttype: String) -> void:
-	# Activate placement immediately on button-down so the ghost tracks drag gestures.
-	# button_down fires on press; if the user simply clicks without dragging, pressed
-	# fires on release and _on_shop_pressed re-enters placement (harmless) and shows the hint.
+	# Activate placement immediately on button-down so the ghost tracks drag
+	# gestures. A second press on the same card is an explicit cancel; remember
+	# that so the matching release does not re-enter placement.
 	if not _shop_affordable(ttype):
 		return
+	if view_state.placement_active and view_state.placement_tower_type == ttype:
+		view_state.exit_placement()
+		_shop_click_was_cancel = true
+		return
+	_shop_click_was_cancel = false
 	view_state.enter_placement(ttype)
 	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
 	view_state.placement_ghost_valid = false
 
 func _on_shop_pressed(ttype: String) -> void:
-	# Fires only on a clean click (no drag). Placement already active from button_down;
-	# just re-confirm the type and show the placement hint.
+	# Fires only on a clean click (no drag). Placement is already active from
+	# button_down; calling enter_placement() again here toggled it OFF (the
+	# function treats a repeat of the same type as a toggle), so a normal click
+	# never started placement. Only switch when the type actually changes.
 	if not _shop_affordable(ttype):
 		return
-	view_state.enter_placement(ttype)
+	if _shop_click_was_cancel:
+		_shop_click_was_cancel = false
+		return
+	if not (view_state.placement_active and view_state.placement_tower_type == ttype):
+		view_state.enter_placement(ttype)
 	view_state.placement_ghost_pos = Vector2(_MAPS.WIDTH * 0.5, _MAPS.HEIGHT * 0.5)
 	view_state.placement_ghost_valid = false
 	var mode_text: String = "Tap the map to place." if view_state.placement_mode == "drop" else "Drag or tap the map to place."
@@ -1732,6 +1892,10 @@ func _on_confirm_placement_pressed() -> void:
 func _on_cancel_placement_pressed() -> void:
 	view_state.clear_pending_placement()
 	view_state.show_toast("Placement cancelled.", Time.get_ticks_msec(), 700)
+
+func _on_close_panel_pressed() -> void:
+	view_state.deselect_tower()
+	_dpad_return_focus()
 
 func _on_info_pressed() -> void:
 	if _details.is_open():
@@ -1848,5 +2012,6 @@ func _on_run_ended() -> void:
 		"gold_earned":             game_state.stat_gold_earned,
 		"newly_unlocked_variants": run_result.get("newly_unlocked_variants", []) if run_result is Dictionary else [],
 		"milestone_deltas":        run_result.get("milestone_deltas", []) if run_result is Dictionary else [],
+		"save_failed":             bool(run_result.get("save_failed", false)) if run_result is Dictionary else false,
 	}
 	get_tree().change_scene_to_file("res://scenes/EndScreen.tscn")

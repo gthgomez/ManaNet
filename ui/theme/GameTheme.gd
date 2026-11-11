@@ -42,21 +42,19 @@ static func apply_panel(panel: Control, kind: String = "default") -> void:
 	var border: Color = CYAN.lerp(Color.WHITE, 0.12)
 	var bg: Color = PANEL
 	var shadow: int = 8
-	if kind == "card" and shader_effects_enabled():
-		var mat := ShaderMaterial.new()
-		mat.shader = preload("res://assets/shaders/chamfer_glass.gdshader")
-		mat.set_shader_parameter("bg_color", PANEL_ALT)
-		mat.set_shader_parameter("border_color", CYAN.lerp(VIOLET, 0.32))
-		mat.set_shader_parameter("border_glow_color", Color(CYAN.r, CYAN.g, CYAN.b, 0.12))
-		mat.set_shader_parameter("border_width", 1.5)
-		mat.set_shader_parameter("chamfer_size", 10.0)
-		mat.set_shader_parameter("glow_size", 5.0)
-		mat.set_shader_parameter("panel_size", panel.size)
-		panel.material = mat
-		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-
-		if not panel.is_connected("resized", Callable(_on_card_resized.bind(panel))):
-			panel.resized.connect(_on_card_resized.bind(panel))
+	if kind == "card":
+		# Draw cards with a real StyleBox. The former shader path replaced the
+		# stylebox with StyleBoxEmpty, so a PanelContainer with nothing to draw
+		# never invoked the shader at all: every map/wave-shop/Cyber-Deck card
+		# was invisible on desktop (they only appeared on Android, where the
+		# fallback stylebox was used). A styled panel is also cheaper on mobile.
+		panel.material = null
+		var card_sb := style_box(PANEL_ALT, CYAN.lerp(VIOLET, 0.32), 1, 12, 0, 6)
+		card_sb.content_margin_left = 0.0
+		card_sb.content_margin_top = 0.0
+		card_sb.content_margin_right = 0.0
+		card_sb.content_margin_bottom = 0.0
+		panel.add_theme_stylebox_override("panel", card_sb)
 		return
 	elif kind == "modal":
 		bg = Color(0.03, 0.05, 0.11, 0.98)
@@ -73,22 +71,17 @@ static func apply_panel(panel: Control, kind: String = "default") -> void:
 static func apply_glass_panel(panel: Control) -> void:
 	if panel == null:
 		return
-	if not shader_effects_enabled():
-		panel.material = null
-		panel.add_theme_stylebox_override("panel",
-				style_box(Color(0.051, 0.082, 0.149, 0.88), Color(0.290, 0.565, 0.851, 0.76), 2, 12, 2, 10))
-		return
-	var mat := ShaderMaterial.new()
-	mat.shader = preload("res://assets/shaders/chamfer_glass.gdshader")
-	mat.set_shader_parameter("bg_color", Color(0.051, 0.082, 0.149, 0.72))
-	mat.set_shader_parameter("border_color", Color(0.290, 0.565, 0.851, 0.76))
-	mat.set_shader_parameter("border_glow_color", Color(0.290, 0.565, 0.851, 0.35))
-	mat.set_shader_parameter("border_width", 2.0)
-	mat.set_shader_parameter("chamfer_size", 20.0)
-	mat.set_shader_parameter("glow_size", 14.0)
-	mat.set_shader_parameter("panel_size", panel.size)
-	panel.material = mat
-	panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	# Always use a real stylebox. The shader path paired a canvas shader with
+	# StyleBoxEmpty, which draws nothing, so the menu/settings/tower glass
+	# surfaces were invisible on desktop. This keeps one rendering path on every
+	# target and gives the same frosted-navy look without a per-frame shader.
+	panel.material = null
+	var glass := style_box(Color(0.051, 0.082, 0.149, 0.82), Color(0.290, 0.565, 0.851, 0.66), 2, 12, 0, 10)
+	glass.content_margin_left = 0.0
+	glass.content_margin_top = 0.0
+	glass.content_margin_right = 0.0
+	glass.content_margin_bottom = 0.0
+	panel.add_theme_stylebox_override("panel", glass)
 
 static func apply_button(btn: Button, kind: String = "secondary") -> void:
 	if btn == null:
@@ -162,7 +155,7 @@ static func apply_button(btn: Button, kind: String = "secondary") -> void:
 	btn.add_theme_color_override("font_color",          font)
 	btn.add_theme_color_override("font_hover_color",    Color(1.0, 1.0, 1.0, 1.0))
 	btn.add_theme_color_override("font_pressed_color",  Color(1.0, 1.0, 1.0, 1.0))
-	btn.add_theme_color_override("font_disabled_color", DISABLED)
+	btn.add_theme_color_override("font_disabled_color", Color(0.58, 0.63, 0.74, 1.0))
 	btn.add_theme_color_override("font_outline_color",  Color(0.0, 0.0, 0.0, 0.52))
 	btn.add_theme_constant_override("outline_size", outline)
 
@@ -315,7 +308,3 @@ static func style_tree(node: Node) -> void:
 		elif child is Label:
 			apply_label(child)
 		style_tree(child)
-
-static func _on_card_resized(panel: Control) -> void:
-	if panel and panel.material is ShaderMaterial:
-		panel.material.set_shader_parameter("panel_size", panel.size)

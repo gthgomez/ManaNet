@@ -74,7 +74,9 @@ func show_shop(wave: int, offers: Array, now_ms: int, host: Node) -> void:
 	if card_columns > 1:
 		card_h = minf(168.0, maxf(card_min.y + 12.0, scroll_h - 8.0))
 	else:
-		card_h = minf(180.0, maxf(120.0, scroll_h * 0.42))
+		# One-column cards must still fit title + tag + 4 description lines +
+		# Choose; 120px clipped the description and the button.
+		card_h = minf(190.0, maxf(150.0, scroll_h * 0.85))
 
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -113,6 +115,7 @@ func show_shop(wave: int, offers: Array, now_ms: int, host: Node) -> void:
 	var scroll_container := ScrollContainer.new()
 	scroll = scroll_container
 	scroll_container.scroll_deadzone = 12
+	scroll_container.follow_focus = true
 	scroll_container.mouse_filter = Control.MOUSE_FILTER_PASS
 	scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll_container.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
@@ -154,17 +157,26 @@ func show_shop(wave: int, offers: Array, now_ms: int, host: Node) -> void:
 		card_margin.add_child(card_vbox)
 
 		var card_title := Label.new()
-		card_title.text = "%s %s" % [card.get("icon", ""), card["label"]]
+		# Emoji from the card data has no glyph in the bundled font and rendered
+		# as a tofu/close-looking box. The label plus a textual category chip is
+		# unambiguous at every size.
+		card_title.text = card["label"]
 		card_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		card_title.max_lines_visible = 2
 		card_title.add_theme_color_override("font_color", _PANEL_TEXT)
 		card_title.add_theme_font_size_override("font_size", 13 if _LAYOUT.is_short_height(viewport) else 14)
 		card_vbox.add_child(card_title)
 
+		var tag_lbl := Label.new()
+		tag_lbl.text = str(card.get("tag", "")).to_upper()
+		tag_lbl.add_theme_font_size_override("font_size", 9)
+		tag_lbl.add_theme_color_override("font_color", _tag_color(str(card.get("tag", ""))))
+		card_vbox.add_child(tag_lbl)
+
 		var card_desc := Label.new()
 		card_desc.text = card["desc"]
 		card_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		card_desc.max_lines_visible = 4 if card_columns == 1 else 3
+		card_desc.max_lines_visible = 4
 		card_desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		card_desc.add_theme_color_override("font_color", _PANEL_MUTED)
 		card_desc.add_theme_font_size_override("font_size", 11 if _LAYOUT.is_short_height(viewport) else 12)
@@ -204,3 +216,11 @@ func _emit_card_picked(card_id: String, now_ms: int) -> void:
 
 func _emit_skipped(now_ms: int) -> void:
 	skipped.emit(now_ms)
+
+func _tag_color(tag: String) -> Color:
+	match tag:
+		"economy": return _THEME.GOLD
+		"combat":  return _THEME.RED
+		"control": return _THEME.CYAN
+		"survival": return _THEME.GREEN
+	return _PANEL_MUTED

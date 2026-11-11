@@ -39,6 +39,7 @@ func _ready() -> void:
 	_status_lbl.add_theme_font_size_override("font_size", 12)
 	_top_bar.add_child(_status_lbl)
 	_scroll.scroll_deadzone = 12
+	_scroll.follow_focus = true
 	_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
 	_content.mouse_filter = Control.MOUSE_FILTER_PASS
 	if _content.get_parent() is Control:
@@ -96,7 +97,7 @@ func _apply_layout() -> void:
 	var top: float = _LAYOUT.top_margin(viewport)
 	var bottom: float = _LAYOUT.bottom_margin(viewport)
 	var top_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.07)
-	var tab_h: float = 44.0
+	var tab_h: float = _LAYOUT.MIN_TOUCH_HEIGHT
 	var tab_gap: float = 8.0
 	var scroll_gap: float = 6.0
 
@@ -122,7 +123,7 @@ func _build_tab_bar() -> void:
 		var tlbl: String = pair[1]
 		var btn := Button.new()
 		btn.text = tlbl
-		btn.custom_minimum_size = Vector2(120.0, 36.0)
+		btn.custom_minimum_size = Vector2(120.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 		btn.toggle_mode = false
 		_THEME.apply_button(btn, "secondary")
 		btn.pressed.connect(_show_tab.bind(tid))
@@ -327,7 +328,14 @@ func _make_shop_card(
 	var hbox := HBoxContainer.new()
 	hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	hbox.add_theme_constant_override("separation", 10)
-	panel.add_child(hbox)
+	var card_margin := MarginContainer.new()
+	card_margin.mouse_filter = Control.MOUSE_FILTER_PASS
+	card_margin.add_theme_constant_override("margin_left", 12)
+	card_margin.add_theme_constant_override("margin_top", 8)
+	card_margin.add_theme_constant_override("margin_right", 12)
+	card_margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(card_margin)
+	card_margin.add_child(hbox)
 
 	# Left: text
 	var vtext := VBoxContainer.new()
@@ -359,7 +367,7 @@ func _make_shop_card(
 
 	if owned:
 		var act_btn := Button.new()
-		act_btn.custom_minimum_size = Vector2(100.0, 34.0)
+		act_btn.custom_minimum_size = Vector2(100.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 		if active:
 			act_btn.text = "Active ✓"
 			_THEME.apply_button(act_btn, "primary")
@@ -386,7 +394,7 @@ func _make_shop_card(
 
 		var buy_btn := Button.new()
 		buy_btn.text = "Buy"
-		buy_btn.custom_minimum_size = Vector2(80.0, 34.0)
+		buy_btn.custom_minimum_size = Vector2(80.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 		_THEME.apply_button(buy_btn, "primary")
 		var can_afford: bool = Progression.get_banked_rp() >= cost
 		if not can_afford:
@@ -410,7 +418,14 @@ func _make_simple_card(
 	var hbox := HBoxContainer.new()
 	hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	hbox.add_theme_constant_override("separation", 10)
-	panel.add_child(hbox)
+	var card_margin := MarginContainer.new()
+	card_margin.mouse_filter = Control.MOUSE_FILTER_PASS
+	card_margin.add_theme_constant_override("margin_left", 12)
+	card_margin.add_theme_constant_override("margin_top", 8)
+	card_margin.add_theme_constant_override("margin_right", 12)
+	card_margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(card_margin)
+	card_margin.add_child(hbox)
 
 	var vtext := VBoxContainer.new()
 	vtext.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -466,7 +481,7 @@ func _make_simple_card(
 
 		var buy_btn := Button.new()
 		buy_btn.text = "Buy"
-		buy_btn.custom_minimum_size = Vector2(80.0, 34.0)
+		buy_btn.custom_minimum_size = Vector2(80.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 		_THEME.apply_button(buy_btn, "primary")
 		var can_afford: bool = Progression.get_banked_rp() >= cost
 		if not can_afford:
@@ -492,7 +507,14 @@ func _make_variant_card(
 	var hbox := HBoxContainer.new()
 	hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	hbox.add_theme_constant_override("separation", 10)
-	panel.add_child(hbox)
+	var card_margin := MarginContainer.new()
+	card_margin.mouse_filter = Control.MOUSE_FILTER_PASS
+	card_margin.add_theme_constant_override("margin_left", 12)
+	card_margin.add_theme_constant_override("margin_top", 8)
+	card_margin.add_theme_constant_override("margin_right", 12)
+	card_margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(card_margin)
+	card_margin.add_child(hbox)
 
 	# Tint badge
 	var badge := ColorRect.new()
@@ -551,7 +573,7 @@ func _make_variant_card(
 
 	if unlocked:
 		var act_btn := Button.new()
-		act_btn.custom_minimum_size = Vector2(100.0, 36.0)
+		act_btn.custom_minimum_size = Vector2(100.0, _LAYOUT.MIN_TOUCH_HEIGHT)
 		if active:
 			act_btn.text = "Active ✓"
 			_THEME.apply_button(act_btn, "primary")

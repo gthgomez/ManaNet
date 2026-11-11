@@ -34,11 +34,9 @@ const _SFX_PATHS: Dictionary = {
 	SFX.WAVE_SHOP_OPEN:  "res://assets/sfx/wave_shop.ogg",
 	SFX.GAME_OVER:       "res://assets/sfx/game_over.ogg",
 	SFX.WIN:             "res://assets/sfx/win.ogg",
-	# Reuse existing cues until designed assets land; the important part is that
-	# these events are no longer silent.
-	SFX.INTEGRITY_LOST:  "res://assets/sfx/enemy_death.ogg",
-	SFX.ERROR:           "res://assets/sfx/btn_press.ogg",
-	SFX.PURCHASE:        "res://assets/sfx/tower_upgrade.ogg",
+	SFX.INTEGRITY_LOST:  "res://assets/sfx/integrity_lost.ogg",
+	SFX.ERROR:           "res://assets/sfx/error.ogg",
+	SFX.PURCHASE:        "res://assets/sfx/purchase.ogg",
 }
 
 const _POOL_SIZE: int = 8
@@ -76,7 +74,11 @@ func configure_from_progression() -> void:
 	var sfx_on: bool = settings.get("sfx_enabled", true)
 	var master_muted: bool = settings.get("audio_muted", false)
 	_haptics_enabled = bool(settings.get("haptics_enabled", true))
-	configure(sfx_on and not master_muted)
+	# Headless runs have no audio device and a dummy driver that never advances
+	# playbacks; keeping cues active there leaks AudioStreamPlayback resources
+	# at exit. CI still validates the OGG assets directly in tests/audio.
+	var headless: bool = DisplayServer.get_name() == "headless"
+	configure(sfx_on and not master_muted and not headless)
 	# Reconcile the Master bus here as well: previously only the menu button
 	# changed it, so "Reset Settings" left playback enabled but the bus muted.
 	var master_idx: int = AudioServer.get_bus_index("Master")
@@ -85,6 +87,17 @@ func configure_from_progression() -> void:
 	var sfx_idx: int = AudioServer.get_bus_index("SFX")
 	if sfx_idx >= 0:
 		AudioServer.set_bus_volume_db(sfx_idx, float(settings.get("sfx_volume_db", 0.0)))
+
+func _exit_tree() -> void:
+	# Stop live playbacks before shutdown so long cues (boss, victory, wave
+	# start) do not leave AudioStreamPlayback resources referenced at exit.
+	for p in _pool:
+		if is_instance_valid(p):
+			p.stop()
+			p.stream = null
+	_pool.clear()
+	_pool_started_ms.clear()
+	_loaded_streams.clear()
 
 func _preload_streams() -> void:
 	for sfx_id in _SFX_PATHS:
@@ -113,6 +126,12 @@ func vibrate(duration_ms: int = 50) -> void:
 func play_and_vibrate(sfx: SFX, vibrate_ms: int = 40) -> void:
 	play(sfx)
 	vibrate(vibrate_ms)
+
+## Stop every active cue (used by capture harnesses and hard shutdown paths).
+func stop_all() -> void:
+	for p in _pool:
+		if is_instance_valid(p):
+			p.stop()
 
 func _get_free_player() -> AudioStreamPlayer:
 	for p in _pool:

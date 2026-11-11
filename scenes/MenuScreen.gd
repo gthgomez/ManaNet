@@ -6,6 +6,8 @@ const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
+const _COLOR_SFX := Color(0.55, 0.80, 0.95, 0.90)
+const _COLOR_MUTED := Color(0.70, 0.38, 0.42, 0.90)
 
 @onready var _vbox: VBoxContainer   = $VBox
 @onready var _title: TextureRect      = $VBox/Title
@@ -34,6 +36,7 @@ var _rp_pill: PanelContainer = null
 var _rp_pill_label: Label = null
 var _version_lbl: Label = null
 var _last_run_lbl: Label = null
+var _decor: TextureRect = null
 
 # Tower showcase (sine float in _process)
 var _tower_showcase: Array = []
@@ -53,9 +56,11 @@ func _ready() -> void:
 	add_child(backdrop)
 	move_child(backdrop, 0)
 
-	# Decor mage — rendered above BG so it's actually visible
-	if ResourceLoader.exists("res://assets/sprites/towers/mage.svg", "Texture2D"):
-		_add_decor_icon(load("res://assets/sprites/towers/mage.svg"))
+	# Decor mage — the SVG ships with a baked #05070d square, which read as a
+	# large dark block behind the title. The PNG tower art has a transparent
+	# background and keeps the same silhouette.
+	if ResourceLoader.exists("res://assets/sprites/towers/mage.png", "Texture2D"):
+		_add_decor_icon(load("res://assets/sprites/towers/mage.png"))
 
 	# Background elements (low z in tree) — must be added before overlays
 	_add_particles()        # Gap 1
@@ -190,16 +195,21 @@ func _apply_layout() -> void:
 	# an 84px title + 32px separations + 64px play button (measured bottom 348 in
 	# a 320px viewport), so the whole column must shrink, not just its box.
 	var compact: bool = viewport_is_compact()
-	var title_h: float = (32.0 if compact else (110.0 if viewport.x >= 1200.0 else 84.0))
+	# On short screens the locked legacy logo is illegible and its baked title
+	# conflicts with the ManaNet wordmark; drop it (and the redundant tagline)
+	# instead of shrinking everything around it.
+	var show_logo: bool = not compact
+	var show_tagline: bool = not compact
+	var title_h: float = (84.0 if viewport.x < 1200.0 else 110.0) if show_logo else 0.0
 	var sep: int = 6 if compact else 32
-	var play_h: float = 46.0 if compact else 64.0
-	var row2_h: float = 34.0 if compact else _LAYOUT.TOUCH_HEIGHT
+	var play_h: float = 52.0 if compact else 64.0
+	var row2_h: float = _LAYOUT.MIN_TOUCH_HEIGHT
 
 	# Height must also respect the viewport and the real content minimum. The
 	# minimum must include the wordmark + tagline rows that now sit above the
 	# logo; omitting them let the column overflow and overlap the showcase.
 	var wordmark_h: float = 30.0 if compact else 46.0
-	var tagline_h: float = 12.0 if compact else 18.0
+	var tagline_h: float = 14.0 if show_tagline else 0.0
 	var content_min: float = wordmark_h + tagline_h + title_h + 24.0 + float(sep * 4) + play_h + row2_h
 	var avail_h: float = viewport.y - _LAYOUT.top_margin(viewport) - _LAYOUT.bottom_margin(viewport) - 12.0
 	# Clamp the column to what the viewport can actually show. If even the
@@ -226,7 +236,15 @@ func _apply_layout() -> void:
 	_LAYOUT.apply_rect(_vbox, Rect2(Vector2(x, y), Vector2(width, height)))
 
 	_vbox.add_theme_constant_override("separation", sep)
+	_title.visible = show_logo
 	_title.custom_minimum_size = Vector2(0.0, title_h)
+	if _product_tagline:
+		_product_tagline.visible = show_tagline
+	if _version_lbl:
+		# The version footer sat behind the Cyber-Deck/Settings row on phones.
+		_version_lbl.visible = not compact
+	if _decor:
+		_decor.visible = not compact
 	# A TextureRect defaults to KEEP_SIZE, so the logo texture's pixel width became
 	# the column's hard minimum and inflated it to 422px inside a 320px phone.
 	# Scale the logo to the column instead of letting it dictate the width.
@@ -243,8 +261,6 @@ func _apply_layout() -> void:
 			Vector2(x - 20.0, y - 12.0),
 			Vector2(width + 40.0, height + 24.0))
 	_LAYOUT.apply_rect(_glass, glass_rect)
-	if _glass.material is ShaderMaterial:
-		_glass.material.set_shader_parameter("panel_size", glass_rect.size)
 	for tr in _tower_showcase:
 		move_child(tr, _vbox.get_index())
 
@@ -348,23 +364,29 @@ func _add_version_label() -> void:
 
 func _add_mute_toggle() -> void:
 	_mute_btn = Button.new()
-	_mute_btn.custom_minimum_size = Vector2(42.0, 34.0)
+	_mute_btn.custom_minimum_size = Vector2(_LAYOUT.MIN_TOUCH_HEIGHT, _LAYOUT.MIN_TOUCH_HEIGHT)
 	_mute_btn.focus_mode          = Control.FOCUS_ALL
 	_mute_btn.tooltip_text        = "Toggle audio mute"
-	_mute_btn.add_theme_font_size_override("font_size", 18)
+	_mute_btn.add_theme_font_size_override("font_size", 11)
 	_mute_btn.add_theme_color_override("font_color",
 			Color(_THEME.MUTED.r, _THEME.MUTED.g, _THEME.MUTED.b, 0.72))
 	_mute_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 0.92))
-	# Icon-only style — transparent fill, subtle hover tint
-	var sb_empty := StyleBoxEmpty.new()
+	# Quiet but unmistakably a button: a low-alpha navy pill, not bare text.
+	var sb_normal := _THEME.style_box(Color(0.05, 0.08, 0.15, 0.72),
+			Color(0.29, 0.565, 0.851, 0.42), 1, 8, 0, 2)
 	var sb_hover := StyleBoxFlat.new()
-	sb_hover.bg_color = Color(1.0, 1.0, 1.0, 0.06)
+	sb_hover.bg_color = Color(0.09, 0.14, 0.24, 0.90)
+	sb_hover.border_color = Color(0.29, 0.565, 0.851, 0.8)
+	sb_hover.set_border_width_all(1)
 	sb_hover.set_corner_radius_all(8)
-	_mute_btn.add_theme_stylebox_override("normal",   sb_empty)
-	_mute_btn.add_theme_stylebox_override("pressed",  sb_empty)
-	_mute_btn.add_theme_stylebox_override("focus",    sb_empty)
+	var sb_press := StyleBoxFlat.new()
+	sb_press.bg_color = Color(0.03, 0.05, 0.10, 0.95)
+	sb_press.set_corner_radius_all(8)
+	_mute_btn.add_theme_stylebox_override("normal",   sb_normal)
+	_mute_btn.add_theme_stylebox_override("pressed",  sb_press)
+	_mute_btn.add_theme_stylebox_override("focus",    sb_normal)
 	_mute_btn.add_theme_stylebox_override("hover",    sb_hover)
-	_mute_btn.add_theme_stylebox_override("disabled", sb_empty)
+	_mute_btn.add_theme_stylebox_override("disabled", sb_normal)
 	_mute_btn.pressed.connect(_on_mute_toggle)
 	add_child(_mute_btn)
 	_refresh_mute_btn()
@@ -373,7 +395,11 @@ func _refresh_mute_btn() -> void:
 	if _mute_btn == null:
 		return
 	var is_muted: bool = Progression.get_settings().get("audio_muted", false)
-	_mute_btn.text = "🔇" if is_muted else "🔊"
+	# The default project font has no emoji glyphs; a missing glyph rendered as
+	# a tofu box in the top-left corner. Text states are unambiguous.
+	_mute_btn.text = "MUTED" if is_muted else "SFX"
+	_mute_btn.add_theme_color_override("font_color",
+			_COLOR_MUTED if is_muted else _COLOR_SFX)
 	var bus_idx := AudioServer.get_bus_index("Master")
 	if bus_idx >= 0:
 		AudioServer.set_bus_mute(bus_idx, is_muted)
@@ -558,10 +584,11 @@ func _add_decor_icon(texture: Texture2D) -> void:
 	decor.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
 	decor.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	decor.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	decor.modulate.a   = 0.0
-	decor.size         = Vector2(300, 300)
-	decor.position     = Vector2(-20, -20)
+	decor.size         = Vector2(260, 260)
+	decor.position     = Vector2(-12, -12)
+	decor.modulate     = Color(1.0, 1.0, 1.0, 0.0)
 	add_child(decor)
+	_decor = decor
 	# +1 over BG so the ghost actually renders (original move_child(1) hid it behind BG)
 	move_child(decor, _bg.get_index() + 1)
 

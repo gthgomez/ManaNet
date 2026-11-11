@@ -107,6 +107,20 @@ func _test_end_screen_milestones() -> void:
 	await _unmount(screen)
 	Progression.pending_end_stats = {}
 
+	# Save-failure state must be visible, not silently reported as +0 Shards.
+	Progression.pending_end_stats = {
+		"won": false, "waves": 4, "perfect_waves": 0, "lives": 0, "map_id": 0,
+		"towers_placed": 3, "enemies_killed": 20, "gold_earned": 400,
+		"rp_earned": 0, "newly_unlocked_variants": [], "milestone_deltas": [],
+		"save_failed": true,
+	}
+	var failed_screen: Node = await _mount("res://scenes/EndScreen.tscn")
+	var failed_text := _collect_labels(failed_screen)
+	_check(failed_text.contains("PROGRESS NOT SAVED"),
+		"EndScreen surfaces an explicit save-failure warning")
+	await _unmount(failed_screen)
+	Progression.pending_end_stats = {}
+
 # ---------------------------------------------------------------------------
 # Sandbox profile — write a seeded profile to the scratch path only
 # ---------------------------------------------------------------------------
@@ -180,7 +194,7 @@ func _test_restart_with_clean_meta() -> void:
 	_check(gs._instruction_banner.size.x <= vp.x,
 		"instruction banner width fits viewport (got %.1f / %.1f)" % [gs._instruction_banner.size.x, vp.x])
 	gs._layout_tower_panel(null)
-	_check(gs._tower_panel.size.y <= 230.0,
+	_check(gs._tower_panel.size.y <= 270.0,
 		"tower panel stays within its reserved slot (got %.1f)" % gs._tower_panel.size.y)
 	var panel_bottom: float = gs._tower_panel.position.y + gs._tower_panel.size.y
 	_check(panel_bottom <= gs._shop_scroll.position.y + 1.0,
