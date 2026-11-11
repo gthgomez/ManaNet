@@ -1,6 +1,7 @@
 # ManaNet Polish Campaign — 2026-11-11
 
-Base: `feat/gameplay-reliability-overhaul` @ `c6ce30c` (main was `a21d21b`).
+Base: `main` @ `e4cd39e` (the polish work started from `c6ce30c` and was
+re-applied on top of current `main` in merge commit `59f2b73`).
 Engine: Godot 4.6.2 stable, GL Compatibility, `llvmpipe` under Xvfb for captures.
 
 ## Verdict
@@ -104,6 +105,14 @@ Additional measurements:
   1024×600, 1280×720, 1280×800, 1440×900, 1600×720 (see
   `docs/qa/captures/`, gitignored). Inspected for clipping, overlap, hitboxes,
   modal stacking, and combat readability at 1× and 3×.
+
+## Delivery
+
+- Branch: `polish/2026-11-11-playability`
+- Commits: `01349c0` (implementation + tests + audio), `e61b727`
+  (unaffordable-shop feedback), `59f2b73` (merge of current `main`)
+- PR: https://github.com/gthgomez/ManaNet/pull/10 (mergeable; GitHub CI and
+  asset-validation workflows green, including the new interaction/audio gates)
 
 ## Remaining gaps / blockers
 
