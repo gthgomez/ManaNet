@@ -6,6 +6,7 @@ class_name CorporateDistrictBackdrop
 ## right, skyline depth, foreground plaza + showcase towers.
 
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _CUTOUT := preload("res://assets/shaders/tower_cutout.gdshader")
 
 const _TOWER_PATHS: Array[String] = [
 	"res://assets/sprites/production/towers/plasma_repeater.svg",
@@ -15,7 +16,7 @@ const _TOWER_PATHS: Array[String] = [
 
 var _time: float = 0.0
 var _flicker: float = 1.0
-var _tower_textures: Array[Texture2D] = []
+var _tower_views: Array[TextureRect] = []
 var _holo_phase: float = 0.0
 
 func _ready() -> void:
@@ -23,7 +24,17 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	for path in _TOWER_PATHS:
 		if ResourceLoader.exists(path, "Texture2D"):
-			_tower_textures.append(load(path) as Texture2D)
+			var tex: Texture2D = load(path) as Texture2D
+			var view := TextureRect.new()
+			view.texture = tex
+			view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			var mat := ShaderMaterial.new()
+			mat.shader = _CUTOUT
+			view.material = mat
+			add_child(view)
+			_tower_views.append(view)
 
 func _process(delta: float) -> void:
 	if bool(Progression.get_settings().get("reduce_motion", false)):
@@ -55,7 +66,7 @@ func _draw() -> void:
 	_draw_arcana_facade(s)
 	_draw_holo_billboard(s, reduce)
 	_draw_plaza(s)
-	_draw_foreground_towers(s)
+	_layout_foreground_towers(s)
 	_draw_vignette(s)
 
 	if not reduce:
@@ -140,25 +151,23 @@ func _draw_plaza(s: Vector2) -> void:
 	var center: Rect2 = Rect2(s.x * 0.28, s.y * 0.12, s.x * 0.44, s.y * 0.76)
 	draw_rect(center, Color(0.02, 0.04, 0.08, 0.42))
 
-func _draw_foreground_towers(s: Vector2) -> void:
-	if _tower_textures.is_empty():
+func _layout_foreground_towers(s: Vector2) -> void:
+	if _tower_views.is_empty():
 		return
-	var ground_y: float = s.y * 0.68
+	var ground_y: float = s.y * 0.72
 	var slots: Array = [
-		[s.x * 0.16, 0.28],
-		[s.x * 0.46, 0.34],
-		[s.x * 0.80, 0.30],
+		[s.x * 0.16, 0.30],
+		[s.x * 0.48, 0.36],
+		[s.x * 0.82, 0.32],
 	]
-	for i in mini(_tower_textures.size(), slots.size()):
+	for i in mini(_tower_views.size(), slots.size()):
 		var slot: Array = slots[i]
 		var tx: float = float(slot[0])
 		var display: float = s.y * float(slot[1])
-		var rect := Rect2(tx - display * 0.5, ground_y - display + 12.0, display, display)
-		var tex: Texture2D = _tower_textures[i]
-		draw_texture_rect(tex, rect, false, Color(1.0, 1.0, 1.0, 0.88))
-		if i == 2 and not bool(Progression.get_settings().get("reduce_motion", false)):
-			var arc_c: Vector2 = Vector2(tx, ground_y - display * 0.55)
-			draw_arc(arc_c, display * 0.22, _time * 2.0, _time * 2.0 + 0.9, 12, Color(_THEME.CYAN.r, _THEME.CYAN.g, _THEME.CYAN.b, 0.35), 2.0)
+		var view: TextureRect = _tower_views[i]
+		view.position = Vector2(tx - display * 0.5, ground_y - display)
+		view.size = Vector2(display, display)
+		view.modulate = Color(1.0, 1.0, 1.0, 0.95)
 
 func _draw_vignette(s: Vector2) -> void:
 	draw_rect(Rect2(Vector2.ZERO, Vector2(s.x, s.y * 0.08)), Color(0.0, 0.0, 0.0, 0.35))
