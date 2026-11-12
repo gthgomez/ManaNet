@@ -80,7 +80,25 @@ func _bytes(path: String) -> PackedByteArray:
 	return FileAccess.get_file_as_bytes(path)
 
 func _chmod(path: String, mode: String) -> void:
-	OS.execute("chmod", [mode, ProjectSettings.globalize_path(path)])
+	var abs: String = ProjectSettings.globalize_path(path)
+	if OS.get_name() == "Windows":
+		var user: String = OS.get_environment("USERNAME")
+		if user == "":
+			user = "Everyone"
+		var sink: Array = []
+		if mode == "nodetect":
+			# Prevent rename/delete (quarantine) while keeping the file readable.
+			OS.execute("icacls", [abs, "/deny", "%s:(D,DC)" % user], sink)
+		elif mode in ["555", "000", "444"]:
+			OS.execute("icacls", [abs, "/inheritance:r"], sink)
+			OS.execute("icacls", [abs, "/grant:r", "%s:R" % user], sink)
+			OS.execute("icacls", [abs, "/deny", "%s:(W,DE,DC)" % user], sink)
+		else:
+			OS.execute("icacls", [abs, "/remove:d", user], sink)
+			OS.execute("icacls", [abs, "/reset"], sink)
+			OS.execute("icacls", [abs, "/grant", "%s:(F)" % user], sink)
+		return
+	OS.execute("chmod", [mode, abs], [])
 
 func _read_text(path: String) -> String:
 	if not FileAccess.file_exists(path):
@@ -376,7 +394,11 @@ func _test_failed_quarantine_blocks_overwrite() -> void:
 	var payload := "{ not json"
 	_write_text(path, payload)
 	var before := _bytes(path)
-	_chmod(folder, "555")
+	var locker: FileAccess = FileAccess.open(path, FileAccess.READ_WRITE)
+	if locker == null and OS.get_name() != "Windows":
+		_chmod(folder, "555")
+	elif locker == null:
+		_chmod(path, "nodetect")
 	var p = ProgressionScript.new()
 	p.initialize(path)
 	var status: Dictionary = p.persistence_status()
@@ -387,7 +409,12 @@ func _test_failed_quarantine_blocks_overwrite() -> void:
 	var run: Dictionary = p.record_run(gs, 0, false)
 	gs.dispose()
 	_check(run.get("save_failed", false), "run record after failed quarantine does not persist")
-	_chmod(folder, "755")
+	if locker != null:
+		locker.close()
+	elif OS.get_name() != "Windows":
+		_chmod(folder, "755")
+	else:
+		_chmod(path, "755")
 	_check(_bytes(path) == before, "failed quarantine left the original bytes in place")
 	p.free()
 

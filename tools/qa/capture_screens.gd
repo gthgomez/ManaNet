@@ -190,8 +190,25 @@ func _run() -> void:
 			scene.game_state.start_wave()
 			await create_timer(7.0).timeout
 			await _shot("game_combat")
-			await create_timer(4.0).timeout
-			await _shot("game_combat_dense")
+		"game_nov2026":
+			await _game(0)
+			scene.game_state.wave = 7
+			scene._prev_wave = 7
+			scene.game_state.gold = 1240
+			scene.game_state.lives = 10
+			await _place("mage", Vector2(420, 220))
+			await _place("cannon", Vector2(300, 280))
+			await _place("frost", Vector2(500, 260))
+			await _place("lightning", Vector2(360, 200))
+			if scene.game_state.towers.size() > 0:
+				var pick: Tower = scene.game_state.towers[0]
+				scene.view_state.selected_tower_id = pick.id
+				scene.game_state.gold = 1240
+			scene._msg_label.text = ""
+			scene._update_hud(Time.get_ticks_msec())
+			scene._msg_label.text = ""
+			await create_timer(0.4).timeout
+			await _shot("game_combat")
 		"game_combat_3x":
 			await _game(0)
 			await _place("archer", Vector2(180, 250))

@@ -11,6 +11,14 @@ const FANTASY_SUBTITLE := "Hold the grid for 15 waves. Patch smart. Deploy wisel
 ## human promote step), so the menu shows the real product name as text.
 const PRODUCT_NAME := "MANANET"
 const PRODUCT_TAGLINE := "CYBER-ARCANA NETWORK DEFENSE"
+const SENTINEL_ID := "SENTINEL-07"
+const SENTINEL_MENU_STATUS := "SENTINEL-07 ONLINE"
+
+static func sentinel_status_line() -> String:
+	return SENTINEL_MENU_STATUS
+
+static func sentinel_hud_line() -> String:
+	return "%s  // DIAGNOSTIC: INSTRUCTION ALIGNMENT… 96%%" % SENTINEL_ID
 
 const CURRENCY_RUN := "Credits"
 const CURRENCY_META := "Shards"
@@ -28,8 +36,25 @@ const INSTRUCTION_START_WAVE := "START WAVE WHEN READY"
 static func credits(amount: int) -> String:
 	return "%s: %d" % [CURRENCY_RUN, amount]
 
+static func credits_hud(amount: int) -> String:
+	return "%s %s" % [CURRENCY_RUN, _group_digits(amount)]
+
+static func _group_digits(n: int) -> String:
+	var neg: bool = n < 0
+	var s: String = str(absi(n))
+	var tail: String = ""
+	while s.length() > 3:
+		tail = "," + s.substr(s.length() - 3, 3) + tail
+		s = s.substr(0, s.length() - 3)
+	return ("%s%s%s" % ["-" if neg else "", s, tail])
+
 static func integrity(amount: int) -> String:
 	return "%s: %d" % [CORE_RESOURCE, amount]
+
+static func integrity_percent(lives: int, capacity: int) -> String:
+	var cap: int = maxi(1, capacity)
+	var pct: int = clampi(int(round(100.0 * float(lives) / float(cap))), 0, 100)
+	return "%s %d%%" % [CORE_RESOURCE, pct]
 
 static func integrity_short(amount: int) -> String:
 	return "%s %d" % [CORE_SHORT, amount]

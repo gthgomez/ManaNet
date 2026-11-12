@@ -8,7 +8,12 @@ const _MAPS_DATA := preload("res://data/maps.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BRAND := preload("res://ui/theme/BrandCopy.gd")
-const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
+const _BACKDROP := preload("res://rendering/backdrop/CorporateDistrictBackdrop.gd")
+const _PLATE := preload("res://rendering/backdrop/ReferencePlate.gd")
+const _MAP_PLATE := "res://art/references/authoritative/nov-2026/reference_b_map_select.png"
+const _MAP_PLATE_TEX: Texture2D = preload("res://art/references/authoritative/nov-2026/reference_b_map_select.png")
+const _MapScenicThumb := preload("res://rendering/ui/MapScenicThumb.gd")
+const _CARD_ORDER: Array[int] = [2, 1, 0]
 const _DIFFICULTY_LABELS: Array[String] = ["", "Easy", "Medium", "Hard"]
 const _DIFFICULTY_COLORS: Array[Color] = [
 	Color.WHITE,
@@ -23,13 +28,17 @@ const _DIFFICULTY_COLORS: Array[Color] = [
 @onready var _title: Label                  = $TopBar/Title
 @onready var _scroll: ScrollContainer       = $Scroll
 var _right_spacer: Control = null
+var _shards_pill: PanelContainer = null
+var _shards_lbl: Label = null
 var _mod_scroll: ScrollContainer = null
 var _mod_strip: HBoxContainer = null
 var _mod_rp_lbl: Label = null
 var _mod_btns: Dictionary = {}   # mod_id -> Button
+var _plate = null
 
 func _ready() -> void:
 	_add_backdrop()
+	_add_shards_pill()
 	_back_btn.pressed.connect(_on_back)
 	get_viewport().size_changed.connect(_apply_layout)
 	_ensure_header_spacer()
@@ -39,6 +48,7 @@ func _ready() -> void:
 	_apply_layout()
 	_scroll.scroll_deadzone = 12
 	_scroll.follow_focus = true
+	_refresh_shards()
 
 	FocusManager.register_initial_focus(_back_btn)
 
@@ -134,24 +144,87 @@ func _refresh_mod_strip() -> void:
 			_mod_rp_lbl.text = _BRAND.shards_mult(stacked, true)
 
 func _add_backdrop() -> void:
+	var tex: Texture2D = _PLATE.texture_for_plate(_MAP_PLATE, _MAP_PLATE_TEX)
+	if tex != null:
+		_plate = _PLATE.new()
+		_plate.texture = tex
+		_plate.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(_plate)
+		var bg := get_node_or_null("BG")
+		if bg is CanvasItem:
+			(bg as CanvasItem).visible = false
+			move_child(_plate, bg.get_index() + 1)
+		return
 	var backdrop := _BACKDROP.new()
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(backdrop)
-	move_child(backdrop, 0)
+	var bg_fallback := get_node_or_null("BG")
+	if bg_fallback is CanvasItem:
+		(bg_fallback as CanvasItem).visible = false
+		move_child(backdrop, bg_fallback.get_index() + 1)
+	else:
+		move_child(backdrop, 0)
+
+func _add_shards_pill() -> void:
+	_shards_pill = PanelContainer.new()
+	_shards_pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := _THEME.style_box(Color(0.04, 0.07, 0.13, 0.9), Color(0.29, 0.56, 0.85, 0.55), 1, 14, 0, 6)
+	sb.content_margin_left = 10.0
+	sb.content_margin_right = 10.0
+	sb.content_margin_top = 4.0
+	sb.content_margin_bottom = 4.0
+	_shards_pill.add_theme_stylebox_override("panel", sb)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	_shards_pill.add_child(row)
+	var shard_icon := TextureRect.new()
+	shard_icon.texture = load("res://assets/sprites/production/ui/shards.svg")
+	shard_icon.custom_minimum_size = Vector2(16.0, 16.0)
+	shard_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	shard_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	row.add_child(shard_icon)
+	var cap := Label.new()
+	cap.text = _BRAND.CURRENCY_META
+	cap.add_theme_font_size_override("font_size", 11)
+	cap.add_theme_color_override("font_color", _THEME.CYAN)
+	row.add_child(cap)
+	_shards_lbl = Label.new()
+	_shards_lbl.text = "0"
+	_shards_lbl.add_theme_font_size_override("font_size", 14)
+	_shards_lbl.add_theme_color_override("font_color", Color(0.95, 0.92, 0.78))
+	row.add_child(_shards_lbl)
+	add_child(_shards_pill)
+
+func _refresh_shards() -> void:
+	if _shards_lbl == null:
+		return
+	var profile: Dictionary = Progression.load_profile()
+	_shards_lbl.text = str(profile.get("banked_rp", 0))
 
 func _apply_visuals() -> void:
 	_THEME.apply_button(_back_btn, "secondary")
 	_THEME.apply_label(_title, "heading")
 
 func _build_cards() -> void:
-	for map_def in _MAPS_DATA.MAPS:
+	for map_id in _CARD_ORDER:
+		var map_def: Dictionary = _MAPS_DATA.MAPS[map_id]
 		var card := _make_card(map_def)
 		_card_container.add_child(card)
 
 func _make_card(map_def: Dictionary) -> PanelContainer:
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(300, 420)
-	_THEME.apply_panel(card, "card")
+	var is_recommended: bool = int(map_def.get("id", -1)) == 2
+	if is_recommended:
+		var rec_sb := _THEME.style_box(Color(0.08, 0.12, 0.20, 0.95), _THEME.GOLD, 3, 10, 0, 14)
+		rec_sb.content_margin_left = 0.0
+		rec_sb.content_margin_top = 0.0
+		rec_sb.content_margin_right = 0.0
+		rec_sb.content_margin_bottom = 0.0
+		card.add_theme_stylebox_override("panel", rec_sb)
+	else:
+		_THEME.apply_panel(card, "card")
 	card.mouse_filter = Control.MOUSE_FILTER_PASS
 	card.focus_mode = Control.FOCUS_ALL
 	card.pivot_offset = Vector2(150, 210)
@@ -196,24 +269,40 @@ func _make_card(map_def: Dictionary) -> PanelContainer:
 	margin.add_child(vbox)
 
 	# Path thumbnail
-	var thumb := _PathThumb.new(map_def["path"])
-	thumb.custom_minimum_size = Vector2(272, 170)
+	var thumb := _MapScenicThumb.new(map_def)
+	thumb.custom_minimum_size = Vector2(272, 198)
 	thumb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(thumb)
 	card.set_meta("thumb", thumb)
 
 	# Map name
 	var name_lbl := Label.new()
-	name_lbl.text = map_def["name"]
+	name_lbl.text = str(map_def.get("name", "")).to_upper()
 	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_lbl.add_theme_font_size_override("font_size", 20)
 	_THEME.apply_label(name_lbl, "body")
 	vbox.add_child(name_lbl)
 
+	var sub_lbl := Label.new()
+	sub_lbl.text = str(map_def.get("subtitle", ""))
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", 11)
+	sub_lbl.add_theme_color_override("font_color", Color(0.45, 0.82, 0.95, 0.9))
+	_THEME.apply_label(sub_lbl, "muted")
+	vbox.add_child(sub_lbl)
+	var rec_lbl: Label = null
+	if is_recommended:
+		rec_lbl = Label.new()
+		rec_lbl.text = "★ RECOMMENDED"
+		rec_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rec_lbl.add_theme_font_size_override("font_size", 10)
+		rec_lbl.add_theme_color_override("font_color", _THEME.GOLD)
+		vbox.add_child(rec_lbl)
+
 	# Difficulty badge
 	var diff_lbl := Label.new()
 	var difficulty: int = int(map_def["difficulty"])
-	var diff_text: String = _DIFFICULTY_LABELS[difficulty]
+	var diff_text: String = _DIFFICULTY_LABELS[difficulty].to_upper()
 	diff_lbl.text = diff_text
 	diff_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var diff_color: Color = _DIFFICULTY_COLORS[difficulty]
@@ -242,6 +331,13 @@ func _make_card(map_def: Dictionary) -> PanelContainer:
 	play_btn.pressed.connect(_on_play_map.bind(map_def["id"]))
 	vbox.add_child(play_btn)
 	_play_btns.append(play_btn)
+	card.set_meta("layout_name", name_lbl)
+	card.set_meta("layout_sub", sub_lbl)
+	card.set_meta("layout_diff", diff_lbl)
+	card.set_meta("layout_desc", desc_lbl)
+	card.set_meta("layout_play", play_btn)
+	if rec_lbl != null:
+		card.set_meta("layout_rec", rec_lbl)
 	_link_neighbors.call_deferred(play_btn)
 	return card
 
@@ -286,6 +382,8 @@ func _apply_layout() -> void:
 	if _right_spacer:
 		_right_spacer.custom_minimum_size = Vector2(104.0, 1.0)
 	_title.add_theme_font_size_override("font_size", 34 if viewport.x >= 1050.0 else 30)
+	if _shards_pill:
+		_shards_pill.position = Vector2(viewport.x - margin - 118.0, top + 8.0)
 
 	var mod_strip_h: float = 0.0
 	if _mod_strip != null and not _mod_btns.is_empty():
@@ -335,26 +433,94 @@ func _apply_layout() -> void:
 					card_vbox.add_theme_constant_override("separation", card_vsep)
 					# Keep every essential row inside the card; only the thumbnail
 					# and description absorb the available height.
-					var show_desc: bool = card_h >= 260.0
-					var sep_count: int = 4 if show_desc else 3
+					var show_desc: bool = card_h >= 260.0 and not ultra_compact
+					var show_sub: bool = show_desc
+					var sep_count: int = 2
+					if show_sub:
+						sep_count += 1
+					if show_desc:
+						sep_count += 2
+					else:
+						sep_count += 1
 					var chrome_h: float = float(card_margin * 2) + float(card_vsep * sep_count) \
-						+ (18.0 if ultra_compact else 24.0) \
-						+ (27.0 if ultra_compact else 31.0) + play_h
-					var thumb_h: float = clampf(card_h - chrome_h - (34.0 if show_desc else 0.0), 40.0, 188.0)
+						+ (16.0 if ultra_compact else 24.0) \
+						+ (22.0 if ultra_compact else 31.0) + play_h
+					var thumb_h: float = clampf(card_h - chrome_h - (34.0 if show_desc else 0.0), 36.0, 188.0)
 					var thumb = child.get_meta("thumb", null)
 					if thumb is Control:
 						thumb.custom_minimum_size = Vector2(maxf(110.0, card_w - float(card_margin * 2)), thumb_h)
-					if card_vbox.get_child_count() >= 5:
-						var name_lbl: Label = card_vbox.get_child(1)
-						var diff_lbl: Label = card_vbox.get_child(2)
-						var desc_lbl: Label = card_vbox.get_child(3)
-						var play_btn: Button = card_vbox.get_child(4)
+					var name_lbl = child.get_meta("layout_name", null)
+					var diff_lbl = child.get_meta("layout_diff", null)
+					var desc_lbl = child.get_meta("layout_desc", null)
+					var play_btn = child.get_meta("layout_play", null)
+					if name_lbl is Label and diff_lbl is Label and desc_lbl is Label and play_btn is Button:
+						var sub_lbl = child.get_meta("layout_sub") if child.has_meta("layout_sub") else null
+						var rec_lbl = child.get_meta("layout_rec") if child.has_meta("layout_rec") else null
 						name_lbl.add_theme_font_size_override("font_size", 15 if ultra_compact else (17 if compact_cards else 20))
+						if sub_lbl is Label:
+							sub_lbl.visible = show_desc and not ultra_compact
+							sub_lbl.add_theme_font_size_override("font_size", 9 if ultra_compact else 10)
+						if rec_lbl is Label:
+							rec_lbl.visible = not ultra_compact
 						diff_lbl.add_theme_font_size_override("font_size", 11 if ultra_compact else 13)
 						desc_lbl.add_theme_font_size_override("font_size", 10 if ultra_compact else 12)
-						desc_lbl.visible = show_desc
+						desc_lbl.visible = show_desc and not ultra_compact
 						play_btn.custom_minimum_size = Vector2(0.0, play_h)
 						play_btn.add_theme_font_size_override("font_size", 14 if ultra_compact else 16)
+	_layout_over_reference()
+
+func _layout_over_reference() -> void:
+	if _plate == null:
+		return
+	_title.modulate = Color(1, 1, 1, 0)
+	for child in _card_container.get_children():
+		if child is CanvasItem:
+			(child as CanvasItem).modulate = Color(1, 1, 1, 0)
+			if child is Control:
+				(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if _back_btn.get_parent() != self:
+		_back_btn.reparent(self)
+	_ghost_control(_back_btn)
+	_place_control(_back_btn, _plate.map_norm(0.018, 0.025, 0.10, 0.060))
+	var norms: Array = [
+		[0.072, 0.808, 0.230, 0.064],
+		[0.390, 0.808, 0.230, 0.064],
+		[0.694, 0.808, 0.236, 0.064],
+	]
+	for i in _play_btns.size():
+		var play_btn: Button = _play_btns[i]
+		if play_btn.get_parent() != self:
+			play_btn.reparent(self)
+		_ghost_control(play_btn)
+		var n: Array = norms[mini(i, norms.size() - 1)]
+		_place_control(play_btn, _plate.map_norm(float(n[0]), float(n[1]), float(n[2]), float(n[3])))
+	if _shards_pill != null:
+		_shards_pill.visible = _shards_lbl != null and _shards_lbl.text != "0"
+	if _plate.get_parent() == self:
+		move_child(_plate, 1)
+		_plate.size = _LAYOUT.viewport_size(self)
+		_plate.queue_redraw()
+
+func _ghost_control(ctrl: Control) -> void:
+	var empty := StyleBoxEmpty.new()
+	for state_name in ["normal", "hover", "pressed", "focus", "disabled"]:
+		ctrl.add_theme_stylebox_override(state_name, empty)
+	ctrl.add_theme_color_override("font_color", Color(1, 1, 1, 0))
+	ctrl.add_theme_color_override("font_hover_color", Color(1, 1, 1, 0.01))
+	ctrl.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 0.04))
+	ctrl.add_theme_color_override("font_focus_color", Color(1, 1, 1, 0))
+
+func _place_control(ctrl: Control, rect: Rect2) -> void:
+	var vp := _LAYOUT.viewport_size(self)
+	var w := minf(maxf(rect.size.x, _LAYOUT.MIN_TOUCH_HEIGHT), maxf(_LAYOUT.MIN_TOUCH_HEIGHT, vp.x - 2.0))
+	var h := minf(maxf(rect.size.y, _LAYOUT.MIN_TOUCH_HEIGHT), maxf(_LAYOUT.MIN_TOUCH_HEIGHT, vp.y - 2.0))
+	var x := clampf(rect.position.x, 0.0, maxf(0.0, vp.x - w))
+	var y := clampf(rect.position.y, 0.0, maxf(0.0, vp.y - h))
+	ctrl.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	ctrl.position = Vector2(x, y)
+	ctrl.size = Vector2(w, h)
+	ctrl.custom_minimum_size = Vector2(w, h)
+	ctrl.modulate = Color(1, 1, 1, 0)
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
@@ -373,55 +539,3 @@ func _fade_to(path: String) -> void:
 	tween.tween_property(self, "modulate:a", 0.0, 0.25)
 	tween.tween_callback(func(): get_tree().change_scene_to_file(path))
 
-# ---------------------------------------------------------------------------
-# Inner class: procedural path thumbnail drawn via _draw()
-# ---------------------------------------------------------------------------
-
-class _PathThumb extends Control:
-	var _path: Array = []  # Array[Vector2]
-
-	func _init(path: Array) -> void:
-		_path = path
-
-	func _draw() -> void:
-		if _path.size() < 2:
-			return
-		var draw_size: Vector2 = size
-		if draw_size.x <= 0.0 or draw_size.y <= 0.0:
-			draw_size = custom_minimum_size
-
-		var min_x: float = INF
-		var max_x: float = -INF
-		var min_y: float = INF
-		var max_y: float = -INF
-		for p_variant in _path:
-			var p: Vector2 = p_variant
-			min_x = minf(min_x, p.x)
-			max_x = maxf(max_x, p.x)
-			min_y = minf(min_y, p.y)
-			max_y = maxf(max_y, p.y)
-
-		var span_x: float = maxf(max_x - min_x, 1.0)
-		var span_y: float = maxf(max_y - min_y, 1.0)
-		var pad: float = 14.0
-		var s: float = minf((draw_size.x - pad * 2.0) / span_x, (draw_size.y - pad * 2.0) / span_y)
-		var off_x: float = pad + ((draw_size.x - pad * 2.0) - span_x * s) / 2.0
-		var off_y: float = pad + ((draw_size.y - pad * 2.0) - span_y * s) / 2.0
-
-		var pts: PackedVector2Array = []
-		for p_variant in _path:
-			var p: Vector2 = p_variant
-			pts.append(Vector2(off_x + (p.x - min_x) * s, off_y + (p.y - min_y) * s))
-
-		# Road layers (matches Python draw order)
-		draw_polyline(pts, Color(0, 0, 0, 0.7), 8.0)
-		draw_polyline(pts, Color(0.071, 0.086, 0.149, 1.0), 6.5)
-		draw_polyline(pts, Color(0.141, 0.165, 0.267, 1.0), 5.0)
-		draw_polyline(pts, Color(0.173, 0.204, 0.314, 1.0), 3.5)
-		draw_polyline(pts, Color(0.204, 0.573, 1.0, 0.22), 5.5)
-		draw_polyline(pts, Color(0.204, 0.573, 1.0, 0.70), 2.5)
-
-		# Start dot (green)
-		draw_circle(pts[0], 5.0, Color(0, 0.863, 0.51))
-		# End dot (red)
-		draw_circle(pts[-1], 5.0, Color(0.863, 0.235, 0.314))

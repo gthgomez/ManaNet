@@ -210,8 +210,9 @@ static func centered_rect(viewport: Vector2, top: float, bottom: float, max_widt
 	return Rect2(Vector2(left + (viewport.x - left - right - width) * 0.5, top), Vector2(width, height))
 
 static func game_world_rect(viewport: Vector2) -> Rect2:
+	# Fit the 900×600 simulation into the viewport. Upscale on large landscape
+	# phones so the battlefield fills the screen instead of sitting in a 1:1 box.
 	var scale: float = minf(viewport.x / BASE_SIZE.x, viewport.y / BASE_SIZE.y)
-	scale = minf(scale, 1.0)
 	var size: Vector2 = BASE_SIZE * scale
 	return Rect2((viewport - size) * 0.5, size)
 
