@@ -11,6 +11,7 @@ const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/CorporateDistrictBackdrop.gd")
 const _PLATE := preload("res://rendering/backdrop/ReferencePlate.gd")
 const _MAP_PLATE := "res://art/references/authoritative/nov-2026/reference_b_map_select.png"
+const _MAP_PLATE_TEX: Texture2D = preload("res://art/references/authoritative/nov-2026/reference_b_map_select.png")
 const _MapScenicThumb := preload("res://rendering/ui/MapScenicThumb.gd")
 const _CARD_ORDER: Array[int] = [2, 1, 0]
 const _DIFFICULTY_LABELS: Array[String] = ["", "Easy", "Medium", "Hard"]
@@ -143,10 +144,10 @@ func _refresh_mod_strip() -> void:
 			_mod_rp_lbl.text = _BRAND.shards_mult(stacked, true)
 
 func _add_backdrop() -> void:
-	var image := Image.new()
-	if image.load(_MAP_PLATE) == OK:
+	var tex: Texture2D = _PLATE.texture_for_plate(_MAP_PLATE, _MAP_PLATE_TEX)
+	if tex != null:
 		_plate = _PLATE.new()
-		_plate.texture = ImageTexture.create_from_image(image)
+		_plate.texture = tex
 		_plate.set_anchors_preset(Control.PRESET_FULL_RECT)
 		add_child(_plate)
 		var bg := get_node_or_null("BG")

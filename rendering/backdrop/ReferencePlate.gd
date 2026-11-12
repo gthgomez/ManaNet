@@ -6,6 +6,15 @@ extends Control
 
 var texture: Texture2D = null
 
+## Desktop reads the source PNG so captures stay pixel-identical to the plate.
+## An exported pack does not contain that source file, so callers also preload
+## the imported texture and pass it here for device builds.
+static func texture_for_plate(source_path: String, packed: Texture2D) -> Texture2D:
+	var image := Image.new()
+	if image.load(source_path) == OK:
+		return ImageTexture.create_from_image(image)
+	return packed
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_preset(Control.PRESET_FULL_RECT)

@@ -8,6 +8,7 @@ const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/CorporateDistrictBackdrop.gd")
 const _PLATE := preload("res://rendering/backdrop/ReferencePlate.gd")
 const _MENU_PLATE := "res://art/references/authoritative/nov-2026/reference_a_main_menu.png"
+const _MENU_PLATE_TEX: Texture2D = preload("res://art/references/authoritative/nov-2026/reference_a_main_menu.png")
 const _COLOR_SFX := Color(0.55, 0.80, 0.95, 0.90)
 const _COLOR_MUTED := Color(0.70, 0.38, 0.42, 0.90)
 const _MENU_ICON_CYBER := "res://assets/sprites/production/ui/cyber_deck.svg"
@@ -322,8 +323,8 @@ func _apply_layout() -> void:
 	_layout_over_reference()
 
 func _install_menu_plate() -> void:
-	var image := Image.new()
-	if image.load(_MENU_PLATE) != OK:
+	var tex: Texture2D = _PLATE.texture_for_plate(_MENU_PLATE, _MENU_PLATE_TEX)
+	if tex == null:
 		var backdrop := _BACKDROP.new()
 		backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -331,7 +332,7 @@ func _install_menu_plate() -> void:
 		move_child(backdrop, _bg.get_index() + 1)
 		return
 	_plate = _PLATE.new()
-	_plate.texture = ImageTexture.create_from_image(image)
+	_plate.texture = tex
 	_plate.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(_plate)
 	move_child(_plate, _bg.get_index() + 1)

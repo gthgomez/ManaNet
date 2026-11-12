@@ -1046,24 +1046,39 @@ class _BakedPathDraw extends Node2D:
 	func _draw() -> void:
 		if map_path.size() < 2:
 			return
-		# Holo-Rail Style (Navy / Steel / Cyan)
-		var c_shadow := Color(0, 0, 0, 0.4)
-		var c_border := Color(0.30, 0.38, 0.50)
-		var c_rail   := Color(0.13, 0.16, 0.23)
-		var c_energy := Color(0.18, 0.69, 1.0, 0.18)
+		var pts := PackedVector2Array()
+		for p in map_path:
+			pts.append(p)
+		# Concrete lane wide enough for the simulation path radius, with round
+		# joints so axis-aligned segments read as one road.
+		for p in map_path:
+			draw_circle(p, 27.0, Color(0.10, 0.09, 0.08, 0.9))
+		draw_polyline(pts, Color(0.0, 0.0, 0.0, 0.35), 56.0, true)
+		draw_polyline(pts, Color(0.45, 0.38, 0.28, 1.0), 48.0, true)
+		draw_polyline(pts, Color(0.16, 0.15, 0.14, 1.0), 40.0, true)
+		for p in map_path:
+			draw_circle(p, 20.0, Color(0.16, 0.15, 0.14, 1.0))
+		_draw_lane_dashes(pts, Color(0.15, 0.85, 0.95, 0.9), 3.0, 16.0, 12.0)
 
-		# Shadow
-		for i in range(map_path.size() - 1):
-			draw_line(map_path[i] + Vector2(3,3), map_path[i+1] + Vector2(3,3), c_shadow, 54.0)
-		# Outer Rail Frame
-		for i in range(map_path.size() - 1):
-			draw_line(map_path[i], map_path[i+1], c_border, 52.0)
-		# Main Track
-		for i in range(map_path.size() - 1):
-			draw_line(map_path[i], map_path[i+1], c_rail, 44.0)
-		# Energy Conduit
-		for i in range(map_path.size() - 1):
-			draw_line(map_path[i], map_path[i+1], c_energy, 12.0)
-		# Center Laser Line
-		for i in range(map_path.size() - 1):
-			draw_line(map_path[i], map_path[i+1], Color(0.18, 0.69, 1.0, 0.45), 2.0)
+	func _draw_lane_dashes(pts: PackedVector2Array, color: Color, width: float, dash: float, gap: float) -> void:
+		var drawing := true
+		var remain := dash
+		for i in range(pts.size() - 1):
+			var a: Vector2 = pts[i]
+			var b: Vector2 = pts[i + 1]
+			var span: float = a.distance_to(b)
+			if span < 0.5:
+				continue
+			var dir: Vector2 = (b - a) / span
+			var walked := 0.0
+			while walked < span:
+				var step: float = minf(remain, span - walked)
+				var p0: Vector2 = a + dir * walked
+				var p1: Vector2 = a + dir * (walked + step)
+				if drawing:
+					draw_line(p0, p1, color, width)
+				walked += step
+				remain -= step
+				if remain <= 0.01:
+					drawing = not drawing
+					remain = dash if drawing else gap

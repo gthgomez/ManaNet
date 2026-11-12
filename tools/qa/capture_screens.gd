@@ -193,6 +193,7 @@ func _run() -> void:
 		"game_nov2026":
 			await _game(0)
 			scene.game_state.wave = 7
+			scene._prev_wave = 7
 			scene.game_state.gold = 1240
 			scene.game_state.lives = 10
 			await _place("mage", Vector2(420, 220))
@@ -202,10 +203,11 @@ func _run() -> void:
 			if scene.game_state.towers.size() > 0:
 				var pick: Tower = scene.game_state.towers[0]
 				scene.view_state.selected_tower_id = pick.id
-				scene.game_state.gold = 9999
-				scene._dispatch({"type": "upgrade_base", "tower_id": pick.id}, Time.get_ticks_msec())
+				scene.game_state.gold = 1240
+			scene._msg_label.text = ""
 			scene._update_hud(Time.get_ticks_msec())
-			await create_timer(0.8).timeout
+			scene._msg_label.text = ""
+			await create_timer(0.4).timeout
 			await _shot("game_combat")
 		"game_combat_3x":
 			await _game(0)
