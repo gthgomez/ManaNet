@@ -457,14 +457,9 @@ func _draw() -> void:
 # --- 1. Background ---
 
 func _draw_background(shake: Vector2) -> void:
-	var map_id: int = game_state.map_id if game_state else 0
-	var bg: Texture2D = _map_bg_textures.get(map_id, null)
-	if bg:
-		draw_texture_rect(bg, Rect2(shake, Vector2(_MAPS.WIDTH, _MAPS.HEIGHT)), false)
-		draw_rect(Rect2(shake, Vector2(_MAPS.WIDTH, _MAPS.HEIGHT)), Color(0.02, 0.03, 0.06, 0.28))
-		return
-
-	draw_rect(Rect2(shake, Vector2(_MAPS.WIDTH, _MAPS.HEIGHT)), Color(0.04, 0.04, 0.08))
+	draw_rect(Rect2(shake, Vector2(_MAPS.WIDTH, _MAPS.HEIGHT)), Color(0.045, 0.055, 0.075))
+	# The production environment SVGs are schematic overlays. The live path bake
+	# and corporate scenery own the battlefield so the plaza is not double-drawn.
 	var drift := Vector2(sin(float(Time.get_ticks_msec()) * 0.0001) * 15.0, cos(float(Time.get_ticks_msec()) * 0.00012) * 10.0)
 	for star in _stars:
 		# Parallax effect: larger (closer) stars move more

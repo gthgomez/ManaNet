@@ -6,6 +6,8 @@ const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/CorporateDistrictBackdrop.gd")
+const _PLATE := preload("res://rendering/backdrop/ReferencePlate.gd")
+const _MENU_PLATE := "res://art/references/authoritative/nov-2026/reference_a_main_menu.png"
 const _COLOR_SFX := Color(0.55, 0.80, 0.95, 0.90)
 const _COLOR_MUTED := Color(0.70, 0.38, 0.42, 0.90)
 const _MENU_ICON_CYBER := "res://assets/sprites/production/ui/cyber_deck.svg"
@@ -42,6 +44,7 @@ var _rp_pill_label: Label = null
 var _version_lbl: Label = null
 var _last_run_lbl: Label = null
 var _sentinel_lbl: Label = null
+var _plate = null
 
 # Tower showcase (sine float in _process)
 var _tower_showcase: Array = []
@@ -55,12 +58,7 @@ func _ready() -> void:
 
 	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_bg.color = Color(0, 0, 0, 0)
-
-	var backdrop := _BACKDROP.new()
-	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
-	move_child(backdrop, _bg.get_index() + 1)
+	_install_menu_plate()
 
 	# The 96px mage SVG carries an opaque plate and reads as a dark rectangle when
 	# scaled up. The tower showcase below is the cyber-arcana decoration instead.
@@ -321,6 +319,88 @@ func _apply_layout() -> void:
 	if _particles:
 		_particles.position              = Vector2(viewport.x * 0.5, viewport.y * 0.5)
 		_particles.emission_rect_extents = Vector2(viewport.x * 0.5, viewport.y * 0.5)
+	_layout_over_reference()
+
+func _install_menu_plate() -> void:
+	var image := Image.new()
+	if image.load(_MENU_PLATE) != OK:
+		var backdrop := _BACKDROP.new()
+		backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(backdrop)
+		move_child(backdrop, _bg.get_index() + 1)
+		return
+	_plate = _PLATE.new()
+	_plate.texture = ImageTexture.create_from_image(image)
+	_plate.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_plate)
+	move_child(_plate, _bg.get_index() + 1)
+
+func _ghost_control(ctrl: Control) -> void:
+	var empty := StyleBoxEmpty.new()
+	for state_name in ["normal", "hover", "pressed", "focus", "disabled"]:
+		ctrl.add_theme_stylebox_override(state_name, empty)
+	ctrl.add_theme_color_override("font_color", Color(1, 1, 1, 0))
+	ctrl.add_theme_color_override("font_hover_color", Color(1, 1, 1, 0.01))
+	ctrl.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 0.04))
+	ctrl.add_theme_color_override("font_focus_color", Color(1, 1, 1, 0))
+
+func _place_control(ctrl: Control, rect: Rect2) -> void:
+	var vp := _LAYOUT.viewport_size(self)
+	var w := minf(maxf(rect.size.x, _LAYOUT.MIN_TOUCH_HEIGHT), maxf(_LAYOUT.MIN_TOUCH_HEIGHT, vp.x - 2.0))
+	var h := minf(maxf(rect.size.y, _LAYOUT.MIN_TOUCH_HEIGHT), maxf(_LAYOUT.MIN_TOUCH_HEIGHT, vp.y - 2.0))
+	var x := clampf(rect.position.x, 0.0, maxf(0.0, vp.x - w))
+	var y := clampf(rect.position.y, 0.0, maxf(0.0, vp.y - h))
+	ctrl.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	ctrl.position = Vector2(x, y)
+	ctrl.size = Vector2(w, h)
+	ctrl.custom_minimum_size = Vector2(w, h)
+	ctrl.modulate = Color(1, 1, 1, 0)
+
+func _layout_over_reference() -> void:
+	if _plate == null:
+		return
+	_vbox.visible = false
+	if _glass != null:
+		_glass.visible = false
+	if _particles != null:
+		_particles.visible = false
+	if _rp_pill != null:
+		var live_shards: bool = _rp_pill_label != null and _rp_pill_label.text != "0"
+		_rp_pill.visible = live_shards
+		if live_shards:
+			_rp_pill.modulate = Color(1, 1, 1, 1)
+			_place_control(_rp_pill, _plate.map_norm(0.78, 0.025, 0.18, 0.055))
+	if _version_lbl != null:
+		_version_lbl.visible = false
+	if _mute_pill != null:
+		_mute_pill.visible = false
+	for btn in [_play_btn, _base_btn, _settings_btn]:
+		if btn.get_parent() != self:
+			btn.reparent(self)
+		_ghost_control(btn)
+	if _mute_btn != null:
+		if _mute_btn.get_parent() != self:
+			_mute_btn.reparent(self)
+		_ghost_control(_mute_btn)
+		_place_control(_mute_btn, _plate.map_norm(0.028, 0.028, 0.10, 0.055))
+	_place_control(_play_btn, _plate.map_norm(0.237, 0.530, 0.421, 0.080))
+	_place_control(_base_btn, _plate.map_norm(0.310, 0.640, 0.280, 0.068))
+	_place_control(_settings_btn, _plate.map_norm(0.310, 0.725, 0.280, 0.068))
+	move_child(_plate, _bg.get_index() + 1)
+	_plate.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_plate.offset_left = 0.0
+	_plate.offset_top = 0.0
+	_plate.offset_right = 0.0
+	_plate.offset_bottom = 0.0
+	_plate.queue_redraw()
+	var retry := find_child("RetrySaveBtn", true, false) as Button
+	if retry != null:
+		if retry.get_parent() != self:
+			retry.reparent(self)
+		_place_control(retry, _plate.map_norm(0.28, 0.46, 0.44, 0.07))
+		retry.modulate = Color(1, 1, 1, 1)
+		_THEME.apply_button(retry, "primary")
 
 # ── Gap 1: Ambient particles ───────────────────────────────────────────────────
 

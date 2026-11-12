@@ -9,6 +9,8 @@ const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BRAND := preload("res://ui/theme/BrandCopy.gd")
 const _BACKDROP := preload("res://rendering/backdrop/CorporateDistrictBackdrop.gd")
+const _PLATE := preload("res://rendering/backdrop/ReferencePlate.gd")
+const _MAP_PLATE := "res://art/references/authoritative/nov-2026/reference_b_map_select.png"
 const _MapScenicThumb := preload("res://rendering/ui/MapScenicThumb.gd")
 const _CARD_ORDER: Array[int] = [2, 1, 0]
 const _DIFFICULTY_LABELS: Array[String] = ["", "Easy", "Medium", "Hard"]
@@ -31,6 +33,7 @@ var _mod_scroll: ScrollContainer = null
 var _mod_strip: HBoxContainer = null
 var _mod_rp_lbl: Label = null
 var _mod_btns: Dictionary = {}   # mod_id -> Button
+var _plate = null
 
 func _ready() -> void:
 	_add_backdrop()
@@ -140,14 +143,25 @@ func _refresh_mod_strip() -> void:
 			_mod_rp_lbl.text = _BRAND.shards_mult(stacked, true)
 
 func _add_backdrop() -> void:
+	var image := Image.new()
+	if image.load(_MAP_PLATE) == OK:
+		_plate = _PLATE.new()
+		_plate.texture = ImageTexture.create_from_image(image)
+		_plate.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(_plate)
+		var bg := get_node_or_null("BG")
+		if bg is CanvasItem:
+			(bg as CanvasItem).visible = false
+			move_child(_plate, bg.get_index() + 1)
+		return
 	var backdrop := _BACKDROP.new()
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(backdrop)
-	var bg := get_node_or_null("BG")
-	if bg is CanvasItem:
-		(bg as CanvasItem).visible = false
-		move_child(backdrop, bg.get_index() + 1)
+	var bg_fallback := get_node_or_null("BG")
+	if bg_fallback is CanvasItem:
+		(bg_fallback as CanvasItem).visible = false
+		move_child(backdrop, bg_fallback.get_index() + 1)
 	else:
 		move_child(backdrop, 0)
 
@@ -452,6 +466,60 @@ func _apply_layout() -> void:
 						desc_lbl.visible = show_desc and not ultra_compact
 						play_btn.custom_minimum_size = Vector2(0.0, play_h)
 						play_btn.add_theme_font_size_override("font_size", 14 if ultra_compact else 16)
+	_layout_over_reference()
+
+func _layout_over_reference() -> void:
+	if _plate == null:
+		return
+	_title.modulate = Color(1, 1, 1, 0)
+	for child in _card_container.get_children():
+		if child is CanvasItem:
+			(child as CanvasItem).modulate = Color(1, 1, 1, 0)
+			if child is Control:
+				(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if _back_btn.get_parent() != self:
+		_back_btn.reparent(self)
+	_ghost_control(_back_btn)
+	_place_control(_back_btn, _plate.map_norm(0.018, 0.025, 0.10, 0.060))
+	var norms: Array = [
+		[0.072, 0.808, 0.230, 0.064],
+		[0.390, 0.808, 0.230, 0.064],
+		[0.694, 0.808, 0.236, 0.064],
+	]
+	for i in _play_btns.size():
+		var play_btn: Button = _play_btns[i]
+		if play_btn.get_parent() != self:
+			play_btn.reparent(self)
+		_ghost_control(play_btn)
+		var n: Array = norms[mini(i, norms.size() - 1)]
+		_place_control(play_btn, _plate.map_norm(float(n[0]), float(n[1]), float(n[2]), float(n[3])))
+	if _shards_pill != null:
+		_shards_pill.visible = _shards_lbl != null and _shards_lbl.text != "0"
+	if _plate.get_parent() == self:
+		move_child(_plate, 1)
+		_plate.size = _LAYOUT.viewport_size(self)
+		_plate.queue_redraw()
+
+func _ghost_control(ctrl: Control) -> void:
+	var empty := StyleBoxEmpty.new()
+	for state_name in ["normal", "hover", "pressed", "focus", "disabled"]:
+		ctrl.add_theme_stylebox_override(state_name, empty)
+	ctrl.add_theme_color_override("font_color", Color(1, 1, 1, 0))
+	ctrl.add_theme_color_override("font_hover_color", Color(1, 1, 1, 0.01))
+	ctrl.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 0.04))
+	ctrl.add_theme_color_override("font_focus_color", Color(1, 1, 1, 0))
+
+func _place_control(ctrl: Control, rect: Rect2) -> void:
+	var vp := _LAYOUT.viewport_size(self)
+	var w := minf(maxf(rect.size.x, _LAYOUT.MIN_TOUCH_HEIGHT), maxf(_LAYOUT.MIN_TOUCH_HEIGHT, vp.x - 2.0))
+	var h := minf(maxf(rect.size.y, _LAYOUT.MIN_TOUCH_HEIGHT), maxf(_LAYOUT.MIN_TOUCH_HEIGHT, vp.y - 2.0))
+	var x := clampf(rect.position.x, 0.0, maxf(0.0, vp.x - w))
+	var y := clampf(rect.position.y, 0.0, maxf(0.0, vp.y - h))
+	ctrl.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	ctrl.position = Vector2(x, y)
+	ctrl.size = Vector2(w, h)
+	ctrl.custom_minimum_size = Vector2(w, h)
+	ctrl.modulate = Color(1, 1, 1, 0)
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
