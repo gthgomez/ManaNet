@@ -5,9 +5,13 @@ const _MAPS_DATA := preload("res://data/maps.gd")
 const _LAYOUT := preload("res://ui/layout/ResponsiveLayout.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
 const _BRAND := preload("res://ui/theme/BrandCopy.gd")
-const _BACKDROP := preload("res://rendering/backdrop/TechBackdrop.gd")
+const _BACKDROP := preload("res://rendering/backdrop/CorporateDistrictBackdrop.gd")
 const _COLOR_SFX := Color(0.55, 0.80, 0.95, 0.90)
 const _COLOR_MUTED := Color(0.70, 0.38, 0.42, 0.90)
+const _MENU_ICON_CYBER := "res://assets/sprites/production/ui/cyber_deck.svg"
+const _MENU_ICON_SETTINGS := "res://assets/sprites/production/ui/settings.svg"
+const _MENU_ICON_SHARDS := "res://assets/sprites/production/ui/shards.svg"
+const _MENU_ICON_SPEAKER := "res://assets/sprites/production/ui/speaker.svg"
 
 @onready var _vbox: VBoxContainer   = $VBox
 @onready var _title: TextureRect      = $VBox/Title
@@ -26,7 +30,8 @@ var _particles: CPUParticles2D = null
 # Gap 2 — glass panel behind VBox
 var _glass: Panel = null
 # Gap 4 — mute toggle
-var _mute_btn: Button = null
+var _mute_btn: CheckButton = null
+var _mute_pill: PanelContainer = null
 # Gap 5 — title decorative rule
 var _title_rule: ColorRect = null
 # Gap 8 — play micro-context
@@ -36,6 +41,7 @@ var _rp_pill: PanelContainer = null
 var _rp_pill_label: Label = null
 var _version_lbl: Label = null
 var _last_run_lbl: Label = null
+var _sentinel_lbl: Label = null
 
 # Tower showcase (sine float in _process)
 var _tower_showcase: Array = []
@@ -48,12 +54,13 @@ func _ready() -> void:
 	_title.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 
 	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bg.color = Color(0, 0, 0, 0)
 
 	var backdrop := _BACKDROP.new()
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(backdrop)
-	move_child(backdrop, 0)
+	move_child(backdrop, _bg.get_index() + 1)
 
 	# The 96px mage SVG carries an opaque plate and reads as a dark rectangle when
 	# scaled up. The tower showcase below is the cyber-arcana decoration instead.
@@ -66,6 +73,7 @@ func _ready() -> void:
 	# VBox content additions
 	_add_title_rule()       # Gap 5
 	_add_product_wordmark() # ManaNet identity above the locked logo asset
+	_add_sentinel_status()
 	_add_last_run_label()   # Previous pass + Gap 6
 	_add_play_context_label() # Gap 8
 
@@ -126,8 +134,7 @@ func _apply_visuals() -> void:
 		else:
 			_bg.material = null
 
-	_THEME.apply_label(_subtitle, "muted")
-	_subtitle.text = _BRAND.FANTASY_SUBTITLE
+	_subtitle.visible = false
 	# The shipped title texture still reads "Tactical Tower Defense". It stays
 	# in the project, but it is not part of the menu composition.
 	_title.visible = false
@@ -135,15 +142,15 @@ func _apply_visuals() -> void:
 	if _product_name != null:
 		_product_name.text = _BRAND.PRODUCT_NAME
 		_THEME.apply_label(_product_name, "heading")
-		_product_name.add_theme_font_size_override("font_size", 28 if viewport_is_compact() else 56)
-		_product_name.add_theme_color_override("font_color", Color(0.72, 0.96, 1.0))
+		_product_name.add_theme_font_size_override("font_size", 28 if viewport_is_compact() else 52)
+		_product_name.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
 		_product_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_product_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_product_name.custom_minimum_size = Vector2(0.0, 34.0 if viewport_is_compact() else 64.0)
 	if _product_tagline != null:
-		_product_tagline.text = _BRAND.PRODUCT_TAGLINE
+		_product_tagline.text = "— %s —" % _BRAND.PRODUCT_TAGLINE
 		_THEME.apply_label(_product_tagline, "muted")
-		_product_tagline.add_theme_font_size_override("font_size", 10 if viewport_is_compact() else 12)
+		_product_tagline.add_theme_font_size_override("font_size", 10 if viewport_is_compact() else 13)
 		_product_tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_product_tagline.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_product_tagline.custom_minimum_size = Vector2(0.0, 14.0 if viewport_is_compact() else 18.0)
@@ -151,6 +158,11 @@ func _apply_visuals() -> void:
 	_THEME.apply_button(_play_btn, "primary")
 	_THEME.apply_button(_base_btn, "secondary")
 	_THEME.apply_button(_settings_btn, "secondary")
+	_base_btn.icon = load(_MENU_ICON_CYBER)
+	_settings_btn.icon = load(_MENU_ICON_SETTINGS)
+	for row_btn in [_base_btn, _settings_btn]:
+		row_btn.add_theme_constant_override("icon_max_width", 22)
+		row_btn.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 	# Gap 9 — Accessibility: tooltip_text and FOCUS_ALL on all interactive controls
 	_play_btn.tooltip_text     = "Start a new network defense run"
@@ -177,6 +189,13 @@ func _apply_visuals() -> void:
 			t.tween_callback(func(): _THEME.trigger_glint(_base_btn)).set_delay(2.0)
 
 	_refresh_mute_btn()
+	if _title_rule != null:
+		_title_rule.visible = false
+	if _play_context_lbl != null:
+		_play_context_lbl.visible = false
+	var sep := _vbox.get_node_or_null("Sep")
+	if sep is CanvasItem:
+		(sep as CanvasItem).visible = false
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
 
@@ -246,14 +265,14 @@ func _apply_layout() -> void:
 	_base_btn.custom_minimum_size     = Vector2(0.0, row2_h)
 	_settings_btn.custom_minimum_size = Vector2(0.0, row2_h)
 
-	# Gap 2 — glass panel housing the content area
 	_ensure_glass()
-	var glass_rect := Rect2(
-			Vector2(x - 20.0, y - 12.0),
-			Vector2(width + 40.0, height + 24.0))
-	_LAYOUT.apply_rect(_glass, glass_rect)
-	if _glass.material is ShaderMaterial:
-		_glass.material.set_shader_parameter("panel_size", glass_rect.size)
+	if _glass != null:
+		var glass_rect := Rect2(
+				Vector2(x - 20.0, y - 12.0),
+				Vector2(width + 40.0, height + 24.0))
+		_LAYOUT.apply_rect(_glass, glass_rect)
+		if _glass.material is ShaderMaterial:
+			_glass.material.set_shader_parameter("panel_size", glass_rect.size)
 	for tr in _tower_showcase:
 		move_child(tr, _vbox.get_index())
 
@@ -266,8 +285,8 @@ func _apply_layout() -> void:
 		_rp_pill.position = Vector2(viewport.x - 118.0 - margin, top + 6.0)
 
 	# Gap 4 — mute toggle — top-left corner, symmetric with Shards pill
-	if _mute_btn:
-		_mute_btn.position = Vector2(margin + 4.0, top + 6.0)
+	if _mute_pill:
+		_mute_pill.position = Vector2(margin + 4.0, top + 6.0)
 
 	# Gap 3 — version label — bottom-left corner
 	if _version_lbl:
@@ -334,14 +353,8 @@ func _add_particles() -> void:
 # ── Gap 2: Glass panel (instantiated on first layout call) ─────────────────────
 
 func _ensure_glass() -> void:
-	if _glass != null:
-		return
-	_glass = Panel.new()
-	_glass.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_glass)
-	# Just before VBox so glass renders behind it but above backdrop/BG
-	move_child(_glass, _vbox.get_index())
-	_THEME.apply_glass_panel(_glass)
+	# Reference A keeps the center clear; no frosted panel behind the stack.
+	pass
 
 # ── Gap 3: Dynamic version (+ fallback to "v7.1.2") ───────────────────────────
 
@@ -358,49 +371,49 @@ func _add_version_label() -> void:
 # ── Gap 4: Mute toggle ────────────────────────────────────────────────────────
 
 func _add_mute_toggle() -> void:
-	_mute_btn = Button.new()
-	_mute_btn.custom_minimum_size = Vector2(_LAYOUT.MIN_TOUCH_HEIGHT, _LAYOUT.MIN_TOUCH_HEIGHT)
-	_mute_btn.focus_mode          = Control.FOCUS_ALL
-	_mute_btn.tooltip_text        = "Toggle audio mute"
-	_mute_btn.add_theme_font_size_override("font_size", 11)
-	_mute_btn.add_theme_color_override("font_color",
-			Color(_THEME.MUTED.r, _THEME.MUTED.g, _THEME.MUTED.b, 0.72))
-	_mute_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 0.92))
-	# Quiet but unmistakably a button: a low-alpha navy pill, not bare text.
-	var sb_normal := _THEME.style_box(Color(0.05, 0.08, 0.15, 0.72),
-			Color(0.29, 0.565, 0.851, 0.42), 1, 8, 0, 2)
-	var sb_hover := StyleBoxFlat.new()
-	sb_hover.bg_color = Color(0.09, 0.14, 0.24, 0.90)
-	sb_hover.border_color = Color(0.29, 0.565, 0.851, 0.8)
-	sb_hover.set_border_width_all(1)
-	sb_hover.set_corner_radius_all(8)
-	var sb_press := StyleBoxFlat.new()
-	sb_press.bg_color = Color(0.03, 0.05, 0.10, 0.95)
-	sb_press.set_corner_radius_all(8)
-	_mute_btn.add_theme_stylebox_override("normal",   sb_normal)
-	_mute_btn.add_theme_stylebox_override("pressed",  sb_press)
-	_mute_btn.add_theme_stylebox_override("focus",    sb_normal)
-	_mute_btn.add_theme_stylebox_override("hover",    sb_hover)
-	_mute_btn.add_theme_stylebox_override("disabled", sb_normal)
-	_mute_btn.pressed.connect(_on_mute_toggle)
-	add_child(_mute_btn)
+	_mute_pill = PanelContainer.new()
+	_mute_pill.custom_minimum_size = Vector2(96.0, 34.0)
+	var sb := _THEME.style_box(Color(0.05, 0.08, 0.15, 0.82), Color(0.29, 0.56, 0.85, 0.5), 1, 16, 0, 4)
+	_mute_pill.add_theme_stylebox_override("panel", sb)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	_mute_pill.add_child(row)
+	var speaker := TextureRect.new()
+	speaker.texture = load(_MENU_ICON_SPEAKER)
+	speaker.custom_minimum_size = Vector2(16.0, 16.0)
+	speaker.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	speaker.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	row.add_child(speaker)
+	var cap := Label.new()
+	cap.text = "SFX"
+	cap.add_theme_font_size_override("font_size", 11)
+	cap.add_theme_color_override("font_color", Color(0.75, 0.85, 0.95))
+	cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(cap)
+	_mute_btn = CheckButton.new()
+	_mute_btn.text = ""
+	_mute_btn.custom_minimum_size = Vector2(44.0, 28.0)
+	_mute_btn.focus_mode = Control.FOCUS_ALL
+	_mute_btn.tooltip_text = "Toggle sound effects"
+	_mute_btn.toggled.connect(_on_mute_toggled)
+	row.add_child(_mute_btn)
+	add_child(_mute_pill)
 	_refresh_mute_btn()
 
 func _refresh_mute_btn() -> void:
 	if _mute_btn == null:
 		return
 	var is_muted: bool = Progression.get_settings().get("audio_muted", false)
-	# The project font has no emoji glyphs; text states are unambiguous.
-	_mute_btn.text = "MUTED" if is_muted else "SFX"
-	_mute_btn.add_theme_color_override("font_color",
-			_COLOR_MUTED if is_muted else _COLOR_SFX)
+	_mute_btn.set_pressed_no_signal(not is_muted)
+	var on_color: Color = Color(_THEME.GOLD.r, _THEME.GOLD.g, _THEME.GOLD.b, 0.95)
+	var off_color: Color = Color(0.22, 0.28, 0.38, 1.0)
+	_mute_btn.add_theme_color_override("font_color", on_color if not is_muted else _COLOR_MUTED)
 	var bus_idx := AudioServer.get_bus_index("Master")
 	if bus_idx >= 0:
 		AudioServer.set_bus_mute(bus_idx, is_muted)
 
-func _on_mute_toggle() -> void:
-	var is_muted: bool = Progression.get_settings().get("audio_muted", false)
-	Progression.set_setting("audio_muted", not is_muted)
+func _on_mute_toggled(sfx_on: bool) -> void:
+	Progression.set_setting("audio_muted", not sfx_on)
 	_refresh_mute_btn()
 	JuiceManager.configure_from_progression()
 
@@ -430,6 +443,16 @@ func _add_pending_save_button() -> void:
 	)
 	_vbox.add_child(btn)
 	_vbox.move_child(btn, _play_btn.get_parent().get_index())
+
+func _add_sentinel_status() -> void:
+	_sentinel_lbl = Label.new()
+	_sentinel_lbl.text = "▼ " + _BRAND.sentinel_status_line()
+	_sentinel_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_sentinel_lbl.add_theme_font_size_override("font_size", 11)
+	_sentinel_lbl.add_theme_color_override("font_color", Color(0.35, 0.95, 0.55, 0.92))
+	_sentinel_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vbox.add_child(_sentinel_lbl)
+	_vbox.move_child(_sentinel_lbl, _product_tagline.get_index() + 1)
 
 func _add_product_wordmark() -> void:
 	_product_name = Label.new()
@@ -502,53 +525,9 @@ func _update_last_run_label() -> void:
 # ── Gap 7 + previous-pass: Tower showcase with per-tower tints ────────────────
 
 func _add_tower_showcase() -> void:
-	if OS.has_feature("android") and not _THEME.shader_effects_enabled():
-		return
-	var paths := [
-		"res://assets/sprites/towers/archer.svg",
-		"res://assets/sprites/towers/cannon.svg",
-		"res://assets/sprites/towers/frost.svg",
-		"res://assets/sprites/towers/lightning.svg",
-	]
-	# Each tower fades in at its gameplay accent color — teaches the color vocabulary
-	var tints := [
-		Color(0.92, 0.84, 0.62, 0.82),  # archer    — warm parchment
-		Color(0.88, 0.58, 0.32, 0.82),  # cannon    — burnt orange
-		Color(0.52, 0.82, 1.00, 0.82),  # frost     — ice blue
-		Color(0.90, 0.96, 0.38, 0.82),  # lightning — electric yellow
-	]
+	# Foreground towers are painted by CorporateDistrictBackdrop.
 	_tower_showcase.clear()
 	_tower_base_y.clear()
-	for i in paths.size():
-		if not ResourceLoader.exists(paths[i], "Texture2D"):
-			continue
-		var tr := TextureRect.new()
-		tr.texture      = load(paths[i])
-		tr.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
-		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		tr.modulate     = Color(1.0, 1.0, 1.0, 0.0)
-
-		if _THEME.shader_effects_enabled():
-			var mat := ShaderMaterial.new()
-			mat.shader = preload("res://assets/shaders/hologram.gdshader")
-			mat.set_shader_parameter("holo_color", tints[i])
-			mat.set_shader_parameter("scanline_speed", 1.4)
-			mat.set_shader_parameter("scanline_scale", 110.0)
-			mat.set_shader_parameter("flicker_amount", 0.05)
-			tr.material = mat
-		else:
-			tr.material = null
-			tr.modulate = Color(tints[i].r, tints[i].g, tints[i].b, 0.0)
-
-		add_child(tr)
-		# Keep towers behind VBox in draw order
-		move_child(tr, _vbox.get_index())
-		_tower_showcase.append(tr)
-		_tower_base_y.append(0.0)
-		# Staggered fade-in, arriving at full opacity
-		var fade := tr.create_tween()
-		fade.tween_property(tr, "modulate:a", tints[i].a, 0.5).set_delay(0.35 + i * 0.11)
 
 # ── Gap 8: Play button micro-context ──────────────────────────────────────────
 
@@ -638,6 +617,12 @@ func _add_rp_pill() -> void:
 	hbox.add_theme_constant_override("separation", 5)
 	_rp_pill.add_child(hbox)
 
+	var shard_icon := TextureRect.new()
+	shard_icon.texture = load(_MENU_ICON_SHARDS)
+	shard_icon.custom_minimum_size = Vector2(16.0, 16.0)
+	shard_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	shard_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	hbox.add_child(shard_icon)
 	var icon_lbl := Label.new()
 	icon_lbl.text = _BRAND.CURRENCY_META
 	icon_lbl.add_theme_color_override("font_color", _THEME.GOLD)

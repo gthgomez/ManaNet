@@ -15,6 +15,14 @@ const _PLACEMENT_HINTS := preload("res://ui/controllers/PlacementHints.gd")
 const _RUN_SETUP := preload("res://ui/controllers/RunSetup.gd")
 const _WAVE_SHOP_CTRL := preload("res://ui/controllers/WaveShopModalController.gd")
 const _DETAILS_CTRL := preload("res://ui/controllers/TowerDetailsOverlayController.gd")
+const _TOWER_SPRITE_PATHS: Dictionary = {
+	"archer": "res://assets/sprites/production/towers/plasma_repeater.svg",
+	"mage": "res://assets/sprites/production/towers/flux_crucible.svg",
+	"cannon": "res://assets/sprites/production/towers/nova_bombard.svg",
+	"sniper": "res://assets/sprites/production/towers/rail_ballista.svg",
+	"frost": "res://assets/sprites/production/towers/cryo_obelisk.svg",
+	"lightning": "res://assets/sprites/production/towers/tesla_spire.svg",
+}
 const _MAP_BG_PATHS: Dictionary = {
 	0: "res://assets/sprites/production/environment/s_curve.svg",
 	1: "res://assets/sprites/production/environment/gauntlet.svg",
@@ -48,6 +56,9 @@ var _target_btn: Button = null
 var _msg_label: Label   = null
 var _gold_label: Label  = null
 var _lives_label: Label = null
+var _integrity_bar: ProgressBar = null
+var _integrity_max: int = 10
+const _TOWER_RANGE_UI_SCALE: float = 37.0
 var _wave_label: Label  = null
 var _tower_panel: PanelContainer = null
 var _tower_panel_box: VBoxContainer = null
@@ -80,7 +91,13 @@ var _placement_confirm_title: Label = null
 var _placement_confirm_btn: Button = null
 var _placement_cancel_btn: Button = null
 var _top_bar: HBoxContainer = null
-var _speed_bar: HBoxContainer = null
+var _top_bar_bg: ColorRect = null
+var _hud_brand_lbl: Label = null
+var _hud_sentinel_lbl: Label = null
+var _dock_header_lbl: Label = null
+var _dock_header_icon: TextureRect = null
+var _dock_panel: PanelContainer = null
+var _speed_strip: HBoxContainer = null
 var _shop_bar: HBoxContainer = null
 var _shop_scroll: ScrollContainer = null
 var _modifier_badge: Label = null
@@ -175,6 +192,7 @@ func _ready() -> void:
 	input_ctrl.view_state = view_state
 
 	_prev_lives = game_state.lives
+	_integrity_max = maxi(1, game_state.lives)
 	_prev_wave = game_state.wave
 	_prev_kills = game_state.stat_enemies_killed
 	_prev_wave_shop_pending = game_state.wave_shop_pending
@@ -219,22 +237,63 @@ func _build_hud() -> void:
 	# and is not affected by screen shake.
 
 	# ---- Top bar ----
+	_top_bar_bg = ColorRect.new()
+	_top_bar_bg.color = Color(0.02, 0.04, 0.08, 0.88)
+	_top_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(_top_bar_bg)
 	_top_bar = HBoxContainer.new()
 	_top_bar.add_theme_constant_override("separation", 12)
 	hud_layer.add_child(_top_bar)
+
+	var brand_col := VBoxContainer.new()
+	brand_col.add_theme_constant_override("separation", 0)
+	brand_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud_brand_lbl = Label.new()
+	_hud_brand_lbl.text = _BRAND.PRODUCT_NAME
+	_hud_brand_lbl.add_theme_font_size_override("font_size", 16)
+	_hud_brand_lbl.add_theme_color_override("font_color", Color(0.92, 0.95, 1.0))
+	brand_col.add_child(_hud_brand_lbl)
+	_hud_sentinel_lbl = Label.new()
+	_hud_sentinel_lbl.text = "▼ " + _BRAND.sentinel_hud_line()
+	_hud_sentinel_lbl.add_theme_font_size_override("font_size", 10)
+	_hud_sentinel_lbl.add_theme_color_override("font_color", Color(0.35, 0.95, 0.55, 0.9))
+	brand_col.add_child(_hud_sentinel_lbl)
+	_top_bar.add_child(brand_col)
 
 	_wave_label = Label.new()
 	_wave_label.text = "Wave 1 / 15"
 	_THEME.apply_label(_wave_label, "body")
 	_top_bar.add_child(_wave_label)
 
+	var integrity_col := VBoxContainer.new()
+	integrity_col.add_theme_constant_override("separation", 2)
+	integrity_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	integrity_col.custom_minimum_size.x = 88.0
+	var integrity_header := HBoxContainer.new()
+	integrity_header.add_theme_constant_override("separation", 4)
+	var integrity_icon := TextureRect.new()
+	integrity_icon.texture = _ui_icon("integrity")
+	integrity_icon.custom_minimum_size = Vector2(14.0, 14.0)
+	integrity_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	integrity_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	integrity_header.add_child(integrity_icon)
 	_lives_label = Label.new()
-	_lives_label.text = _BRAND.integrity(10)
+	_lives_label.text = _BRAND.integrity_percent(10, 10)
 	_THEME.apply_label(_lives_label, "body")
-	_top_bar.add_child(_lives_label)
+	integrity_header.add_child(_lives_label)
+	integrity_col.add_child(integrity_header)
+	_integrity_bar = ProgressBar.new()
+	_integrity_bar.show_percentage = false
+	_integrity_bar.custom_minimum_size = Vector2(72.0, 6.0)
+	_integrity_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_integrity_bar.max_value = 10.0
+	_integrity_bar.value = 10.0
+	_apply_integrity_bar_style(1.0)
+	integrity_col.add_child(_integrity_bar)
+	_top_bar.add_child(integrity_col)
 
 	_gold_label = Label.new()
-	_gold_label.text = _BRAND.credits(300)
+	_gold_label.text = _BRAND.credits_hud(300)
 	_THEME.apply_label(_gold_label, "currency")
 	_top_bar.add_child(_gold_label)
 
@@ -246,18 +305,8 @@ func _build_hud() -> void:
 	_THEME.apply_label(_msg_label, "muted")
 	_top_bar.add_child(_msg_label)
 
-	_pause_btn = Button.new()
-	_pause_btn.text = "II"
-	_pause_btn.custom_minimum_size = Vector2(48.0, _LAYOUT.min_touch_height(false))
-	_THEME.apply_button(_pause_btn, "secondary")
-	_pause_btn.pressed.connect(_on_pause_pressed)
-	_top_bar.add_child(_pause_btn)
-
-	# ---- Speed buttons ----
-	_speed_bar = HBoxContainer.new()
-	_speed_bar.add_theme_constant_override("separation", 4)
-	hud_layer.add_child(_speed_bar)
-
+	_speed_strip = HBoxContainer.new()
+	_speed_strip.add_theme_constant_override("separation", 4)
 	var speed_group := ButtonGroup.new()
 	speed_group.allow_unpress = false
 	_speed_group = speed_group
@@ -266,12 +315,20 @@ func _build_hud() -> void:
 		btn.text = "x%d" % int(mult)
 		btn.toggle_mode = true
 		btn.button_group = speed_group
-		btn.custom_minimum_size = Vector2(48.0, _LAYOUT.min_touch_height(false))
+		btn.custom_minimum_size = Vector2(44.0, _LAYOUT.min_touch_height(false))
 		_THEME.apply_button(btn, "tab")
 		btn.pressed.connect(_on_speed_pressed.bind(mult))
-		_speed_bar.add_child(btn)
+		_speed_strip.add_child(btn)
 		_speed_btns.append(btn)
 	_speed_btns[0].button_pressed = true
+	_top_bar.add_child(_speed_strip)
+
+	_pause_btn = Button.new()
+	_pause_btn.text = "II"
+	_pause_btn.custom_minimum_size = Vector2(48.0, _LAYOUT.min_touch_height(false))
+	_THEME.apply_button(_pause_btn, "secondary")
+	_pause_btn.pressed.connect(_on_pause_pressed)
+	_top_bar.add_child(_pause_btn)
 
 	# ---- Wave button ----
 	_wave_btn = Button.new()
@@ -402,6 +459,36 @@ func _build_hud() -> void:
 	_target_btn.pressed.connect(_on_target_pressed)
 	act_row.add_child(_target_btn)
 
+	_dock_panel = PanelContainer.new()
+	_dock_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dock_panel.z_index = _Z_SHOP_BAR - 1
+	var dock_bg := StyleBoxFlat.new()
+	dock_bg.bg_color = Color(0.04, 0.06, 0.10, 0.92)
+	dock_bg.border_color = Color(0.12, 0.18, 0.28, 0.85)
+	dock_bg.set_border_width_all(1)
+	dock_bg.set_corner_radius_all(10)
+	dock_bg.shadow_color = Color(0, 0, 0, 0.35)
+	dock_bg.shadow_size = 8
+	_dock_panel.add_theme_stylebox_override("panel", dock_bg)
+	hud_layer.add_child(_dock_panel)
+
+	var dock_header := HBoxContainer.new()
+	dock_header.add_theme_constant_override("separation", 6)
+	dock_header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dock_header_icon = TextureRect.new()
+	_dock_header_icon.texture = _ui_icon("patch")
+	_dock_header_icon.custom_minimum_size = Vector2(14.0, 14.0)
+	_dock_header_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_dock_header_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	dock_header.add_child(_dock_header_icon)
+	_dock_header_lbl = Label.new()
+	_dock_header_lbl.text = "DEFENDER DOCK | DEPLOY TOWERS"
+	_dock_header_lbl.add_theme_font_size_override("font_size", 11)
+	_dock_header_lbl.add_theme_color_override("font_color", Color(0.62, 0.70, 0.82, 0.96))
+	_dock_header_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dock_header.add_child(_dock_header_lbl)
+	hud_layer.add_child(dock_header)
+
 	# ---- Shop strip (ScrollContainer when cards exceed phone width) ----
 	_shop_scroll = ScrollContainer.new()
 	_shop_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
@@ -427,7 +514,11 @@ func _build_hud() -> void:
 		shop_vbox.add_theme_constant_override("separation", 2)
 		shop_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var icon := TextureRect.new()
-		icon.texture = load("res://assets/sprites/towers/%s_icon.png" % ttype)
+		var prod_path: String = str(_TOWER_SPRITE_PATHS.get(ttype, ""))
+		if prod_path != "" and ResourceLoader.exists(prod_path, "Texture2D"):
+			icon.texture = load(prod_path)
+		else:
+			icon.texture = load("res://assets/sprites/towers/%s_icon.png" % ttype)
 		if icon.texture:
 			icon.custom_minimum_size = Vector2(40, 40)
 			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -834,11 +925,16 @@ func _on_viewport_size_changed() -> void:
 
 func _draw() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
-	if _backdrop_texture != null:
-		draw_texture_rect(_backdrop_texture, Rect2(Vector2.ZERO, viewport), false)
-		draw_rect(Rect2(Vector2.ZERO, viewport), Color(0.02, 0.03, 0.06, 0.34))
-	else:
-		draw_rect(Rect2(Vector2.ZERO, viewport), _LAYOUT.BG_COLOR)
+	# Letterbox only — map environment is drawn once inside GameRenderer (900×600).
+	draw_rect(Rect2(Vector2.ZERO, viewport), _LAYOUT.BG_COLOR)
+	if _world_rect.size.x > 1.0:
+		# Subtle panels beside the playfield echo reference C framing without
+		# stretching the map SVG across the HUD.
+		if _world_rect.position.x > 0.5:
+			draw_rect(Rect2(Vector2.ZERO, Vector2(_world_rect.position.x, viewport.y)), Color(0.02, 0.04, 0.08, 1.0))
+		var right_x: float = _world_rect.end.x
+		if right_x < viewport.x - 0.5:
+			draw_rect(Rect2(Vector2(right_x, 0.0), Vector2(viewport.x - right_x, viewport.y)), Color(0.02, 0.04, 0.08, 1.0))
 
 func _apply_responsive_layout() -> void:
 	var viewport: Vector2 = _LAYOUT.viewport_size(self)
@@ -856,8 +952,14 @@ func _apply_responsive_layout() -> void:
 	var top_bar_h: float = maxf(_LAYOUT.min_touch_height(false), viewport.y * 0.074)
 	if _LAYOUT.is_short_height(viewport):
 		top_bar_h = maxf(_LAYOUT.min_touch_height(false), minf(top_bar_h, 44.0))
-	_LAYOUT.apply_rect(_top_bar, Rect2(Vector2(margin_l, top), Vector2(maxf(0.0, viewport.x - margin_l - margin_r), top_bar_h)))
-	_LAYOUT.apply_rect(_speed_bar, Rect2(Vector2(margin_l, top + top_bar_h + 6.0), Vector2(166.0, _LAYOUT.min_touch_height(false))))
+	var top_bar_rect := Rect2(Vector2(margin_l, top), Vector2(maxf(0.0, viewport.x - margin_l - margin_r), top_bar_h))
+	if _top_bar_bg != null:
+		_LAYOUT.apply_rect(_top_bar_bg, top_bar_rect)
+	_LAYOUT.apply_rect(_top_bar, top_bar_rect)
+
+	var brand_col: Node = _hud_brand_lbl.get_parent() if _hud_brand_lbl != null else null
+	if brand_col is CanvasItem:
+		(brand_col as CanvasItem).visible = viewport.x >= 700.0 and viewport.x > viewport.y
 
 	# Scale font sizes with viewport height so they stay readable at all sizes
 	var top_font: int = int(clampf(viewport.y * 0.026, 13.0, 18.0))
@@ -892,6 +994,21 @@ func _apply_responsive_layout() -> void:
 	var card_h: float = shop_h
 	var shop_x: float = margin_l + (viewport.x - margin_l - margin_r - shop_w) * 0.5
 	var shop_y: float = viewport.y - bottom - shop_h
+	var dock_pad: float = 10.0
+	var dock_header_h: float = 18.0
+	var dock_block_h: float = shop_h + dock_header_h + dock_pad * 2.0 + 6.0
+	var dock_y: float = shop_y - dock_header_h - dock_pad - 4.0
+	if _dock_panel != null:
+		_LAYOUT.apply_rect(_dock_panel, Rect2(
+			Vector2(shop_x - dock_pad, dock_y - dock_pad),
+			Vector2(shop_w + dock_pad * 2.0, dock_block_h)))
+		_dock_panel.visible = shop_w > 200.0
+	if _dock_header_lbl != null:
+		var header_root: Node = _dock_header_lbl.get_parent()
+		if header_root is Control:
+			_LAYOUT.apply_rect(header_root as Control, Rect2(
+				Vector2(shop_x, dock_y), Vector2(shop_w, dock_header_h)))
+			(header_root as CanvasItem).visible = shop_w > 200.0
 	_shop_bar.add_theme_constant_override("separation", int(shop_sep))
 	for ttype in _shop_btns.keys():
 		var shop_btn: Button = _shop_btns[ttype]
@@ -927,13 +1044,12 @@ func _apply_responsive_layout() -> void:
 	if _wave_progress_bar != null:
 		_LAYOUT.apply_rect(_wave_progress_bar, Rect2(Vector2((viewport.x - wave_size.x) * 0.5, wave_y + wave_size.y + 2.0), Vector2(wave_size.x, 5.0)))
 
-	# Position modifier badge right of speed bar if present
 	if _modifier_badge != null:
-		var badge_x: float = margin_l + 166.0 + 8.0
-		var badge_y: float = top + top_bar_h + 9.0
+		var badge_x: float = maxf(margin_l, viewport.x - margin_r - 200.0)
+		var badge_y: float = top + (top_bar_h - _modifier_badge.size.y) * 0.5
 		_modifier_badge.position = Vector2(badge_x, badge_y)
 
-	# Instruction banner: below the speed strip, never over x1/x2/x3.
+	# Instruction banner below top bar; speed controls live in the bar on wide layouts.
 	if _instruction_banner != null:
 		var banner_w: float = minf(560.0, maxf(280.0, viewport.x - margin_l - margin_r))
 		var short_ui: bool = _LAYOUT.is_small(viewport) or _LAYOUT.is_short_height(viewport)
@@ -1241,12 +1357,17 @@ func _update_hud(now_ms: int) -> void:
 			_wave_progress_bar.value = ratio
 			_apply_wave_progress_style(ratio)
 
-	var lives_txt: String = _BRAND.integrity(game_state.lives)
+	var int_ratio: float = float(game_state.lives) / float(maxi(1, _integrity_max))
+	var lives_txt: String = _BRAND.integrity_percent(game_state.lives, _integrity_max)
 	if _lives_label.text != lives_txt:
 		_lives_label.text = lives_txt
 		_juice_label(_lives_label)
+	if _integrity_bar != null:
+		_integrity_bar.max_value = float(_integrity_max)
+		_integrity_bar.value = float(game_state.lives)
+		_apply_integrity_bar_style(int_ratio)
 
-	var gold_txt: String = _BRAND.credits(game_state.gold)
+	var gold_txt: String = _BRAND.credits_hud(game_state.gold)
 	if _gold_label.text != gold_txt:
 		_gold_label.text = gold_txt
 		_juice_label(_gold_label)
@@ -1265,6 +1386,8 @@ func _update_hud(now_ms: int) -> void:
 	var toast: String = view_state.get_toast(now_ms)
 	var vp_now: Vector2 = _LAYOUT.viewport_size(self)
 	var compact_hud: bool = vp_now.x < 700.0 or vp_now.y < 430.0
+	if _integrity_bar != null:
+		_integrity_bar.visible = not compact_hud
 
 	# Instruction banner: persistent instructions have priority over contextual
 	# hints. Placement feedback stays visible while pending so an invalid ghost
@@ -1313,7 +1436,8 @@ func _update_hud(now_ms: int) -> void:
 		_shop_scroll.visible = not blocking_menu_visible and not _compact_tower_panel
 	elif _shop_bar != null:
 		_shop_bar.visible = not blocking_menu_visible
-	_speed_bar.visible = not _compact_tower_panel
+	if _speed_strip != null:
+		_speed_strip.visible = not _compact_tower_panel
 
 	# Wave button visibility
 	_wave_btn.visible = game_state.wave_ready and game_state.game_state == "playing" \
@@ -1345,8 +1469,10 @@ func _update_hud(now_ms: int) -> void:
 			_tower_panel_box.custom_minimum_size.x = maxf(208.0, _tower_panel.size.x - pad * 2.0 - 8.0)
 		var pnames := ["Top","Middle","Bottom"]
 		_tower_name_label.text = "%s  Lv.%d" % [sel.tower_name, sel.level]
-		_tower_stats_label.text = "DMG %d   RNG %d   CD %dms" % [
-			sel.get_effective_damage(game_state.sim_now()), int(sel.effective_range()), sel.effective_cooldown()]
+		var dmg: int = sel.get_effective_damage(game_state.sim_now())
+		var rate: float = 1000.0 / float(maxi(1, sel.effective_cooldown()))
+		var rng: float = sel.effective_range() / _TOWER_RANGE_UI_SCALE
+		_tower_stats_label.text = "DMG %d   RATE %.1f/s   RANGE %.1f" % [dmg, rate, rng]
 
 		# Base Upgrade Delta
 		if sel.level < 5:
@@ -1518,6 +1644,25 @@ func _apply_wave_progress_style(ratio: float) -> void:
 	fill.set_corner_radius_all(2)
 	_wave_progress_bar.add_theme_stylebox_override("background", bg)
 	_wave_progress_bar.add_theme_stylebox_override("fill", fill)
+
+func _apply_integrity_bar_style(ratio: float) -> void:
+	if _integrity_bar == null:
+		return
+	var fill_color: Color
+	if ratio >= 0.66:
+		fill_color = _THEME.CYAN
+	elif ratio >= 0.33:
+		fill_color = _THEME.GOLD
+	else:
+		fill_color = _THEME.RED
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.08, 0.10, 0.14, 0.85)
+	bg.set_corner_radius_all(3)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(fill_color.r, fill_color.g, fill_color.b, 0.95)
+	fill.set_corner_radius_all(3)
+	_integrity_bar.add_theme_stylebox_override("background", bg)
+	_integrity_bar.add_theme_stylebox_override("fill", fill)
 
 func _juice_label(label: Label) -> void:
 	var tween := create_tween()
@@ -2004,6 +2149,7 @@ func _restart_current_run() -> void:
 	renderer.rebuild_path_for_map(map_data["path"])
 
 	_prev_lives = game_state.lives
+	_integrity_max = maxi(1, game_state.lives)
 	_prev_wave = game_state.wave
 	_prev_kills = game_state.stat_enemies_killed
 	_prev_wave_shop_pending = game_state.wave_shop_pending

@@ -21,6 +21,7 @@ class_name GameRenderer
 const _MAPS := preload("res://data/maps.gd")
 const _TT   := preload("res://data/tower_types.gd")
 const _THEME := preload("res://ui/theme/GameTheme.gd")
+const _CORP_SCENERY := preload("res://rendering/environment/CorporateSceneryDraw.gd")
 const _TOWER_FIDELITY_SHADER := preload("res://assets/shaders/TowerFidelity.gdshader")
 const _TOWER_CUTOUT_SHADER := preload("res://assets/shaders/tower_cutout.gdshader")
 const TOWER_SPRITE_PATHS: Dictionary = {
@@ -425,6 +426,8 @@ func _draw() -> void:
 	var shake: Vector2 = view_state.get_screen_shake_offset(now_ms) if view_state else Vector2.ZERO
 
 	_draw_background(shake)
+	var reduce_motion: bool = bool(Progression.get_settings().get("reduce_motion", false))
+	_CORP_SCENERY.draw_playfield_decor(self, shake, now_ms, reduce_motion)
 	_draw_path(shake)
 	_draw_range_circle(now_ms, shake)
 	_draw_projectile_trails(shake)
@@ -514,10 +517,9 @@ func _draw_path_direct(shake: Vector2) -> void:
 func _draw_portals(now_ms: int, shake: Vector2) -> void:
 	var map_path: Array = game_state.path
 	if map_path.size() < 2: return
-	# Start portal (Cyan Energy Vortex)
-	_draw_vortex(map_path[0] + shake, _THEME.CYAN, now_ms)
-	# End portal (Red Energy Vortex)
-	_draw_vortex(map_path[-1] + shake, _THEME.RED, now_ms)
+	# Spawn breach (red) and grid exit (cyan) — matches Nov 2026 reference C.
+	_draw_vortex(map_path[0] + shake, _THEME.RED, now_ms)
+	_draw_vortex(map_path[-1] + shake, _THEME.CYAN, now_ms)
 
 func _draw_vortex(p: Vector2, color: Color, now_ms: int) -> void:
 	var t := float(now_ms) * 0.003

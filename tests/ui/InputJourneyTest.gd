@@ -4,20 +4,23 @@ extends Node
 # This node clears itself as the current scene so later scene changes do not
 # free the harness. Desktop synthetic input does not certify Android touch.
 
-const SANDBOX := "/tmp/mananet_input_journey/profile.json"
+const SANDBOX := "user://input_journey/profile.json"
 
 var _pass: int = 0
 var _fail: int = 0
 
 func _ready() -> void:
-	DirAccess.make_dir_recursive_absolute("/tmp/mananet_input_journey")
-	if FileAccess.file_exists(SANDBOX):
-		DirAccess.remove_absolute(SANDBOX)
+	var sandbox: String = OS.get_environment("MANANET_PROFILE_PATH")
+	if sandbox == "":
+		sandbox = SANDBOX
+		DirAccess.make_dir_recursive_absolute("user://input_journey")
+		if FileAccess.file_exists(SANDBOX):
+			DirAccess.remove_absolute(SANDBOX)
 	await get_tree().process_frame
 	if get_tree().current_scene == self:
 		get_tree().current_scene = null
-	Progression.set_save_path(SANDBOX)
-	Progression.load_profile()
+	Progression.set_save_path(sandbox)
+	Progression.initialize(sandbox)
 	var profile: Dictionary = Progression.get_profile()
 	profile["banked_rp"] = 400
 	Progression.save_profile()
@@ -213,7 +216,10 @@ func _run() -> void:
 	if maps == null:
 		return
 
-	var game: Node = await _open_via(maps._play_btns[0], "GameScreen")
+	# Map cards render SPIRAL, GAUNTLET, S-CURVE — use S-Curve (index 2) so the
+	# placement spot below matches that map geometry.
+	var s_curve_play_idx: int = mini(2, maps._play_btns.size() - 1)
+	var game: Node = await _open_via(maps._play_btns[s_curve_play_idx], "GameScreen")
 	_check(game != null, "clicking a map play control opens the game")
 	if game == null:
 		return
@@ -375,7 +381,8 @@ func _run() -> void:
 	get_tree().change_scene_to_file("res://scenes/MapSelectScreen.tscn")
 	var maps2: Node = await _wait_scene("MapSelectScreen")
 	if maps2 != null:
-		var game2: Node = await _open_via(maps2._play_btns[0], "GameScreen")
+		var s_curve_idx: int = mini(2, maps2._play_btns.size() - 1)
+		var game2: Node = await _open_via(maps2._play_btns[s_curve_idx], "GameScreen")
 		_check(game2 != null and game2.game_state.gold == 310,
 			"the purchased upgrade changes the next run (gold %s)"
 			% (game2.game_state.gold if game2 != null else "none"))
@@ -384,9 +391,13 @@ func _run() -> void:
 
 func _save_failure(game: Node) -> void:
 	game.game_state.stat_waves_survived = 1
-	var blocked := "/tmp/mananet_input_journey/future.json"
+	var blocked := "user://input_journey/future.json"
+	DirAccess.make_dir_recursive_absolute("user://input_journey")
 	var original := "{\"version\":99,\"banked_rp\":5}"
 	var f := FileAccess.open(blocked, FileAccess.WRITE)
+	_check(f != null, "future-version scratch file opens for writing")
+	if f == null:
+		return
 	f.store_string(original)
 	f.close()
 	Progression.initialize(blocked)
