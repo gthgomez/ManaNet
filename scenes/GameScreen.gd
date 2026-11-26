@@ -133,6 +133,7 @@ var _dpad_pause_open: bool = false
 var _dpad_promo_open: bool = false
 var _dpad_shop_open: bool  = false
 var _dpad_place_open: bool = false
+var _last_placement_focus: Button = null
 var _world_scale: float = 1.0
 var _backdrop_texture: Texture2D = null
 var _selection_ring: SelectionRing = null
@@ -562,6 +563,7 @@ func _build_hud() -> void:
 	_confirm_placement_btn.custom_minimum_size = Vector2(108.0, _LAYOUT.min_touch_height(true))
 	_THEME.apply_button(_confirm_placement_btn, "primary")
 	_confirm_placement_btn.pressed.connect(_on_confirm_placement)
+	_confirm_placement_btn.focus_entered.connect(func(): _last_placement_focus = _confirm_placement_btn)
 	_placement_confirm_bar.add_child(_confirm_placement_btn)
 
 	_cancel_placement_btn = Button.new()
@@ -569,6 +571,7 @@ func _build_hud() -> void:
 	_cancel_placement_btn.custom_minimum_size = Vector2(108.0, _LAYOUT.min_touch_height(true))
 	_THEME.apply_button(_cancel_placement_btn, "danger")
 	_cancel_placement_btn.pressed.connect(_on_cancel_placement)
+	_cancel_placement_btn.focus_entered.connect(func(): _last_placement_focus = _cancel_placement_btn)
 	_placement_confirm_bar.add_child(_cancel_placement_btn)
 
 	# ---- Active modifier badge ----
@@ -1569,12 +1572,16 @@ func _update_hud(now_ms: int) -> void:
 	# P0: floating confirm bar only — keep center modal hidden so it never stacks over the map.
 	if _placement_confirm_modal:
 		_placement_confirm_modal.visible = false
-	if has_pending and not _dpad_place_open:
-		if _confirm_placement_btn != null:
-			_confirm_placement_btn.grab_focus()
-	elif not has_pending and _dpad_place_open:
+	# An overlay owns focus while it is open. Restore the previous placement
+	# action when the confirmation bar becomes interactive again.
+	var placement_available: bool = has_pending and not menu_overlay_visible
+	if not has_pending:
+		_last_placement_focus = null
+	if placement_available and not _dpad_place_open:
+		FocusManager.focus_first_in([_last_placement_focus, _confirm_placement_btn, _cancel_placement_btn])
+	elif not has_pending and _dpad_place_open and not menu_overlay_visible:
 		_dpad_return_focus()
-	_dpad_place_open = has_pending
+	_dpad_place_open = placement_available
 
 	# Shop button affordability — block active menus, dim-only for unaffordable towers.
 	for ttype in _shop_btns:

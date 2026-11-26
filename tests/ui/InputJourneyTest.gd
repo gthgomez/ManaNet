@@ -128,7 +128,9 @@ func _check_placement_confirmation_focus() -> void:
 	Progression.set_setting("confirm_placement_enabled", true)
 	for size: Vector2i in [Vector2i(568, 320), Vector2i(1280, 720)]:
 		_fit_viewport(size)
-		for method: String in ["focused Cancel", "focused Place", "pointer Cancel"]:
+		for method: String in [
+			"focused Cancel", "focused Place", "pointer Cancel", "resumed Cancel", "resumed Place",
+		]:
 			await _check_placement_confirmation_action(size, method)
 	Progression.set_setting("confirm_placement_enabled", previous)
 
@@ -159,21 +161,22 @@ func _check_placement_confirmation_action(size: Vector2i, method: String) -> voi
 	_check(pending, "%s: world input opens a valid choice before spending" % label)
 	if not pending:
 		return
-	if method == "focused Cancel":
-		await _joypad_tap(vp, JOY_BUTTON_DPAD_RIGHT)
-		_check(vp.gui_get_focus_owner() == game._cancel_placement_btn,
-			"%s: D-pad moves visible focus to Cancel" % label)
-		await _press_enter(vp)
-	elif method == "focused Place":
-		_check(vp.gui_get_focus_owner() == game._confirm_placement_btn,
-			"%s: initial visible focus is Place" % label)
-		await _press_enter(vp)
-	else:
+	var should_place := method.ends_with("Place")
+	if method == "pointer Cancel":
 		await _mouse_click(game._cancel_placement_btn)
+	else:
+		var expected_focus: Button = game._confirm_placement_btn if should_place else game._cancel_placement_btn
+		if not should_place:
+			await _joypad_tap(vp, JOY_BUTTON_DPAD_RIGHT)
+		_check(vp.gui_get_focus_owner() == expected_focus and expected_focus.is_visible_in_tree(),
+			"%s: placement action has visible focus" % label)
+		if method.begins_with("resumed"):
+			await _check_pause_resume_placement(game, expected_focus, label)
+		await _press_enter(vp)
 	_check(not game.view_state.has_pending_placement()
 		and not game._placement_confirm_bar.is_visible_in_tree(),
 		"%s: chosen action closes confirmation" % label)
-	if method == "focused Place":
+	if should_place:
 		var cost: int = game._shop_cost("archer")
 		_check(state.towers.size() == 1 and state.gold == before_gold - cost
 			and state.towers[0].pos.distance_to(world) < 1.0,
@@ -183,6 +186,25 @@ func _check_placement_confirmation_action(size: Vector2i, method: String) -> voi
 		_check(state.towers.is_empty() and state.gold == before_gold,
 			"%s: cancels with no tower (%d -> %d credits, %d towers)"
 			% [label, before_gold, state.gold, state.towers.size()])
+
+func _check_pause_resume_placement(game: Node, expected_focus: Button, label: String) -> void:
+	var state: GameState = game.game_state
+	var vp: Viewport = game.get_viewport()
+	var pending_pos: Vector2 = game.view_state.pending_placement_pos
+	var before_gold: int = state.gold
+	await _mouse_click(game._pause_btn)
+	_check(state.paused and game._pause_modal.is_visible_in_tree()
+		and vp.gui_get_focus_owner() == game._resume_btn
+		and state.gold == before_gold and state.towers.is_empty(),
+		"%s: Pause gives focus to Resume without spending" % label)
+	await _press_enter(vp)
+	_check(not state.paused and not game._pause_modal.is_visible_in_tree()
+		and game.view_state.has_pending_placement()
+		and game.view_state.pending_placement_pos == pending_pos
+		and state.gold == before_gold and state.towers.is_empty(),
+		"%s: Resume preserves the pending placement and credits" % label)
+	_check(vp.gui_get_focus_owner() == expected_focus and expected_focus.is_visible_in_tree(),
+		"%s: Resume restores the previously focused placement action" % label)
 
 ## Navigation fades for 0.25s, so a second input during the fade can hit a
 ## different focused control. Try the focused keyboard action once, then the
