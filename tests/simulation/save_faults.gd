@@ -425,34 +425,59 @@ func _test_future_save_blocks_later_writes() -> void:
 
 func _test_failed_quarantine_blocks_overwrite() -> void:
 	var folder := _path("locked_dir")
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(folder))
+	var absolute_folder := ProjectSettings.globalize_path(folder)
+	DirAccess.make_dir_recursive_absolute(absolute_folder)
 	var path := "%s/profile.json" % folder
 	var payload := "{ not json"
 	_write_text(path, payload)
 	var before := _bytes(path)
-	var locker: FileAccess = FileAccess.open(path, FileAccess.READ_WRITE)
-	if locker == null and OS.get_name() != "Windows":
+	var windows := OS.get_name() == "Windows"
+	var locker: FileAccess = null
+	var fault_established := true
+	var probe := "%s/rename_probe" % folder
+	var probe_target := "%s/rename_probe_moved" % folder
+	if windows:
+		locker = FileAccess.open(path, FileAccess.READ_WRITE)
+		if locker == null:
+			_chmod(path, "nodetect")
+	else:
+		# POSIX permits renaming an open file. Deny changes to its parent directory.
+		_write_text(probe, "quarantine rename probe")
 		_chmod(folder, "555")
-	elif locker == null:
-		_chmod(path, "nodetect")
-	var p = ProgressionScript.new()
-	p.initialize(path)
-	var status: Dictionary = p.persistence_status()
-	_check(status.get("state") == "failed_quarantine",
-		"unmovable corrupt save reports failed_quarantine (got %s)" % str(status.get("state")))
-	_check(p.save_profile() == false, "failed quarantine refuses a follow-up save")
-	var gs := _make_run_state("game_over")
-	var run: Dictionary = p.record_run(gs, 0, false)
-	gs.dispose()
-	_check(run.get("save_failed", false), "run record after failed quarantine does not persist")
+		var rename_error := DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(probe), ProjectSettings.globalize_path(probe_target))
+		fault_established = rename_error != OK and FileAccess.file_exists(probe) \
+			and not FileAccess.file_exists(probe_target) and _bytes(path) == before
+		_check(fault_established, "POSIX setup denies rename while the corrupt profile remains readable")
+
+	if fault_established:
+		var p = ProgressionScript.new()
+		p.initialize(path)
+		var status: Dictionary = p.persistence_status()
+		_check(status.get("state") == "failed_quarantine",
+			"unmovable corrupt save reports failed_quarantine (got %s)" % str(status.get("state")))
+		_check(p.save_profile() == false, "failed quarantine refuses a follow-up save")
+		var gs := _make_run_state("game_over")
+		var run: Dictionary = p.record_run(gs, 0, false)
+		gs.dispose()
+		_check(run.get("save_failed", false), "run record after failed quarantine does not persist")
+		p.free()
+
 	if locker != null:
 		locker.close()
-	elif OS.get_name() != "Windows":
-		_chmod(folder, "755")
-	else:
+	elif windows:
 		_chmod(path, "755")
-	_check(_bytes(path) == before, "failed quarantine left the original bytes in place")
-	p.free()
+	else:
+		_chmod(folder, "755")
+	if fault_established:
+		_check(_bytes(path) == before, "failed quarantine left the original bytes in place")
+	_remove(probe)
+	_remove(probe_target)
+	_remove(path)
+	for filename in DirAccess.get_files_at(folder):
+		if filename.begins_with("profile.json.corrupt-"):
+			_remove("%s/%s" % [folder, filename])
+	_check(DirAccess.remove_absolute(absolute_folder) == OK, "temporary quarantine fixture is removed")
 
 func _test_unreadable_profile_blocks_overwrite() -> void:
 	var path := _path("unreadable.json")
