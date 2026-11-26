@@ -336,12 +336,17 @@ func _default_profile() -> Dictionary:
 
 func load_profile() -> Dictionary:
 	_initialized = true
+	var preserve_parked_run := not _pending_run.is_empty() and _needs_parked_profile_recheck()
 	# A crash between parking the old file and committing the temp file leaves
 	# the previous profile at .bak and no live file. Put it back. An orphan
 	# .tmp is never adopted.
 	var restore_error := _restore_parked_backup_if_needed()
 	var outcome := _inspect_save_file(_save_path)
 	var kind: String = str(outcome.get("kind", "missing"))
+	# A pending run can only resume from a validated profile. Leave rejected
+	# live bytes in place and keep the existing write block and run snapshot.
+	if preserve_parked_run and (kind == "missing" or kind == "corrupt"):
+		return _profile
 	if restore_error != OK and kind == "missing":
 		# The parked file remains authoritative until the live path is restored.
 		_adopt_blocked_defaults("parked_backup", PersistState.BACKUP_RESTORE_FAILED)
@@ -751,6 +756,11 @@ func _remove_if_exists(path: String) -> void:
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
+func _needs_parked_profile_recheck() -> bool:
+	return _persist_state == PersistState.BACKUP_RESTORE_FAILED \
+		or (_persist_state in [PersistState.UNREADABLE, PersistState.UNSUPPORTED_FUTURE]
+			and FileAccess.file_exists(_save_path + ".bak"))
+
 func _restore_parked_backup_if_needed() -> int:
 	if FileAccess.file_exists(_save_path):
 		return OK
@@ -965,8 +975,7 @@ func retry_pending_run() -> Dictionary:
 			"rp": 0,
 		}
 	# Retry on the current screen can outlive the original restore obstruction.
-	if _persist_state == PersistState.BACKUP_RESTORE_FAILED \
-			and _restore_parked_backup_if_needed() == OK and FileAccess.file_exists(_save_path):
+	if _needs_parked_profile_recheck():
 		load_profile()
 	if writes_blocked():
 		var blocked: Dictionary = (_pending_run["result"] as Dictionary).duplicate(true)
