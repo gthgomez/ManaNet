@@ -42,7 +42,7 @@ func _init() -> void:
 	_test_recovery_then_retry_awards_once()
 	_test_retry_restores_parked_backup_in_session()
 	_test_retry_preserves_protected_live_profile()
-	_test_retry_preserves_corrupt_live_during_parked_restore()
+	_test_retry_preserves_untrusted_live_during_parked_restore()
 	_test_environment_override_isolates_autoload()
 	_clean_scratch()
 	print("--- RESULTS ---")
@@ -630,6 +630,21 @@ func _test_retry_restores_parked_backup_in_session() -> void:
 		"the original balance plus one run persists across reload")
 	reloaded.free()
 
+func _serialized_retry_profile(shards: int, history: Array = []) -> String:
+	var name := "retry_authored_fixture.json"
+	var author := _fresh(name)
+	var authored: Dictionary = author.get_profile()
+	authored["banked_rp"] = shards
+	authored["total_rp"] = shards
+	authored["run_history"] = history
+	var saved: bool = author.save_profile()
+	author.free()
+	var path := _path(name)
+	var text := _read_text(path) if saved else ""
+	_check(not text.is_empty(), "native save authors a complete replacement profile")
+	_remove(path)
+	return text
+
 func _test_retry_preserves_protected_live_profile() -> void:
 	for state in ["unsupported_future", "unreadable"]:
 		var path := _path("retry_%s.json" % state)
@@ -651,7 +666,8 @@ func _test_retry_preserves_protected_live_profile() -> void:
 		if cleared != OK:
 			p.free()
 			continue
-		_write_text(path, JSON.stringify({"version": 7 if state == "unsupported_future" else 1, "banked_rp": 500}))
+		var replacement := _serialized_retry_profile(500) if state == "unreadable" else "{\"version\":7}"
+		_write_text(path, replacement)
 		var original := _bytes(path)
 		if state == "unreadable":
 			_chmod(path, "000")
@@ -673,18 +689,26 @@ func _test_retry_preserves_protected_live_profile() -> void:
 				"rechecking an accessible profile commits once and preserves the parked bytes")
 		p.free()
 
-func _test_retry_preserves_corrupt_live_during_parked_restore() -> void:
-	for recovery in ["backup", "live"]:
-		var path := _path("retry_corrupt_%s.json" % recovery)
+func _test_retry_preserves_untrusted_live_during_parked_restore() -> void:
+	var cases := [
+		{"id": "malformed_backup", "live": "{ interrupted live save", "restore_backup": true},
+		{"id": "malformed_live", "live": "{ interrupted live save", "restore_backup": false},
+		{"id": "empty_object_backup", "live": "{}", "restore_backup": true},
+		{"id": "version_only_live", "live": "{\"version\":1}", "restore_backup": false},
+	]
+	for fixture in cases:
+		var label: String = fixture["id"]
+		var restore_backup: bool = fixture["restore_backup"]
+		var path := _path("retry_%s.json" % label)
 		var backup := path + ".bak"
 		var prior_run := {"map_id": 1, "waves": 2, "rp_earned": 15}
-		var profile := {"version": 1, "banked_rp": 137, "total_rp": 137, "run_history": [prior_run]}
+		var profile := {"banked_rp": 137, "total_rp": 137, "run_history": [prior_run]}
 		_write_text(backup, JSON.stringify(profile))
 		var parked := _bytes(backup)
 		var original_history: Array = JSON.parse_string(_read_text(backup))["run_history"]
 		var live_path := ProjectSettings.globalize_path(path)
 		var obstruction := DirAccess.make_dir_absolute(live_path)
-		_check(obstruction == OK, "fixture parks a known-good save before a corrupt %s transition" % recovery)
+		_check(obstruction == OK, "fixture parks a supported legacy save before %s" % label)
 		if obstruction != OK:
 			continue
 		var p := ProgressionScript.new()
@@ -694,40 +718,37 @@ func _test_retry_preserves_corrupt_live_during_parked_restore() -> void:
 		gs.dispose()
 		var cleared := DirAccess.remove_absolute(live_path)
 		_check(cleared == OK and queued.get("save_failed", false) and p.has_pending_run(),
-			"the live path can change while a run is pending (%s)" % recovery)
+			"the live path can change while a run is pending (%s)" % label)
 		if cleared != OK:
 			p.free()
 			continue
-		_write_text(path, "{ interrupted live save")
-		var corrupt := _bytes(path)
+		_write_text(path, fixture["live"])
+		var untrusted := _bytes(path)
 		var blocked: Dictionary = p.retry_pending_run()
 		_check(blocked.get("save_failed", false) and not blocked.get("persisted", true)
 			and p.has_pending_run() and p.writes_blocked(),
-			"a corrupt live file keeps the award pending (%s)" % recovery)
-		_check(_bytes(path) == corrupt and _bytes(backup) == parked
+			"an untrusted live file keeps the award pending (%s)" % label)
+		_check(_bytes(path) == untrusted and _bytes(backup) == parked
 			and p.get_profile()["run_history"] == original_history,
-			"retry preserves both files and the previously loaded run history (%s)" % recovery)
+			"retry preserves both files and the previously loaded run history (%s)" % label)
 
-		var expected_balance := 137
-		if recovery == "live":
-			expected_balance = 221
-			profile["banked_rp"] = expected_balance
-			profile["total_rp"] = expected_balance
-			_write_text(path, JSON.stringify(profile))
-		else:
+		var expected_balance := 137 if restore_backup else 221
+		if restore_backup:
 			_remove(path)
+		else:
+			_write_text(path, _serialized_retry_profile(expected_balance, original_history))
 		var recovered: Dictionary = p.retry_pending_run()
 		var history: Array = p.get_profile()["run_history"]
 		_check(recovered.get("persisted", false) and not p.has_pending_run()
 			and p.get_banked_rp() == expected_balance + int(queued.get("rp", 0))
 			and history.size() == 2 and history[0] == original_history[0],
-			"retry adds one run to the validated %s profile and keeps its prior history" % recovery)
-		_check(_bytes(backup) == parked if recovery == "live" else not FileAccess.file_exists(backup),
-			"the parked profile remains untouched unless it was restored (%s)" % recovery)
+			"retry commits once from a native replacement or restored backup (%s)" % label)
+		_check(not FileAccess.file_exists(backup) if restore_backup else _bytes(backup) == parked,
+			"the parked profile remains untouched unless it was restored (%s)" % label)
 		var committed := _bytes(path)
 		var repeat: Dictionary = p.retry_pending_run()
 		_check(repeat.get("duplicate", false) and not committed.is_empty() and _bytes(path) == committed,
-			"additional retries do not repeat the %s recovery award" % recovery)
+			"additional retries do not repeat the recovery award (%s)" % label)
 		p.free()
 
 func _test_environment_override_isolates_autoload() -> void:

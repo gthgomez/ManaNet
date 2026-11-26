@@ -341,7 +341,10 @@ func load_profile() -> Dictionary:
 	# the previous profile at .bak and no live file. Put it back. An orphan
 	# .tmp is never adopted.
 	var restore_error := _restore_parked_backup_if_needed()
-	var outcome := _inspect_save_file(_save_path)
+	# A replacement live file must be a complete save while a parked profile
+	# remains. A restored backup still uses the usual migration rules.
+	var require_serialized_replacement := preserve_parked_run and FileAccess.file_exists(_save_path + ".bak")
+	var outcome := _inspect_save_file(_save_path, require_serialized_replacement)
 	var kind: String = str(outcome.get("kind", "missing"))
 	# A pending run can only resume from a validated profile. Leave rejected
 	# live bytes in place and keep the existing write block and run snapshot.
@@ -414,7 +417,7 @@ func _adopt_blocked_defaults(origin: String, state: int) -> void:
 ## Classify a file without mutating it. "missing" is the only kind that means
 ## "there is no player data here". Every other kind is a real file that must
 ## not be confused with a fresh profile.
-func _inspect_save_file(path: String) -> Dictionary:
+func _inspect_save_file(path: String, require_serialized_profile: bool = false) -> Dictionary:
 	if path == "" or not FileAccess.file_exists(path):
 		return {"kind": "missing"}
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -433,6 +436,8 @@ func _inspect_save_file(path: String) -> Dictionary:
 			return {"kind": "corrupt"}
 		if file_version > SAVE_VERSION:
 			return {"kind": "future"}
+	if require_serialized_profile and not _profile_schema_ok(parsed):
+		return {"kind": "corrupt"}
 	var default := _default_profile()
 	_deep_merge(default, parsed)
 	_normalize_profile(default)
