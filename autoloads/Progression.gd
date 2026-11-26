@@ -964,6 +964,10 @@ func retry_pending_run() -> Dictionary:
 			"duplicate": false,
 			"rp": 0,
 		}
+	# Retry on the current screen can outlive the original restore obstruction.
+	if _persist_state == PersistState.BACKUP_RESTORE_FAILED \
+			and _restore_parked_backup_if_needed() == OK and FileAccess.file_exists(_save_path):
+		load_profile()
 	if writes_blocked():
 		var blocked: Dictionary = (_pending_run["result"] as Dictionary).duplicate(true)
 		blocked["save_failed"] = true

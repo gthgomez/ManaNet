@@ -40,6 +40,8 @@ func _init() -> void:
 	_test_old_save_migrates_without_data_loss()
 	_test_current_save_keeps_bytes_until_explicit_write()
 	_test_recovery_then_retry_awards_once()
+	_test_retry_restores_parked_backup_in_session()
+	_test_retry_preserves_protected_live_profile()
 	_test_environment_override_isolates_autoload()
 	_clean_scratch()
 	print("--- RESULTS ---")
@@ -564,6 +566,79 @@ func _test_recovery_then_retry_awards_once() -> void:
 		"reloaded profile contains the retried run exactly once")
 	_check(reloaded.get_banked_rp() == banked_after, "reloaded balance matches the single award")
 	reloaded.free()
+
+func _test_retry_restores_parked_backup_in_session() -> void:
+	var path := _path("retry_parked.json")
+	var backup := path + ".bak"
+	_write_text(backup, JSON.stringify({"version": 1, "banked_rp": 137, "total_rp": 137}))
+	var original := _bytes(backup)
+	var live_path := ProjectSettings.globalize_path(path)
+	var obstruction := DirAccess.make_dir_absolute(live_path)
+	_check(obstruction == OK, "fixture obstructs restoration of a parked profile")
+	if obstruction != OK:
+		return
+	var p := ProgressionScript.new()
+	p.initialize(path)
+	var gs := _make_run_state("won")
+	var failed: Dictionary = p.record_run(gs, 0, false)
+	gs.dispose()
+	_check(failed.get("save_failed", false) and p.has_pending_run(), "the blocked run is queued")
+	var still_blocked: Dictionary = p.retry_pending_run()
+	_check(still_blocked.get("save_failed", false) and p.has_pending_run() and _bytes(backup) == original,
+		"Retry Save waits while the obstruction still prevents restoration")
+	_check(DirAccess.remove_absolute(live_path) == OK, "fixture clears the obstruction in the same session")
+	var retried: Dictionary = p.retry_pending_run()
+	_check(retried.get("persisted", false) and not p.has_pending_run(),
+		"Retry Save reloads the unblocked profile and commits without restart")
+	var expected: int = 137 + int(failed.get("rp", 0))
+	var committed := _bytes(path)
+	_check(expected > 137 and p.get_banked_rp() == expected and p.get_profile()["run_history"].size() == 1,
+		"retry adds the pending run once to the existing Shards and history")
+	var repeated: Dictionary = p.retry_pending_run()
+	_check(repeated.get("duplicate", false) and not committed.is_empty() and _bytes(path) == committed,
+		"a second retry leaves the committed profile unchanged")
+	p.free()
+	var reloaded := ProgressionScript.new()
+	reloaded.initialize(path)
+	_check(reloaded.get_banked_rp() == expected and reloaded.get_profile()["run_history"].size() == 1,
+		"the original balance plus one run persists across reload")
+	reloaded.free()
+
+func _test_retry_preserves_protected_live_profile() -> void:
+	for state in ["unsupported_future", "unreadable"]:
+		var path := _path("retry_%s.json" % state)
+		var backup := path + ".bak"
+		_write_text(backup, JSON.stringify({"version": 1, "banked_rp": 137}))
+		var parked := _bytes(backup)
+		var live_path := ProjectSettings.globalize_path(path)
+		var obstruction := DirAccess.make_dir_absolute(live_path)
+		_check(obstruction == OK, "fixture initially obstructs the parked profile for %s" % state)
+		if obstruction != OK:
+			continue
+		var p := ProgressionScript.new()
+		p.initialize(path)
+		var gs := _make_run_state("won")
+		p.record_run(gs, 0, false)
+		gs.dispose()
+		var cleared := DirAccess.remove_absolute(live_path)
+		_check(cleared == OK, "fixture can place a protected live profile for %s" % state)
+		if cleared != OK:
+			p.free()
+			continue
+		_write_text(path, JSON.stringify({"version": 7 if state == "unsupported_future" else 1, "banked_rp": 500}))
+		var original := _bytes(path)
+		if state == "unreadable":
+			_chmod(path, "000")
+		var retried: Dictionary = p.retry_pending_run()
+		if state == "unreadable":
+			_chmod(path, "644")
+		_check(p.persistence_status().get("state") == state and p.writes_blocked(),
+			"retry revalidates the actual live profile as %s" % state)
+		_check(retried.get("save_failed", false) and not retried.get("persisted", true) and p.has_pending_run(),
+			"retry keeps the run pending when the live profile is %s" % state)
+		_check(_bytes(path) == original and _bytes(backup) == parked,
+			"retry leaves both live and parked bytes intact when the live profile is %s" % state)
+		p.free()
 
 func _test_environment_override_isolates_autoload() -> void:
 	var p = ProgressionScript.new()
