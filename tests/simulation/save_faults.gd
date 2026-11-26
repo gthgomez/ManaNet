@@ -28,6 +28,7 @@ func _init() -> void:
 	_test_failed_temp_write_reports_failure()
 	_test_failed_commit_reports_failure()
 	_test_interrupted_save_ignores_orphan_temp()
+	_test_obstructed_parked_backup_preserves_progress()
 	_test_failed_quarantine_reports_failure()
 	_test_settings_persist_across_reload()
 	_test_purchase_persists_across_reload()
@@ -274,6 +275,39 @@ func _test_interrupted_save_ignores_orphan_temp() -> void:
 		"the last committed save is what loads after an interruption")
 	p1.free()
 	p2.free()
+
+func _test_obstructed_parked_backup_preserves_progress() -> void:
+	var path := _path("parked.json")
+	var backup := path + ".bak"
+	_write_text(backup, JSON.stringify({"version": 1, "banked_rp": 137, "engine": "godot"}))
+	var original := _bytes(backup)
+	var live_path := ProjectSettings.globalize_path(path)
+	var obstruction := DirAccess.make_dir_absolute(live_path)
+	_check(obstruction == OK, "an empty directory obstructs the parked save's live path")
+	if obstruction != OK:
+		return
+	var p = ProgressionScript.new()
+	p.initialize(path)
+	var status: Dictionary = p.persistence_status()
+	_check(status.get("state") == "backup_restore_failed" and status.get("writes_blocked") == true,
+		"failed restoration keeps the parked save read-only")
+	_check(status.get("loaded_player_data") == true and p.get_banked_rp() == 137,
+		"the last committed Shard balance is available while the backup is parked")
+	_check(DirAccess.remove_absolute(live_path) == OK, "the live path obstruction is removed")
+	_check(not p.recover_blocked_profile().get("success", true),
+		"explicit reset cannot bypass the parked backup")
+	_check(not p.set_setting("audio_muted", true), "an ordinary setting cannot supersede the parked save")
+	_check(not FileAccess.file_exists(path) and _bytes(backup) == original,
+		"failed restore and follow-up writes leave the last committed bytes parked")
+	p.free()
+
+	var reloaded := ProgressionScript.new()
+	reloaded.initialize(path)
+	_check(reloaded.get_banked_rp() == 137 and not reloaded.writes_blocked(),
+		"a new load restores the original balance and resumes writes")
+	_check(_bytes(path) == original and not FileAccess.file_exists(backup),
+		"successful recovery moves the exact parked bytes back to the live path")
+	reloaded.free()
 
 func _test_failed_quarantine_reports_failure() -> void:
 	var p = ProgressionScript.new()
