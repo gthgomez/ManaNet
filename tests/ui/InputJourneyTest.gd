@@ -24,6 +24,7 @@ func _ready() -> void:
 	var profile: Dictionary = Progression.get_profile()
 	profile["banked_rp"] = 400
 	Progression.save_profile()
+	await _check_placement_confirmation_focus()
 	await _run()
 	print("--- RESULTS ---")
 	print("PASS: %d" % _pass)
@@ -52,17 +53,18 @@ func _check(condition: bool, message: String) -> void:
 		_fail += 1
 		push_error("[FAIL] %s" % message)
 
-func _fit_viewport() -> void:
+func _fit_viewport(size: Vector2i = Vector2i(1280, 720)) -> void:
 	# Headless boots a 64×64 window. Controls laid out in the 1280×720 design
 	# viewport sit outside that window, so the GUI discards the click.
 	var root := get_tree().root
-	root.content_scale_size = Vector2i(1280, 720)
-	root.size = Vector2i(1280, 720)
-	DisplayServer.window_set_size(Vector2i(1280, 720))
+	root.content_scale_size = size
+	root.size = size
+	DisplayServer.window_set_size(size)
 
 func _mouse_click(ctrl: Control) -> void:
-	var point := ctrl.get_global_rect().get_center()
-	var vp := ctrl.get_viewport()
+	await _mouse_click_at(ctrl.get_viewport(), ctrl.get_global_rect().get_center())
+
+func _mouse_click_at(vp: Viewport, point: Vector2) -> void:
 	var down := InputEventMouseButton.new()
 	down.button_index = MOUSE_BUTTON_LEFT
 	down.pressed = true
@@ -102,6 +104,85 @@ func _activate(ctrl: Button, done: Callable) -> void:
 		return
 	ctrl.grab_focus()
 	await _accept_focused()
+
+func _joypad_tap(vp: Viewport, button: JoyButton) -> void:
+	for pressed: bool in [true, false]:
+		var event := InputEventJoypadButton.new()
+		event.button_index = button
+		event.pressed = pressed
+		event.pressure = 1.0 if pressed else 0.0
+		vp.push_input(event)
+		await get_tree().process_frame
+
+func _press_enter(vp: Viewport) -> void:
+	for pressed: bool in [true, false]:
+		var event := InputEventKey.new()
+		event.keycode = KEY_ENTER
+		event.pressed = pressed
+		vp.push_input(event)
+		await get_tree().process_frame
+
+func _check_placement_confirmation_focus() -> void:
+	print("--- PLACEMENT CONFIRMATION INPUT ---")
+	var previous: bool = Progression.get_settings().get("confirm_placement_enabled", false)
+	Progression.set_setting("confirm_placement_enabled", true)
+	for size: Vector2i in [Vector2i(568, 320), Vector2i(1280, 720)]:
+		_fit_viewport(size)
+		for method: String in ["focused Cancel", "focused Place", "pointer Cancel"]:
+			await _check_placement_confirmation_action(size, method)
+	Progression.set_setting("confirm_placement_enabled", previous)
+
+func _check_placement_confirmation_action(size: Vector2i, method: String) -> void:
+	Progression.pending_map_id = 0
+	get_tree().change_scene_to_file("res://scenes/GameScreen.tscn")
+	await get_tree().process_frame
+	var game: Node = await _wait_scene("GameScreen")
+	var label := "%dx%d %s" % [size.x, size.y, method]
+	if game == null:
+		_check(false, "%s: battle scene opens" % label)
+		return
+	var vp: Viewport = game.get_viewport()
+	var state: GameState = game.game_state
+	var before_gold: int = state.gold
+	var world := Vector2(300, 240)
+	# Start each replay with the same shop focus after the scene's delayed
+	# initial-focus hook. Selection and confirmation still use viewport events.
+	await get_tree().create_timer(0.1).timeout
+	game._shop_btns["archer"].grab_focus()
+	_check(vp.get_visible_rect().size == Vector2(size), "%s: actual viewport matches" % label)
+	await _press_enter(vp)
+	await _mouse_click_at(vp, game._world_to_screen(world))
+	var pending: bool = game.view_state.has_pending_placement() \
+		and game._placement_confirm_bar.is_visible_in_tree() \
+		and not game._confirm_placement_btn.disabled \
+		and state.towers.is_empty() and state.gold == before_gold
+	_check(pending, "%s: world input opens a valid choice before spending" % label)
+	if not pending:
+		return
+	if method == "focused Cancel":
+		await _joypad_tap(vp, JOY_BUTTON_DPAD_RIGHT)
+		_check(vp.gui_get_focus_owner() == game._cancel_placement_btn,
+			"%s: D-pad moves visible focus to Cancel" % label)
+		await _press_enter(vp)
+	elif method == "focused Place":
+		_check(vp.gui_get_focus_owner() == game._confirm_placement_btn,
+			"%s: initial visible focus is Place" % label)
+		await _press_enter(vp)
+	else:
+		await _mouse_click(game._cancel_placement_btn)
+	_check(not game.view_state.has_pending_placement()
+		and not game._placement_confirm_bar.is_visible_in_tree(),
+		"%s: chosen action closes confirmation" % label)
+	if method == "focused Place":
+		var cost: int = game._shop_cost("archer")
+		_check(state.towers.size() == 1 and state.gold == before_gold - cost
+			and state.towers[0].pos.distance_to(world) < 1.0,
+			"%s: purchases one tower at the chosen position (%d -> %d credits)"
+			% [label, before_gold, state.gold])
+	else:
+		_check(state.towers.is_empty() and state.gold == before_gold,
+			"%s: cancels with no tower (%d -> %d credits, %d towers)"
+			% [label, before_gold, state.gold, state.towers.size()])
 
 ## Navigation fades for 0.25s, so a second input during the fade can hit a
 ## different focused control. Try the focused keyboard action once, then the

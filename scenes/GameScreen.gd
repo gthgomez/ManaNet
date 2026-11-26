@@ -1777,14 +1777,6 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouse and event.device == InputEvent.DEVICE_ID_EMULATION:
 		return
 
-	# Dpad / keyboard accept — Godot fires Button.pressed automatically on focused buttons,
-	# but we need ui_accept to also confirm placement when the bar is visible.
-	if event.is_action_pressed("ui_accept"):
-		if _placement_confirm_bar != null and _placement_confirm_bar.visible:
-			_on_confirm_placement()
-			get_viewport().set_input_as_handled()
-			return
-
 	# Dpad / keyboard cancel — layered dismiss (innermost modal first)
 	if event.is_action_pressed("ui_cancel"):
 		_handle_back(now_ms)
