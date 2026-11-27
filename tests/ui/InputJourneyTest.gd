@@ -4,7 +4,8 @@ extends Node
 # This node clears itself as the current scene so later scene changes do not
 # free the harness. Desktop synthetic input does not certify Android touch.
 
-const SANDBOX := "user://input_journey/profile.json"
+const SANDBOX_DIR := "user://input_journey"
+const SANDBOX := SANDBOX_DIR + "/profile.json"
 
 var _pass: int = 0
 var _fail: int = 0
@@ -13,7 +14,7 @@ func _ready() -> void:
 	var sandbox: String = OS.get_environment("MANANET_PROFILE_PATH")
 	if sandbox == "":
 		sandbox = SANDBOX
-		DirAccess.make_dir_recursive_absolute("user://input_journey")
+		DirAccess.make_dir_recursive_absolute(SANDBOX_DIR)
 		if FileAccess.file_exists(SANDBOX):
 			DirAccess.remove_absolute(SANDBOX)
 	await get_tree().process_frame
@@ -494,8 +495,8 @@ func _run() -> void:
 
 func _save_failure(game: Node) -> void:
 	game.game_state.stat_waves_survived = 1
-	var blocked := "user://input_journey/future.json"
-	DirAccess.make_dir_recursive_absolute("user://input_journey")
+	DirAccess.make_dir_recursive_absolute(SANDBOX_DIR)
+	var blocked := SANDBOX_DIR + "/future.json"
 	var original := "{\"version\":99,\"banked_rp\":5}"
 	var f := FileAccess.open(blocked, FileAccess.WRITE)
 	_check(f != null, "future-version scratch file opens for writing")
