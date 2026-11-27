@@ -32,6 +32,8 @@ const START_WAVE := "Start Wave"
 const INSTRUCTION_PICK_TOWER := "Pick a defender to secure the grid"
 const INSTRUCTION_CHOOSE_TOWER := "CHOOSE A DEFENDER TO BEGIN"
 const INSTRUCTION_START_WAVE := "START WAVE WHEN READY"
+const INSTRUCTION_CONFIRM_PLACEMENT := "CHOOSE PLACE TO BUILD OR CANCEL"
+const INSTRUCTION_CANCEL_PLACEMENT := "CHOOSE CANCEL TO PICK ANOTHER SPOT"
 
 static func credits(amount: int) -> String:
 	return "%s: %d" % [CURRENCY_RUN, amount]

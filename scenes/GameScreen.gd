@@ -1392,12 +1392,15 @@ func _update_hud(now_ms: int) -> void:
 	if _integrity_bar != null:
 		_integrity_bar.visible = not compact_hud
 
-	# Instruction banner: persistent instructions have priority over contextual
-	# hints. Placement feedback stays visible while pending so an invalid ghost
-	# always explains itself; compact HUDs also surface toasts here.
+	# A pending placement owns the banner until the player confirms or cancels.
+	# Compact HUDs also use this space for toasts during ordinary gameplay.
 	if _instruction_banner != null:
 		if menu_overlay_visible or (sel != null and _tower_panel.visible):
 			_instruction_banner.visible = false
+		elif view_state.has_pending_placement():
+			_instruction_banner.visible = true
+			_instruction_label.text = _BRAND.INSTRUCTION_CONFIRM_PLACEMENT \
+				if view_state.pending_placement_valid else _BRAND.INSTRUCTION_CANCEL_PLACEMENT
 		elif compact_hud and toast != "":
 			_instruction_banner.visible = true
 			_instruction_label.text = toast
@@ -1718,9 +1721,19 @@ func _update_placement_confirm_bar() -> void:
 		var margin_r: float = float(margins["right"])
 		var margin_t: float = float(margins["top"])
 		var margin_b: float = float(margins["bottom"])
+		var max_y: float = maxf(margin_t, viewport.y - bar_size.y - margin_b)
 		var next_pos: Vector2 = pos + Vector2(-bar_size.x * 0.5, 40.0)
 		next_pos.x = clampf(next_pos.x, margin_l, maxf(margin_l, viewport.x - bar_size.x - margin_r))
-		next_pos.y = clampf(next_pos.y, margin_t, maxf(margin_t, viewport.y - bar_size.y - margin_b))
+		next_pos.y = clampf(next_pos.y, margin_t, max_y)
+		if _instruction_banner != null and _instruction_banner.is_visible_in_tree():
+			var instruction_bounds := _instruction_banner.get_rect()
+			if Rect2(next_pos, bar_size).intersects(instruction_bounds):
+				var below: float = instruction_bounds.end.y + 8.0
+				var above: float = instruction_bounds.position.y - bar_size.y - 8.0
+				if below <= max_y:
+					next_pos.y = below
+				elif above >= margin_t:
+					next_pos.y = above
 		_placement_confirm_bar.position = next_pos
 		_confirm_placement_btn.disabled = not view_state.pending_placement_valid
 	else:
