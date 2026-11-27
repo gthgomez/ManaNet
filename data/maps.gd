@@ -7,7 +7,8 @@ const MAPS: Array = [
 	{
 		"id": 0,
 		"name": "S-Curve",
-		"desc": "Classic winding path. Tight coverage and the least room for error.",
+		"subtitle": "COMPROMISED SECTOR",
+		"desc": "A corrupted district under AI instability. Expect unpredictable routes and heightened enemy activity.",
 		"difficulty": 3,
 		"path": [
 			Vector2(-40, 300), Vector2(250, 300), Vector2(250, 100), Vector2(450, 100),
@@ -17,7 +18,8 @@ const MAPS: Array = [
 	{
 		"id": 1,
 		"name": "Gauntlet",
-		"desc": "Two choke points.  Splash and long-range dominate.",
+		"subtitle": "INDUSTRIAL FIREWALL",
+		"desc": "A high-pressure industrial zone that channels enemy forces through tight, strategic chokepoints.",
 		"difficulty": 2,
 		"path": [
 			Vector2(-40, 480), Vector2(380, 480), Vector2(380, 340), Vector2(200, 340),
@@ -28,7 +30,8 @@ const MAPS: Array = [
 	{
 		"id": 2,
 		"name": "Spiral",
-		"desc": "Long coil. Extra travel time makes it the most forgiving route.",
+		"subtitle": "CORPORATE PERIMETER",
+		"desc": "A controlled perimeter around Arcana's core facilities. Learn the basics and establish your defense.",
 		"difficulty": 1,
 		"path": [
 			Vector2(-40, 300), Vector2(200, 300), Vector2(200, 100), Vector2(750, 100),

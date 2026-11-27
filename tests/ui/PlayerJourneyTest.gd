@@ -85,9 +85,9 @@ func _journey_main_to_game() -> void:
 
 	var map_sel: Node = await _mount("res://scenes/MapSelectScreen.tscn")
 	var map_text := _labels(map_sel)
-	_check(map_text.contains("S-Curve"), "map select lists the S-Curve map")
-	_check(map_text.contains("Gauntlet"), "map select lists the Gauntlet map")
-	_check(map_text.contains("Spiral"), "map select lists the Spiral map")
+	_check(map_text.contains("S-CURVE") or map_text.contains("S-Curve"), "map select lists the S-Curve map")
+	_check(map_text.contains("GAUNTLET") or map_text.contains("Gauntlet"), "map select lists the Gauntlet map")
+	_check(map_text.contains("SPIRAL") or map_text.contains("Spiral"), "map select lists the Spiral map")
 
 	# Select a map the same way the button does, then enter the game screen.
 	Progression.pending_map_id = 0

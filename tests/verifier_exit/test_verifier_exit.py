@@ -102,10 +102,10 @@ class TestParseGateClassification(unittest.TestCase):
     def test_fake_process_modes(self):
         import stat
         import tempfile
-        fake = os.path.join(tempfile.mkdtemp(), "fake-godot")
-        with open(fake, "w", encoding="utf-8") as handle:
+        tmpdir = tempfile.mkdtemp()
+        fake_py = os.path.join(tmpdir, "fake_godot.py")
+        with open(fake_py, "w", encoding="utf-8") as handle:
             handle.write(
-                "#!/usr/bin/env python3\n"
                 "import os, sys, time\n"
                 "mode = os.environ.get('FAKE_GODOT_MODE', 'clean')\n"
                 "if mode == 'clean':\n"
@@ -122,7 +122,18 @@ class TestParseGateClassification(unittest.TestCase):
                 "    time.sleep(30)\n"
                 "sys.exit(0)\n"
             )
-        os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+        if sys.platform == "win32":
+            fake = os.path.join(tmpdir, "fake_godot.cmd")
+            with open(fake, "w", encoding="utf-8") as handle:
+                handle.write('@echo off\r\n"%s" "%s" %%*\r\n' % (sys.executable, fake_py))
+        else:
+            with open(fake_py, "r+", encoding="utf-8") as handle:
+                body = handle.read()
+                handle.seek(0)
+                handle.write("#!/usr/bin/env python3\n" + body)
+                handle.truncate()
+            fake = fake_py
+            os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
         cases = [
             ("clean", 0),
             ("fatal", 1),

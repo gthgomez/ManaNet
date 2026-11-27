@@ -21,7 +21,7 @@ func _ready() -> void:
 	if get_tree().current_scene == self:
 		get_tree().current_scene = null
 	Progression.set_save_path(sandbox)
-	Progression.load_profile()
+	Progression.initialize(sandbox)
 	var profile: Dictionary = Progression.get_profile()
 	profile["banked_rp"] = 400
 	Progression.save_profile()
@@ -153,8 +153,21 @@ func _check_placement_confirmation_action(size: Vector2i, method: String) -> voi
 	await get_tree().create_timer(0.1).timeout
 	game._shop_btns["archer"].grab_focus()
 	_check(vp.get_visible_rect().size == Vector2(size), "%s: actual viewport matches" % label)
+	if method == "focused Cancel":
+		await _press_enter(vp)
+		await _mouse_click_at(vp, game._world_to_screen(Vector2(250, 165)))
+		await get_tree().process_frame
+		var bar: Rect2 = game._placement_confirm_bar.get_global_rect()
+		var banner: Rect2 = game._instruction_banner.get_global_rect()
+		_check(game.view_state.has_pending_placement() and game._confirm_placement_btn.disabled
+			and game._instruction_label.text == "CHOOSE CANCEL TO PICK ANOTHER SPOT"
+			and vp.get_visible_rect().encloses(bar) and not bar.intersects(banner),
+			"%s: blocked path keeps the retry message clear of the buttons" % label)
+		await _mouse_click(game._cancel_placement_btn)
+		game._shop_btns["archer"].grab_focus()
 	await _press_enter(vp)
 	await _mouse_click_at(vp, game._world_to_screen(world))
+	await get_tree().process_frame
 	var pending: bool = game.view_state.has_pending_placement() \
 		and game._placement_confirm_bar.is_visible_in_tree() \
 		and not game._confirm_placement_btn.disabled \
@@ -162,6 +175,9 @@ func _check_placement_confirmation_action(size: Vector2i, method: String) -> voi
 	_check(pending, "%s: world input opens a valid choice before spending" % label)
 	if not pending:
 		return
+	_check(game._instruction_label.is_visible_in_tree()
+		and game._instruction_label.text == "CHOOSE PLACE TO BUILD OR CANCEL",
+		"%s: banner explains the pending choice" % label)
 	var should_place := method.ends_with("Place")
 	if method == "pointer Cancel":
 		await _mouse_click(game._cancel_placement_btn)
@@ -320,7 +336,10 @@ func _run() -> void:
 	if maps == null:
 		return
 
-	var game: Node = await _open_via(maps._play_btns[0], "GameScreen")
+	# Map cards render SPIRAL, GAUNTLET, S-CURVE — use S-Curve (index 2) so the
+	# placement spot below matches that map geometry.
+	var s_curve_play_idx: int = mini(2, maps._play_btns.size() - 1)
+	var game: Node = await _open_via(maps._play_btns[s_curve_play_idx], "GameScreen")
 	_check(game != null, "clicking a map play control opens the game")
 	if game == null:
 		return
@@ -482,7 +501,8 @@ func _run() -> void:
 	get_tree().change_scene_to_file("res://scenes/MapSelectScreen.tscn")
 	var maps2: Node = await _wait_scene("MapSelectScreen")
 	if maps2 != null:
-		var game2: Node = await _open_via(maps2._play_btns[0], "GameScreen")
+		var s_curve_idx: int = mini(2, maps2._play_btns.size() - 1)
+		var game2: Node = await _open_via(maps2._play_btns[s_curve_idx], "GameScreen")
 		_check(game2 != null and game2.game_state.gold == 310,
 			"the purchased upgrade changes the next run (gold %s)"
 			% (game2.game_state.gold if game2 != null else "none"))
