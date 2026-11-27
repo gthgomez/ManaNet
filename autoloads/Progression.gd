@@ -169,6 +169,7 @@ enum PersistState {
 	UNREADABLE,
 	FAILED_WRITE,
 	UNSAVED_CHANGES,
+	BACKUP_RESTORE_FAILED,
 }
 
 const PERSIST_STATE_NAMES: Dictionary = {
@@ -181,6 +182,7 @@ const PERSIST_STATE_NAMES: Dictionary = {
 	PersistState.UNREADABLE: "unreadable",
 	PersistState.FAILED_WRITE: "failed_write",
 	PersistState.UNSAVED_CHANGES: "unsaved_changes",
+	PersistState.BACKUP_RESTORE_FAILED: "backup_restore_failed",
 }
 
 var _profile: Dictionary = {}
@@ -243,7 +245,8 @@ func writes_blocked() -> bool:
 	return _persist_state == PersistState.UNINITIALIZED \
 		or _persist_state == PersistState.UNSUPPORTED_FUTURE \
 		or _persist_state == PersistState.FAILED_QUARANTINE \
-		or _persist_state == PersistState.UNREADABLE
+		or _persist_state == PersistState.UNREADABLE \
+		or _persist_state == PersistState.BACKUP_RESTORE_FAILED
 
 func persistence_status() -> Dictionary:
 	return {
@@ -333,12 +336,29 @@ func _default_profile() -> Dictionary:
 
 func load_profile() -> Dictionary:
 	_initialized = true
+	var preserve_parked_run := not _pending_run.is_empty() and _needs_parked_profile_recheck()
 	# A crash between parking the old file and committing the temp file leaves
 	# the previous profile at .bak and no live file. Put it back. An orphan
 	# .tmp is never adopted.
-	_restore_parked_backup_if_needed()
-	var outcome := _inspect_save_file(_save_path)
+	var restore_error := _restore_parked_backup_if_needed()
+	# A replacement live file must be a complete save while a parked profile
+	# remains. A restored backup still uses the usual migration rules.
+	var require_serialized_replacement := preserve_parked_run and FileAccess.file_exists(_save_path + ".bak")
+	var outcome := _inspect_save_file(_save_path, require_serialized_replacement)
 	var kind: String = str(outcome.get("kind", "missing"))
+	# A pending run can only resume from a validated profile. Leave rejected
+	# live bytes in place and keep the existing write block and run snapshot.
+	if preserve_parked_run and (kind == "missing" or kind == "corrupt"):
+		return _profile
+	if restore_error != OK and kind == "missing":
+		# The parked file remains authoritative until the live path is restored.
+		_adopt_blocked_defaults("parked_backup", PersistState.BACKUP_RESTORE_FAILED)
+		_last_save_error = "backup_restore_failed:%d" % restore_error
+		var parked := _inspect_save_file(_save_path + ".bak")
+		if parked.get("kind") == "supported":
+			_profile = parked["profile"]
+			_loaded_player_data = true
+		return _profile
 	if kind == "supported":
 		_profile = outcome["profile"]
 		_loaded_player_data = true
@@ -397,7 +417,7 @@ func _adopt_blocked_defaults(origin: String, state: int) -> void:
 ## Classify a file without mutating it. "missing" is the only kind that means
 ## "there is no player data here". Every other kind is a real file that must
 ## not be confused with a fresh profile.
-func _inspect_save_file(path: String) -> Dictionary:
+func _inspect_save_file(path: String, require_serialized_profile: bool = false) -> Dictionary:
 	if path == "" or not FileAccess.file_exists(path):
 		return {"kind": "missing"}
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -416,6 +436,8 @@ func _inspect_save_file(path: String) -> Dictionary:
 			return {"kind": "corrupt"}
 		if file_version > SAVE_VERSION:
 			return {"kind": "future"}
+	if require_serialized_profile and not _profile_schema_ok(parsed):
+		return {"kind": "corrupt"}
 	var default := _default_profile()
 	_deep_merge(default, parsed)
 	_normalize_profile(default)
@@ -685,6 +707,8 @@ func _parsed_matches_profile(parsed: Dictionary) -> bool:
 ## Deliberate recovery. Copies the blocked file to a verified backup, then
 ## writes a fresh profile. Refuses if the original bytes cannot be preserved.
 func recover_blocked_profile() -> Dictionary:
+	if _persist_state == PersistState.BACKUP_RESTORE_FAILED:
+		return {"success": false, "reason": "backup_restore_failed", "state": persistence_status()["state"]}
 	if not writes_blocked() or _persist_state == PersistState.UNINITIALIZED:
 		return {
 			"success": false,
@@ -737,13 +761,18 @@ func _remove_if_exists(path: String) -> void:
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
-func _restore_parked_backup_if_needed() -> void:
+func _needs_parked_profile_recheck() -> bool:
+	return _persist_state == PersistState.BACKUP_RESTORE_FAILED \
+		or (_persist_state in [PersistState.UNREADABLE, PersistState.UNSUPPORTED_FUTURE]
+			and FileAccess.file_exists(_save_path + ".bak"))
+
+func _restore_parked_backup_if_needed() -> int:
 	if FileAccess.file_exists(_save_path):
-		return
+		return OK
 	var bak := _save_path + ".bak"
 	if not FileAccess.file_exists(bak):
-		return
-	DirAccess.rename_absolute(
+		return OK
+	return DirAccess.rename_absolute(
 		ProjectSettings.globalize_path(bak),
 		ProjectSettings.globalize_path(_save_path)
 	)
@@ -950,6 +979,9 @@ func retry_pending_run() -> Dictionary:
 			"duplicate": false,
 			"rp": 0,
 		}
+	# Retry on the current screen can outlive the original restore obstruction.
+	if _needs_parked_profile_recheck():
+		load_profile()
 	if writes_blocked():
 		var blocked: Dictionary = (_pending_run["result"] as Dictionary).duplicate(true)
 		blocked["save_failed"] = true

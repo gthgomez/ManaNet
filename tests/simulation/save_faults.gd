@@ -28,6 +28,7 @@ func _init() -> void:
 	_test_failed_temp_write_reports_failure()
 	_test_failed_commit_reports_failure()
 	_test_interrupted_save_ignores_orphan_temp()
+	_test_obstructed_parked_backup_preserves_progress()
 	_test_failed_quarantine_reports_failure()
 	_test_settings_persist_across_reload()
 	_test_purchase_persists_across_reload()
@@ -39,6 +40,9 @@ func _init() -> void:
 	_test_old_save_migrates_without_data_loss()
 	_test_current_save_keeps_bytes_until_explicit_write()
 	_test_recovery_then_retry_awards_once()
+	_test_retry_restores_parked_backup_in_session()
+	_test_retry_preserves_protected_live_profile()
+	_test_retry_preserves_untrusted_live_during_parked_restore()
 	_test_environment_override_isolates_autoload()
 	_clean_scratch()
 	print("--- RESULTS ---")
@@ -80,7 +84,25 @@ func _bytes(path: String) -> PackedByteArray:
 	return FileAccess.get_file_as_bytes(path)
 
 func _chmod(path: String, mode: String) -> void:
-	OS.execute("chmod", [mode, ProjectSettings.globalize_path(path)])
+	var abs: String = ProjectSettings.globalize_path(path)
+	if OS.get_name() == "Windows":
+		var user: String = OS.get_environment("USERNAME")
+		if user == "":
+			user = "Everyone"
+		var sink: Array = []
+		if mode == "nodetect":
+			# Prevent rename/delete (quarantine) while keeping the file readable.
+			OS.execute("icacls", [abs, "/deny", "%s:(D,DC)" % user], sink)
+		elif mode in ["555", "000", "444"]:
+			OS.execute("icacls", [abs, "/inheritance:r"], sink)
+			OS.execute("icacls", [abs, "/grant:r", "%s:R" % user], sink)
+			OS.execute("icacls", [abs, "/deny", "%s:(W,DE,DC)" % user], sink)
+		else:
+			OS.execute("icacls", [abs, "/remove:d", user], sink)
+			OS.execute("icacls", [abs, "/reset"], sink)
+			OS.execute("icacls", [abs, "/grant", "%s:(F)" % user], sink)
+		return
+	OS.execute("chmod", [mode, abs], [])
 
 func _read_text(path: String) -> String:
 	if not FileAccess.file_exists(path):
@@ -257,6 +279,39 @@ func _test_interrupted_save_ignores_orphan_temp() -> void:
 	p1.free()
 	p2.free()
 
+func _test_obstructed_parked_backup_preserves_progress() -> void:
+	var path := _path("parked.json")
+	var backup := path + ".bak"
+	_write_text(backup, JSON.stringify({"version": 1, "banked_rp": 137, "engine": "godot"}))
+	var original := _bytes(backup)
+	var live_path := ProjectSettings.globalize_path(path)
+	var obstruction := DirAccess.make_dir_absolute(live_path)
+	_check(obstruction == OK, "an empty directory obstructs the parked save's live path")
+	if obstruction != OK:
+		return
+	var p = ProgressionScript.new()
+	p.initialize(path)
+	var status: Dictionary = p.persistence_status()
+	_check(status.get("state") == "backup_restore_failed" and status.get("writes_blocked") == true,
+		"failed restoration keeps the parked save read-only")
+	_check(status.get("loaded_player_data") == true and p.get_banked_rp() == 137,
+		"the last committed Shard balance is available while the backup is parked")
+	_check(DirAccess.remove_absolute(live_path) == OK, "the live path obstruction is removed")
+	_check(not p.recover_blocked_profile().get("success", true),
+		"explicit reset cannot bypass the parked backup")
+	_check(not p.set_setting("audio_muted", true), "an ordinary setting cannot supersede the parked save")
+	_check(not FileAccess.file_exists(path) and _bytes(backup) == original,
+		"failed restore and follow-up writes leave the last committed bytes parked")
+	p.free()
+
+	var reloaded := ProgressionScript.new()
+	reloaded.initialize(path)
+	_check(reloaded.get_banked_rp() == 137 and not reloaded.writes_blocked(),
+		"a new load restores the original balance and resumes writes")
+	_check(_bytes(path) == original and not FileAccess.file_exists(backup),
+		"successful recovery moves the exact parked bytes back to the live path")
+	reloaded.free()
+
 func _test_failed_quarantine_reports_failure() -> void:
 	var p = ProgressionScript.new()
 	p.initialize(_path("quarantine_probe.json"))
@@ -371,25 +426,59 @@ func _test_future_save_blocks_later_writes() -> void:
 
 func _test_failed_quarantine_blocks_overwrite() -> void:
 	var folder := _path("locked_dir")
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(folder))
+	var absolute_folder := ProjectSettings.globalize_path(folder)
+	DirAccess.make_dir_recursive_absolute(absolute_folder)
 	var path := "%s/profile.json" % folder
 	var payload := "{ not json"
 	_write_text(path, payload)
 	var before := _bytes(path)
-	_chmod(folder, "555")
-	var p = ProgressionScript.new()
-	p.initialize(path)
-	var status: Dictionary = p.persistence_status()
-	_check(status.get("state") == "failed_quarantine",
-		"unmovable corrupt save reports failed_quarantine (got %s)" % str(status.get("state")))
-	_check(p.save_profile() == false, "failed quarantine refuses a follow-up save")
-	var gs := _make_run_state("game_over")
-	var run: Dictionary = p.record_run(gs, 0, false)
-	gs.dispose()
-	_check(run.get("save_failed", false), "run record after failed quarantine does not persist")
-	_chmod(folder, "755")
-	_check(_bytes(path) == before, "failed quarantine left the original bytes in place")
-	p.free()
+	var windows := OS.get_name() == "Windows"
+	var locker: FileAccess = null
+	var fault_established := true
+	var probe := "%s/rename_probe" % folder
+	var probe_target := "%s/rename_probe_moved" % folder
+	if windows:
+		locker = FileAccess.open(path, FileAccess.READ_WRITE)
+		if locker == null:
+			_chmod(path, "nodetect")
+	else:
+		# POSIX permits renaming an open file. Deny changes to its parent directory.
+		_write_text(probe, "quarantine rename probe")
+		_chmod(folder, "555")
+		var rename_error := DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(probe), ProjectSettings.globalize_path(probe_target))
+		fault_established = rename_error != OK and FileAccess.file_exists(probe) \
+			and not FileAccess.file_exists(probe_target) and _bytes(path) == before
+		_check(fault_established, "POSIX setup denies rename while the corrupt profile remains readable")
+
+	if fault_established:
+		var p = ProgressionScript.new()
+		p.initialize(path)
+		var status: Dictionary = p.persistence_status()
+		_check(status.get("state") == "failed_quarantine",
+			"unmovable corrupt save reports failed_quarantine (got %s)" % str(status.get("state")))
+		_check(p.save_profile() == false, "failed quarantine refuses a follow-up save")
+		var gs := _make_run_state("game_over")
+		var run: Dictionary = p.record_run(gs, 0, false)
+		gs.dispose()
+		_check(run.get("save_failed", false), "run record after failed quarantine does not persist")
+		p.free()
+
+	if locker != null:
+		locker.close()
+	elif windows:
+		_chmod(path, "755")
+	else:
+		_chmod(folder, "755")
+	if fault_established:
+		_check(_bytes(path) == before, "failed quarantine left the original bytes in place")
+	_remove(probe)
+	_remove(probe_target)
+	_remove(path)
+	for filename in DirAccess.get_files_at(folder):
+		if filename.begins_with("profile.json.corrupt-"):
+			_remove("%s/%s" % [folder, filename])
+	_check(DirAccess.remove_absolute(absolute_folder) == OK, "temporary quarantine fixture is removed")
 
 func _test_unreadable_profile_blocks_overwrite() -> void:
 	var path := _path("unreadable.json")
@@ -503,6 +592,164 @@ func _test_recovery_then_retry_awards_once() -> void:
 		"reloaded profile contains the retried run exactly once")
 	_check(reloaded.get_banked_rp() == banked_after, "reloaded balance matches the single award")
 	reloaded.free()
+
+func _test_retry_restores_parked_backup_in_session() -> void:
+	var path := _path("retry_parked.json")
+	var backup := path + ".bak"
+	_write_text(backup, JSON.stringify({"version": 1, "banked_rp": 137, "total_rp": 137}))
+	var original := _bytes(backup)
+	var live_path := ProjectSettings.globalize_path(path)
+	var obstruction := DirAccess.make_dir_absolute(live_path)
+	_check(obstruction == OK, "fixture obstructs restoration of a parked profile")
+	if obstruction != OK:
+		return
+	var p := ProgressionScript.new()
+	p.initialize(path)
+	var gs := _make_run_state("won")
+	var failed: Dictionary = p.record_run(gs, 0, false)
+	gs.dispose()
+	_check(failed.get("save_failed", false) and p.has_pending_run(), "the blocked run is queued")
+	var still_blocked: Dictionary = p.retry_pending_run()
+	_check(still_blocked.get("save_failed", false) and p.has_pending_run() and _bytes(backup) == original,
+		"Retry Save waits while the obstruction still prevents restoration")
+	_check(DirAccess.remove_absolute(live_path) == OK, "fixture clears the obstruction in the same session")
+	var retried: Dictionary = p.retry_pending_run()
+	_check(retried.get("persisted", false) and not p.has_pending_run(),
+		"Retry Save reloads the unblocked profile and commits without restart")
+	var expected: int = 137 + int(failed.get("rp", 0))
+	var committed := _bytes(path)
+	_check(expected > 137 and p.get_banked_rp() == expected and p.get_profile()["run_history"].size() == 1,
+		"retry adds the pending run once to the existing Shards and history")
+	var repeated: Dictionary = p.retry_pending_run()
+	_check(repeated.get("duplicate", false) and not committed.is_empty() and _bytes(path) == committed,
+		"a second retry leaves the committed profile unchanged")
+	p.free()
+	var reloaded := ProgressionScript.new()
+	reloaded.initialize(path)
+	_check(reloaded.get_banked_rp() == expected and reloaded.get_profile()["run_history"].size() == 1,
+		"the original balance plus one run persists across reload")
+	reloaded.free()
+
+func _serialized_retry_profile(shards: int, history: Array = []) -> String:
+	var name := "retry_authored_fixture.json"
+	var author := _fresh(name)
+	var authored: Dictionary = author.get_profile()
+	authored["banked_rp"] = shards
+	authored["total_rp"] = shards
+	authored["run_history"] = history
+	var saved: bool = author.save_profile()
+	author.free()
+	var path := _path(name)
+	var text := _read_text(path) if saved else ""
+	_check(not text.is_empty(), "native save authors a complete replacement profile")
+	_remove(path)
+	return text
+
+func _test_retry_preserves_protected_live_profile() -> void:
+	for state in ["unsupported_future", "unreadable"]:
+		var path := _path("retry_%s.json" % state)
+		var backup := path + ".bak"
+		_write_text(backup, JSON.stringify({"version": 1, "banked_rp": 137}))
+		var parked := _bytes(backup)
+		var live_path := ProjectSettings.globalize_path(path)
+		var obstruction := DirAccess.make_dir_absolute(live_path)
+		_check(obstruction == OK, "fixture initially obstructs the parked profile for %s" % state)
+		if obstruction != OK:
+			continue
+		var p := ProgressionScript.new()
+		p.initialize(path)
+		var gs := _make_run_state("won")
+		var queued: Dictionary = p.record_run(gs, 0, false)
+		gs.dispose()
+		var cleared := DirAccess.remove_absolute(live_path)
+		_check(cleared == OK, "fixture can place a protected live profile for %s" % state)
+		if cleared != OK:
+			p.free()
+			continue
+		var replacement := _serialized_retry_profile(500) if state == "unreadable" else "{\"version\":7}"
+		_write_text(path, replacement)
+		var original := _bytes(path)
+		if state == "unreadable":
+			_chmod(path, "000")
+		var retried: Dictionary = p.retry_pending_run()
+		if state == "unreadable":
+			_chmod(path, "644")
+		_check(p.persistence_status().get("state") == state and p.writes_blocked(),
+			"retry revalidates the actual live profile as %s" % state)
+		_check(retried.get("save_failed", false) and not retried.get("persisted", true) and p.has_pending_run(),
+			"retry keeps the run pending when the live profile is %s" % state)
+		_check(_bytes(path) == original and _bytes(backup) == parked,
+			"retry leaves both live and parked bytes intact when the live profile is %s" % state)
+		if state == "unreadable":
+			var accessible: Dictionary = p.retry_pending_run()
+			_check(accessible.get("persisted", false) and not p.has_pending_run(),
+				"retry rechecks the unreadable profile once it becomes accessible")
+			_check(int(queued.get("rp", 0)) > 0 and p.get_banked_rp() == 500 + int(queued.get("rp", 0))
+				and p.get_profile()["run_history"].size() == 1 and _bytes(backup) == parked,
+				"rechecking an accessible profile commits once and preserves the parked bytes")
+		p.free()
+
+func _test_retry_preserves_untrusted_live_during_parked_restore() -> void:
+	var cases := [
+		{"id": "malformed_backup", "live": "{ interrupted live save", "restore_backup": true},
+		{"id": "malformed_live", "live": "{ interrupted live save", "restore_backup": false},
+		{"id": "empty_object_backup", "live": "{}", "restore_backup": true},
+		{"id": "version_only_live", "live": "{\"version\":1}", "restore_backup": false},
+	]
+	for fixture in cases:
+		var label: String = fixture["id"]
+		var restore_backup: bool = fixture["restore_backup"]
+		var path := _path("retry_%s.json" % label)
+		var backup := path + ".bak"
+		var prior_run := {"map_id": 1, "waves": 2, "rp_earned": 15}
+		var profile := {"banked_rp": 137, "total_rp": 137, "run_history": [prior_run]}
+		_write_text(backup, JSON.stringify(profile))
+		var parked := _bytes(backup)
+		var original_history: Array = JSON.parse_string(_read_text(backup))["run_history"]
+		var live_path := ProjectSettings.globalize_path(path)
+		var obstruction := DirAccess.make_dir_absolute(live_path)
+		_check(obstruction == OK, "fixture parks a supported legacy save before %s" % label)
+		if obstruction != OK:
+			continue
+		var p := ProgressionScript.new()
+		p.initialize(path)
+		var gs := _make_run_state("won")
+		var queued: Dictionary = p.record_run(gs, 0, false)
+		gs.dispose()
+		var cleared := DirAccess.remove_absolute(live_path)
+		_check(cleared == OK and queued.get("save_failed", false) and p.has_pending_run(),
+			"the live path can change while a run is pending (%s)" % label)
+		if cleared != OK:
+			p.free()
+			continue
+		_write_text(path, fixture["live"])
+		var untrusted := _bytes(path)
+		var blocked: Dictionary = p.retry_pending_run()
+		_check(blocked.get("save_failed", false) and not blocked.get("persisted", true)
+			and p.has_pending_run() and p.writes_blocked(),
+			"an untrusted live file keeps the award pending (%s)" % label)
+		_check(_bytes(path) == untrusted and _bytes(backup) == parked
+			and p.get_profile()["run_history"] == original_history,
+			"retry preserves both files and the previously loaded run history (%s)" % label)
+
+		var expected_balance := 137 if restore_backup else 221
+		if restore_backup:
+			_remove(path)
+		else:
+			_write_text(path, _serialized_retry_profile(expected_balance, original_history))
+		var recovered: Dictionary = p.retry_pending_run()
+		var history: Array = p.get_profile()["run_history"]
+		_check(recovered.get("persisted", false) and not p.has_pending_run()
+			and p.get_banked_rp() == expected_balance + int(queued.get("rp", 0))
+			and history.size() == 2 and history[0] == original_history[0],
+			"retry commits once from a native replacement or restored backup (%s)" % label)
+		_check(not FileAccess.file_exists(backup) if restore_backup else _bytes(backup) == parked,
+			"the parked profile remains untouched unless it was restored (%s)" % label)
+		var committed := _bytes(path)
+		var repeat: Dictionary = p.retry_pending_run()
+		_check(repeat.get("duplicate", false) and not committed.is_empty() and _bytes(path) == committed,
+			"additional retries do not repeat the recovery award (%s)" % label)
+		p.free()
 
 func _test_environment_override_isolates_autoload() -> void:
 	var p = ProgressionScript.new()
